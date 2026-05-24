@@ -154,6 +154,8 @@ func (c *dashController) runLoop(
 				Total:    sum.Total,
 				Errors:   sum.Errors,
 				P50Ms:    sum.P50.Milliseconds(),
+				P90Ms:    sum.P90.Milliseconds(),
+				P95Ms:    sum.P95.Milliseconds(),
 				P99Ms:    sum.P99.Milliseconds(),
 				ErrorPct: errPct,
 				MeanMs:   sum.MeanLatency().Milliseconds(),

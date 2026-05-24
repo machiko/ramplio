@@ -24,6 +24,8 @@ type RunResult struct {
 	Total    int64   `json:"total"`
 	Errors   int64   `json:"errors"`
 	P50Ms    int64   `json:"p50_ms"`
+	P90Ms    int64   `json:"p90_ms"`
+	P95Ms    int64   `json:"p95_ms"`
 	P99Ms    int64   `json:"p99_ms"`
 	ErrorPct float64 `json:"error_pct"`
 	MeanMs   int64   `json:"mean_ms"`

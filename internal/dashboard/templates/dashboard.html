@@ -476,6 +476,41 @@
     }
     .btn-stop:hover { background: rgba(248, 113, 113, 0.1); }
 
+    /* ── Verdict Card ────────────────────────────────── */
+    .verdict-card {
+      margin: 16px 24px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px 22px;
+    }
+    .verdict-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 13px;
+      font-weight: 700;
+      padding: 3px 12px;
+      border-radius: 20px;
+      margin-bottom: 10px;
+    }
+    .verdict-badge.stable    { background: rgba(52,211,153,.15); color: var(--green); }
+    .verdict-badge.borderline{ background: rgba(251,191,36,.15);  color: var(--amber); }
+    .verdict-badge.overloaded{ background: rgba(248,113,113,.15); color: var(--red); }
+    .verdict-desc {
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+    .verdict-next {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid var(--border);
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .verdict-next strong { color: var(--text); }
+
     /* ── Result View ─────────────────────────────────── */
     .result-view {
       flex: 1;
@@ -869,6 +904,15 @@
       </div>
     </div>
 
+    <!-- Verdict Card -->
+    <div v-if="finalVerdict" class="verdict-card">
+      <div class="verdict-badge" :class="finalVerdict.level">
+        {{ finalVerdict.icon }}&nbsp;{{ finalVerdict.title }}
+      </div>
+      <div class="verdict-desc">{{ finalVerdict.desc }}</div>
+      <div class="verdict-next"><strong>下一步：</strong>{{ finalVerdict.next }}</div>
+    </div>
+
     <div class="charts" style="flex: 1; min-height: 0;">
       <div class="chart-card">
         <div class="chart-header">
@@ -891,7 +935,7 @@
 </div>
 
 <script>
-const { createApp, ref, reactive, onMounted, onUnmounted, nextTick } = Vue;
+const { createApp, ref, reactive, computed, onMounted, onUnmounted, nextTick } = Vue;
 const MAX_PTS = 120;
 
 createApp({
@@ -915,6 +959,11 @@ createApp({
     let rpsChart = null;
     let latChart = null;
     const labels = [];
+    const rpsData = [];
+    const lat50Data = [];
+    const lat90Data = [];
+    const lat99Data = [];
+    const testVUs = ref(0);
     let ws;
 
     const baseOpts = {
@@ -961,7 +1010,7 @@ createApp({
       if (!rpsCanvas.value || !latCanvas.value) return;
       rpsChart = new Chart(rpsCanvas.value, {
         type: 'line',
-        data: { labels, datasets: [mkLine('RPS', '#7c3aed', true)] },
+        data: { labels, datasets: [{ ...mkLine('RPS', '#7c3aed', true), data: rpsData }] },
         options: {
           ...baseOpts,
           plugins: {
@@ -978,18 +1027,16 @@ createApp({
         data: {
           labels,
           datasets: [
-            mkLine('p50 中位數', '#34d399'),
-            mkLine('p90', '#fbbf24'),
-            mkLine('p99 尾端', '#f87171'),
+            { ...mkLine('p50 中位數', '#34d399'), data: lat50Data },
+            { ...mkLine('p90', '#fbbf24'), data: lat90Data },
+            { ...mkLine('p99 尾端', '#f87171'), data: lat99Data },
           ],
         },
         options: {
           ...baseOpts,
           plugins: {
             ...baseOpts.plugins,
-            legend: {
-              display: false,
-            },
+            legend: { display: false },
             tooltip: {
               ...baseOpts.plugins.tooltip,
               callbacks: { label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.y}ms` },
@@ -1001,8 +1048,12 @@ createApp({
 
     function resetCharts() {
       labels.length = 0;
-      if (rpsChart) { rpsChart.data.datasets[0].data.length = 0; rpsChart.update('none'); }
-      if (latChart) { latChart.data.datasets.forEach(d => { d.data.length = 0; }); latChart.update('none'); }
+      rpsData.length = 0;
+      lat50Data.length = 0;
+      lat90Data.length = 0;
+      lat99Data.length = 0;
+      rpsChart?.update('none');
+      latChart?.update('none');
     }
 
     function pushPoint(d) {
@@ -1010,16 +1061,17 @@ createApp({
       labels.push(lbl);
       if (labels.length > MAX_PTS) labels.shift();
 
-      rpsChart.data.datasets[0].data.push(parseFloat((d.rps ?? 0).toFixed(1)));
-      if (rpsChart.data.datasets[0].data.length > MAX_PTS) rpsChart.data.datasets[0].data.shift();
+      rpsData.push(parseFloat((d.rps ?? 0).toFixed(1)));
+      if (rpsData.length > MAX_PTS) rpsData.shift();
 
+      const latArrs = [lat50Data, lat90Data, lat99Data];
       [d.p50_ms, d.p90_ms, d.p99_ms].forEach((v, i) => {
-        latChart.data.datasets[i].data.push(v ?? 0);
-        if (latChart.data.datasets[i].data.length > MAX_PTS) latChart.data.datasets[i].data.shift();
+        latArrs[i].push(v ?? 0);
+        if (latArrs[i].length > MAX_PTS) latArrs[i].shift();
       });
 
-      rpsChart.update('none');
-      latChart.update('none');
+      rpsChart?.update('none');
+      latChart?.update('none');
     }
 
     function connect() {
@@ -1038,7 +1090,10 @@ createApp({
         }
         if (d.state === 'done' && view.value === 'live') {
           finalResult.value = d.result ?? null;
+          rpsChart?.destroy(); rpsChart = null;
+          latChart?.destroy(); latChart = null;
           view.value = 'result';
+          nextTick(() => initCharts());
         }
         if (d.state === 'running' || d.state === 'idle') {
           Object.assign(snap, d);
@@ -1060,6 +1115,7 @@ createApp({
           body: JSON.stringify({ url: form.url, method: form.method, vus: form.vus, duration: form.duration }),
         });
         if (!res.ok) { formError.value = await res.text(); return; }
+        testVUs.value = form.vus;
       } catch (err) {
         formError.value = err.message || 'Connection error';
       } finally {
@@ -1110,6 +1166,39 @@ createApp({
       if (!r || !r.p50_ms || r.p50_ms === 0) return '—';
       return (r.p99_ms / r.p50_ms).toFixed(1);
     }
+
+    const finalVerdict = computed(() => {
+      const r = finalResult.value;
+      if (!r) return null;
+      const errPct = r.error_pct ?? 0;
+      const p99 = r.p99_ms ?? 0;
+      const vus = testVUs.value;
+      if (errPct >= 1 || p99 >= 1000) {
+        return {
+          level: 'overloaded',
+          icon: '⚠',
+          title: 'Overloaded — 系統超載',
+          desc: `錯誤率 ${errPct.toFixed(2)}%，p99 ${p99}ms，${vus} VU 已超過系統承載能力。`,
+          next: `建議降低負載至 ${Math.max(1, Math.round(vus * 0.6))} VU 或先擴容，再重新測試找出穩定點。`,
+        };
+      }
+      if (errPct === 0 && p99 < 500) {
+        return {
+          level: 'stable',
+          icon: '✓',
+          title: 'Stable — 系統穩定',
+          desc: `無錯誤，p99 ${p99}ms，系統在 ${vus} VU 下表現穩定，尚有餘裕。`,
+          next: `可嘗試提升至 ${Math.round(vus * 1.5)} VU 繼續探索系統上限。`,
+        };
+      }
+      return {
+        level: 'borderline',
+        icon: '△',
+        title: 'Borderline — 邊緣狀態',
+        desc: `錯誤率 ${errPct.toFixed(2)}%，p99 ${p99}ms，系統在 ${vus} VU 下接近承載邊界。`,
+        next: '延遲偏高或有少量錯誤，建議先調查 p99 尾端根因或優化服務，再提高負載。',
+      };
+    });
     function fmtElapsed(s) {
       s = Math.round(s ?? 0);
       if (s < 60) return s + 's';
@@ -1118,7 +1207,7 @@ createApp({
 
     return {
       view, submitting, formError, form, finalResult, snap,
-      rpsCanvas, latCanvas,
+      rpsCanvas, latCanvas, finalVerdict,
       runTest, stopTest, resetSetup,
       fmt1, fmt2, pct,
       latClass, latLabel, errClass, errLabel,
