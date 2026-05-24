@@ -11,22 +11,23 @@ import (
 
 // wsMessage is the JSON payload pushed to every connected dashboard client.
 type wsMessage struct {
-	RPS          float64    `json:"rps"`
-	Total        int64      `json:"total"`
-	Errors       int64      `json:"errors"`
-	ErrorPct     float64    `json:"error_pct"`
-	MeanMs       int64      `json:"mean_ms"`
-	P50Ms        int64      `json:"p50_ms"`
-	P90Ms        int64      `json:"p90_ms"`
-	P95Ms        int64      `json:"p95_ms"`
-	P99Ms        int64      `json:"p99_ms"`
-	ActiveVUs    int        `json:"active_vus"`
-	StageCurrent int        `json:"stage_current"`
-	StageTotal   int        `json:"stage_total"`
-	StagePct     float64    `json:"stage_pct"`
-	ElapsedS     float64    `json:"elapsed_s"`
-	State        State      `json:"state"`
-	Result       *RunResult `json:"result,omitempty"`
+	RPS          float64       `json:"rps"`
+	Total        int64         `json:"total"`
+	Errors       int64         `json:"errors"`
+	ErrorPct     float64       `json:"error_pct"`
+	MeanMs       int64         `json:"mean_ms"`
+	P50Ms        int64         `json:"p50_ms"`
+	P90Ms        int64         `json:"p90_ms"`
+	P95Ms        int64         `json:"p95_ms"`
+	P99Ms        int64         `json:"p99_ms"`
+	ActiveVUs    int           `json:"active_vus"`
+	StageCurrent int           `json:"stage_current"`
+	StageTotal   int           `json:"stage_total"`
+	StagePct     float64       `json:"stage_pct"`
+	ElapsedS     float64       `json:"elapsed_s"`
+	State        State         `json:"state"`
+	Result       *RunResult    `json:"result,omitempty"`
+	ScenarioInfo *ScenarioMeta `json:"scenario_info,omitempty"`
 }
 
 // Server serves the embedded dashboard HTML and streams live metrics over WebSocket.
@@ -178,5 +179,6 @@ func (s *Server) buildWSMessage() wsMessage {
 		ElapsedS:     snap.Elapsed.Seconds(),
 		State:        s.ctrl.State(),
 		Result:       s.ctrl.Result(),
+		ScenarioInfo: s.ctrl.ScenarioInfo(),
 	}
 }

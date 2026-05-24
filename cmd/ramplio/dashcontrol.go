@@ -19,15 +19,45 @@ import (
 // dashController implements dashboard.Controller, managing the load test lifecycle
 // for tests triggered from the web UI or pre-started from CLI flags.
 type dashController struct {
-	mu        sync.RWMutex
-	state     dashboard.State
-	result    *dashboard.RunResult
-	cancel    context.CancelFunc
-	snapCache reporter.LiveSnapshot
+	mu            sync.RWMutex
+	state         dashboard.State
+	result        *dashboard.RunResult
+	cancel        context.CancelFunc
+	snapCache     reporter.LiveSnapshot
+	httpCfg       protocols.HTTPConfig
+	scenarioMeta  *dashboard.ScenarioMeta
+	pendingSteps  []engine.RampStep
+	pendingStages []scenarios.Stage
+	pendingVars   map[string]string
 }
 
-func newDashController() *dashController {
-	return &dashController{state: dashboard.StateIdle}
+func newDashController(httpCfg protocols.HTTPConfig) *dashController {
+	return &dashController{
+		state:   dashboard.StateIdle,
+		httpCfg: httpCfg,
+	}
+}
+
+// setScenario loads a YAML scenario into the controller so the browser can display
+// its metadata and start it by sending POST /api/run with an empty body.
+func (c *dashController) setScenario(
+	meta *dashboard.ScenarioMeta,
+	steps []engine.RampStep,
+	stages []scenarios.Stage,
+	vars map[string]string,
+) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.scenarioMeta = meta
+	c.pendingSteps = steps
+	c.pendingStages = stages
+	c.pendingVars = vars
+}
+
+func (c *dashController) ScenarioInfo() *dashboard.ScenarioMeta {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.scenarioMeta
 }
 
 func (c *dashController) Snapshot() reporter.LiveSnapshot {
@@ -58,9 +88,19 @@ func (c *dashController) Stop() {
 }
 
 // Start launches a new load test in the background. Allowed from idle or done state.
+// If a scenario was pre-loaded via setScenario(), it runs in scenario mode (the
+// request body from the browser is ignored). Otherwise it uses URL mode.
 func (c *dashController) Start(req dashboard.RunRequest) error {
-	if err := validateRunRequest(req); err != nil {
-		return err
+	// Read scenario mode flag without holding write lock so validateRunRequest
+	// (which is pure computation) can run outside the critical section.
+	c.mu.RLock()
+	isScenario := c.scenarioMeta != nil
+	c.mu.RUnlock()
+
+	if !isScenario {
+		if err := validateRunRequest(req); err != nil {
+			return err
+		}
 	}
 
 	c.mu.Lock()
@@ -69,36 +109,53 @@ func (c *dashController) Start(req dashboard.RunRequest) error {
 		return fmt.Errorf("a test is already running; stop it first")
 	}
 
-	vus := req.VUs
-	if vus <= 0 {
-		vus = 1
-	}
-	dur, _ := time.ParseDuration(req.Duration) // validated above
-	method := strings.ToUpper(req.Method)
-	if method == "" {
-		method = http.MethodGet
-	}
+	var (
+		col  *metrics.Collector
+		ramp *engine.RampEngine
+	)
 
-	// Three equal stages: ramp-up → hold → ramp-down
-	stageDur := dur / 3
-	if stageDur < time.Second {
-		stageDur = time.Second
+	if c.scenarioMeta != nil {
+		maxVUs := c.scenarioMeta.MaxVUs
+		if maxVUs <= 0 {
+			maxVUs = 1
+		}
+		col = metrics.NewCollector(maxVUs)
+		ramp = engine.NewRamp(engine.RampConfig{
+			Stages:   c.pendingStages,
+			Steps:    c.pendingSteps,
+			Vars:     c.pendingVars,
+			Executor: protocols.NewHTTPExecutor(c.httpCfg),
+		}, col)
+	} else {
+		vus := req.VUs
+		if vus <= 0 {
+			vus = 1
+		}
+		dur, _ := time.ParseDuration(req.Duration) // validated above
+		method := strings.ToUpper(req.Method)
+		if method == "" {
+			method = http.MethodGet
+		}
+		// Three equal stages: ramp-up → hold → ramp-down
+		stageDur := dur / 3
+		if stageDur < time.Second {
+			stageDur = time.Second
+		}
+		stgs := []scenarios.Stage{
+			{Duration: stageDur, Target: vus},
+			{Duration: stageDur, Target: vus},
+			{Duration: stageDur, Target: 0},
+		}
+		steps := []engine.RampStep{{
+			Request: protocols.Request{Method: method, URL: req.URL},
+		}}
+		col = metrics.NewCollector(vus)
+		ramp = engine.NewRamp(engine.RampConfig{
+			Stages:   stgs,
+			Steps:    steps,
+			Executor: protocols.NewHTTPExecutor(c.httpCfg),
+		}, col)
 	}
-	stgs := []scenarios.Stage{
-		{Duration: stageDur, Target: vus},
-		{Duration: stageDur, Target: vus},
-		{Duration: stageDur, Target: 0},
-	}
-	steps := []engine.RampStep{{
-		Request: protocols.Request{Method: method, URL: req.URL},
-	}}
-
-	col := metrics.NewCollector(vus)
-	ramp := engine.NewRamp(engine.RampConfig{
-		Stages:   stgs,
-		Steps:    steps,
-		Executor: protocols.NewHTTPExecutor(protocols.DefaultHTTPConfig()),
-	}, col)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	c.cancel = cancel

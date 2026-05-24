@@ -55,10 +55,7 @@ func newRunCmd() *cobra.Command {
 
 			// Dashboard mode: browser handles test setup and control.
 			if dashboardOn {
-				if scenarioFile != "" {
-					return fmt.Errorf("--scenario cannot be used with --dashboard; configure the test from the browser")
-				}
-				return runDashboard(url, method, vus, duration, dashboardPort, httpCfg)
+				return runDashboard(url, method, vus, duration, scenarioFile, dashboardPort, httpCfg)
 			}
 
 			// CLI mode: --url or --scenario required.
@@ -123,9 +120,10 @@ func newRunCmd() *cobra.Command {
 }
 
 // runDashboard starts the web control panel and blocks until Ctrl+C.
-// If url is non-empty, the test is auto-started immediately.
-func runDashboard(url, method string, vus int, duration string, port int, httpCfg protocols.HTTPConfig) error {
-	ctrl := newDashController()
+// If scenarioFile is set, the scenario is loaded and displayed in the browser (user clicks Run).
+// If url is set (and no scenario), the test auto-starts immediately.
+func runDashboard(url, method string, vus int, duration, scenarioFile string, port int, httpCfg protocols.HTTPConfig) error {
+	ctrl := newDashController(httpCfg)
 	srv := dashboard.New(ctrl, port)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -146,7 +144,31 @@ func runDashboard(url, method string, vus int, duration string, port int, httpCf
 	fmt.Printf("Dashboard → http://%s\n\n", srv.Addr())
 	fmt.Println("Open the URL above in your browser. Press Ctrl+C to exit.")
 
-	if url != "" {
+	switch {
+	case scenarioFile != "":
+		sc, err := scenarios.ParseFile(scenarioFile)
+		if err != nil {
+			return fmt.Errorf("loading scenario: %w", err)
+		}
+		steps, stepNames := buildDashSteps(sc, httpCfg)
+		maxVUs := maxTarget(sc.Stages)
+		var totalSec float64
+		for _, stg := range sc.Stages {
+			totalSec += stg.Duration.Seconds()
+		}
+		meta := &dashboard.ScenarioMeta{
+			Name:       sc.Name,
+			StepNames:  stepNames,
+			MaxVUs:     maxVUs,
+			TotalSec:   totalSec,
+			StageCount: len(sc.Stages),
+		}
+		ctrl.setScenario(meta, steps, sc.Stages, sc.Vars)
+		fmt.Printf("Scenario loaded: %q — %d step(s), %d stage(s), %d max VUs\n",
+			sc.Name, len(steps), len(sc.Stages), maxVUs)
+		fmt.Println("Open the dashboard and click Run to start.")
+
+	case url != "":
 		if err := ctrl.Start(dashboard.RunRequest{
 			URL:      url,
 			Method:   method,
@@ -160,6 +182,32 @@ func runDashboard(url, method string, vus int, duration string, port int, httpCf
 
 	<-ctx.Done()
 	return nil
+}
+
+// buildDashSteps converts a parsed scenario into engine steps and returns
+// their display names for the dashboard UI.
+func buildDashSteps(sc *scenarios.Scenario, _ protocols.HTTPConfig) ([]engine.RampStep, []string) {
+	steps := make([]engine.RampStep, len(sc.Steps))
+	names := make([]string, len(sc.Steps))
+	for i, s := range sc.Steps {
+		steps[i] = engine.RampStep{
+			Request: protocols.Request{
+				Method:  strings.ToUpper(s.Method),
+				URL:     s.URL,
+				Headers: s.Headers,
+				Body:    []byte(s.Body),
+			},
+			Assertions: s.Assertions,
+			Auth:       s.Auth,
+			Capture:    s.Capture,
+		}
+		name := s.Name
+		if name == "" {
+			name = strings.ToUpper(s.Method) + " " + s.URL
+		}
+		names[i] = name
+	}
+	return steps, names
 }
 
 // rampProvider supplies live metrics snapshots from a running scenario (TUI / Prometheus path).

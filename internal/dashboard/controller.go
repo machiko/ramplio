@@ -33,6 +33,15 @@ type RunResult struct {
 	WallSec  float64 `json:"wall_sec"`
 }
 
+// ScenarioMeta holds display metadata for a YAML scenario loaded via --scenario flag.
+type ScenarioMeta struct {
+	Name       string   `json:"name"`
+	StepNames  []string `json:"step_names"`
+	MaxVUs     int      `json:"max_vus"`
+	TotalSec   float64  `json:"total_sec"`
+	StageCount int      `json:"stage_count"`
+}
+
 // Controller extends LiveProvider with start/stop lifecycle control for the web dashboard.
 type Controller interface {
 	reporter.LiveProvider
@@ -45,4 +54,6 @@ type Controller interface {
 	State() State
 	// Result returns the final RunResult after a test completes, or nil if not done.
 	Result() *RunResult
+	// ScenarioInfo returns metadata about the loaded YAML scenario, or nil in URL mode.
+	ScenarioInfo() *ScenarioMeta
 }

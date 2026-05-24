@@ -663,6 +663,52 @@
       margin-bottom: 10px;
       font-variant-numeric: tabular-nums;
     }
+
+    /* ── Scenario panel (Setup View / scenario mode) ── */
+    .scenario-panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px 20px;
+      margin-bottom: 20px;
+    }
+    .scenario-name {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--accent2);
+      margin-bottom: 6px;
+    }
+    .scenario-meta {
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 14px;
+    }
+    .scenario-steps {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .scenario-step {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 12px;
+      color: var(--text);
+    }
+    .step-num {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: var(--accent);
+      color: #fff;
+      font-size: 10px;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+    .step-name { font-family: ui-monospace, monospace; }
   </style>
 </head>
 <body>
@@ -692,72 +738,102 @@
   <!-- ── Setup View ─────────────────────────────────── -->
   <div v-if="view === 'setup'" class="setup-view">
     <div class="setup-card">
-      <div class="setup-title">New Load Test</div>
-      <div class="setup-subtitle">發送大量並發請求到目標 URL，量測回應速度與穩定性。</div>
-      <div class="setup-form-box">
-        <form @submit.prevent="runTest">
-          <div class="field">
-            <div class="field-label-row">
-              <label>Target URL</label>
-            </div>
-            <input
-              v-model="form.url"
-              type="url"
-              placeholder="https://example.com/api/health"
-              required
-              autocomplete="off"
-            />
-          </div>
-          <div class="field-row">
-            <div class="field">
-              <div class="field-label-row"><label>Method</label></div>
-              <select v-model="form.method">
-                <option>GET</option>
-                <option>POST</option>
-                <option>PUT</option>
-                <option>DELETE</option>
-              </select>
-            </div>
-            <div class="field">
-              <div class="field-label-row"><label>Virtual Users</label></div>
-              <input v-model.number="form.vus" type="number" min="1" max="5000" placeholder="50" />
-              <div class="field-hint">模擬同時上線的使用者數</div>
-            </div>
-            <div class="field">
-              <div class="field-label-row"><label>Duration</label></div>
-              <input v-model="form.duration" type="text" placeholder="30s" />
-              <div class="field-hint">例如：30s、2m、1m30s</div>
-            </div>
-          </div>
-          <button type="submit" class="btn-run" :disabled="submitting">
-            {{ submitting ? 'Starting…' : '▶  Run Test' }}
-          </button>
-        </form>
-        <div v-if="formError" class="error-msg">{{ formError }}</div>
-      </div>
 
-      <!-- Metric guide -->
-      <div class="metric-guide">
-        <div class="metric-guide-title">測試結果會顯示哪些指標？</div>
-        <div class="metric-guide-grid">
-          <div class="metric-guide-item">
-            <div class="metric-guide-name">RPS（每秒請求數）</div>
-            <div class="metric-guide-desc">系統的吞吐量；數字越高代表能承受越多流量。</div>
+      <!-- Scenario mode: pre-loaded via --scenario flag -->
+      <template v-if="scenarioInfo">
+        <div class="setup-title">Scenario Ready</div>
+        <div class="setup-subtitle">已從 CLI 載入 YAML Scenario，點擊執行開始壓測。</div>
+        <div class="setup-form-box">
+          <div class="scenario-panel">
+            <div class="scenario-name">{{ scenarioInfo.name }}</div>
+            <div class="scenario-meta">
+              {{ scenarioInfo.stage_count }} 個 stage ·
+              {{ scenarioInfo.max_vus }} max VUs ·
+              {{ fmtElapsed(scenarioInfo.total_sec) }}
+            </div>
+            <div class="scenario-steps">
+              <div v-for="(name, i) in scenarioInfo.step_names" :key="i" class="scenario-step">
+                <span class="step-num">{{ i + 1 }}</span>
+                <span class="step-name">{{ name }}</span>
+              </div>
+            </div>
           </div>
-          <div class="metric-guide-item">
-            <div class="metric-guide-name">Error Rate（錯誤率）</div>
-            <div class="metric-guide-desc">HTTP 4xx/5xx 或連線失敗佔總請求的比例，應維持在 0%。</div>
-          </div>
-          <div class="metric-guide-item">
-            <div class="metric-guide-name">p50 延遲（中位數）</div>
-            <div class="metric-guide-desc">50% 的使用者在此時間內收到回應，代表典型使用者體驗。</div>
-          </div>
-          <div class="metric-guide-item">
-            <div class="metric-guide-name">p99 延遲（尾端延遲）</div>
-            <div class="metric-guide-desc">99% 的請求在此時間內完成。越低代表所有人體驗都一致，不只是幸運的多數。</div>
+          <button class="btn-run" :disabled="submitting" @click="startScenario">
+            {{ submitting ? 'Starting…' : '▶  Run Scenario' }}
+          </button>
+          <div v-if="formError" class="error-msg">{{ formError }}</div>
+        </div>
+      </template>
+
+      <!-- URL mode: normal form -->
+      <template v-else>
+        <div class="setup-title">New Load Test</div>
+        <div class="setup-subtitle">發送大量並發請求到目標 URL，量測回應速度與穩定性。</div>
+        <div class="setup-form-box">
+          <form @submit.prevent="runTest">
+            <div class="field">
+              <div class="field-label-row">
+                <label>Target URL</label>
+              </div>
+              <input
+                v-model="form.url"
+                type="url"
+                placeholder="https://example.com/api/health"
+                required
+                autocomplete="off"
+              />
+            </div>
+            <div class="field-row">
+              <div class="field">
+                <div class="field-label-row"><label>Method</label></div>
+                <select v-model="form.method">
+                  <option>GET</option>
+                  <option>POST</option>
+                  <option>PUT</option>
+                  <option>DELETE</option>
+                </select>
+              </div>
+              <div class="field">
+                <div class="field-label-row"><label>Virtual Users</label></div>
+                <input v-model.number="form.vus" type="number" min="1" max="5000" placeholder="50" />
+                <div class="field-hint">模擬同時上線的使用者數</div>
+              </div>
+              <div class="field">
+                <div class="field-label-row"><label>Duration</label></div>
+                <input v-model="form.duration" type="text" placeholder="30s" />
+                <div class="field-hint">例如：30s、2m、1m30s</div>
+              </div>
+            </div>
+            <button type="submit" class="btn-run" :disabled="submitting">
+              {{ submitting ? 'Starting…' : '▶  Run Test' }}
+            </button>
+          </form>
+          <div v-if="formError" class="error-msg">{{ formError }}</div>
+        </div>
+
+        <!-- Metric guide -->
+        <div class="metric-guide">
+          <div class="metric-guide-title">測試結果會顯示哪些指標？</div>
+          <div class="metric-guide-grid">
+            <div class="metric-guide-item">
+              <div class="metric-guide-name">RPS（每秒請求數）</div>
+              <div class="metric-guide-desc">系統的吞吐量；數字越高代表能承受越多流量。</div>
+            </div>
+            <div class="metric-guide-item">
+              <div class="metric-guide-name">Error Rate（錯誤率）</div>
+              <div class="metric-guide-desc">HTTP 4xx/5xx 或連線失敗佔總請求的比例，應維持在 0%。</div>
+            </div>
+            <div class="metric-guide-item">
+              <div class="metric-guide-name">p50 延遲（中位數）</div>
+              <div class="metric-guide-desc">50% 的使用者在此時間內收到回應，代表典型使用者體驗。</div>
+            </div>
+            <div class="metric-guide-item">
+              <div class="metric-guide-name">p99 延遲（尾端延遲）</div>
+              <div class="metric-guide-desc">99% 的請求在此時間內完成。越低代表所有人體驗都一致，不只是幸運的多數。</div>
+            </div>
           </div>
         </div>
-      </div>
+      </template>
     </div>
   </div>
 
@@ -1134,6 +1210,7 @@ createApp({
     const submitting = ref(false);
     const formError = ref('');
     const finalResult = ref(null);
+    const scenarioInfo = ref(null);
 
     const form = reactive({ url: '', method: 'GET', vus: 50, duration: '30s' });
 
@@ -1273,6 +1350,8 @@ createApp({
       ws.onmessage = (e) => {
         const d = JSON.parse(e.data);
 
+        if (d.scenario_info) scenarioInfo.value = d.scenario_info;
+
         if (d.state === 'running' && view.value !== 'live') {
           resetCharts();
           view.value = 'live';
@@ -1306,6 +1385,24 @@ createApp({
         });
         if (!res.ok) { formError.value = await res.text(); return; }
         testVUs.value = form.vus;
+      } catch (err) {
+        formError.value = err.message || 'Connection error';
+      } finally {
+        submitting.value = false;
+      }
+    }
+
+    async function startScenario() {
+      submitting.value = true;
+      formError.value = '';
+      try {
+        const res = await fetch('/api/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+        });
+        if (!res.ok) { formError.value = await res.text(); return; }
+        testVUs.value = scenarioInfo.value?.max_vus ?? 0;
       } catch (err) {
         formError.value = err.message || 'Connection error';
       } finally {
@@ -1443,9 +1540,9 @@ createApp({
     }
 
     return {
-      view, submitting, formError, form, finalResult, snap,
+      view, submitting, formError, form, finalResult, snap, scenarioInfo,
       rpsCanvas, latCanvas, finalVerdict, nlSummary,
-      runTest, stopTest, resetSetup,
+      runTest, startScenario, stopTest, resetSetup,
       fmt1, fmt2, pct,
       latClass, latLabel, errClass, errLabel,
       p99Color, tailRatio, ratioClass, ratioLabel, fmtElapsed,
