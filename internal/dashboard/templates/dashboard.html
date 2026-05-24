@@ -572,19 +572,96 @@
     .summary-grid {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
-      gap: 8px 24px;
+      gap: 10px 24px;
     }
     .summary-item {}
+    .summary-key-row {
+      display: flex;
+      align-items: center;
+      margin-bottom: 4px;
+    }
     .summary-key {
       font-size: 10px;
       color: var(--muted);
-      margin-bottom: 2px;
+    }
+    .summary-val-row {
+      display: flex;
+      align-items: center;
+      gap: 7px;
     }
     .summary-val {
       font-size: 13px;
       font-weight: 600;
       font-variant-numeric: tabular-nums;
       color: var(--text);
+    }
+    .summary-val.ok   { color: var(--green); }
+    .summary-val.warn { color: var(--amber); }
+    .summary-val.bad  { color: var(--red); }
+    .summary-health {
+      font-size: 10px;
+      font-weight: 600;
+      padding: 1px 5px;
+      border-radius: 3px;
+      white-space: nowrap;
+    }
+    .summary-health.ok   { background: rgba(52,211,153,.15); color: var(--green); }
+    .summary-health.warn { background: rgba(251,191,36,.15);  color: var(--amber); }
+    .summary-health.bad  { background: rgba(248,113,113,.15); color: var(--red); }
+    .summary-benchmark {
+      margin-top: 14px;
+      padding-top: 10px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      flex-wrap: wrap;
+    }
+    .bench-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: var(--muted);
+    }
+    .bench-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 10.5px;
+      color: var(--muted);
+    }
+    .bench-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+
+    /* ── Natural language summary ───────────────────── */
+    .nl-summary {
+      padding: 14px 24px 12px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+    }
+    .nl-summary-title {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+    .nl-sentence {
+      font-size: 13px;
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .nl-hl { font-weight: 700; color: var(--accent2); }
+
+    /* ── Verdict basis ───────────────────────────────── */
+    .verdict-basis {
+      font-size: 11px;
+      color: #4a5568;
+      padding: 5px 10px;
+      background: rgba(255,255,255,0.03);
+      border-left: 2px solid var(--border);
+      border-radius: 0 4px 4px 0;
+      margin-bottom: 10px;
+      font-variant-numeric: tabular-nums;
     }
   </style>
 </head>
@@ -842,16 +919,45 @@
       <span class="result-verdict">共執行 {{ fmtElapsed(finalResult?.wall_sec) }}</span>
     </div>
 
+    <!-- 白話解讀 -->
+    <div v-if="nlSummary" class="nl-summary">
+      <div class="nl-summary-title">白話解讀</div>
+      <div v-for="s in nlSummary" class="nl-sentence" v-html="s"></div>
+    </div>
+
     <div class="kpi-row" style="border-top: none;">
       <div class="kpi">
-        <div class="kpi-label-row"><div class="kpi-label">Requests / sec</div></div>
+        <div class="kpi-label-row">
+          <div class="kpi-label">Requests / sec</div>
+          <div class="tip-wrap">
+            <div class="tip-icon">?</div>
+            <div class="tip-box">
+              <strong>每秒請求數（吞吐量）</strong><br>
+              系統每秒能處理的請求數。數字越高代表承載能力越強，但沒有絕對好壞，需結合業務需求判斷。
+            </div>
+          </div>
+        </div>
         <div class="kpi-value accent">{{ fmt1(finalResult?.rps) }}</div>
         <div class="kpi-footer">
           <div class="kpi-sub">{{ (finalResult?.total ?? 0).toLocaleString() }} total requests</div>
         </div>
       </div>
       <div class="kpi">
-        <div class="kpi-label-row"><div class="kpi-label">p99 Latency</div></div>
+        <div class="kpi-label-row">
+          <div class="kpi-label">p99 Latency</div>
+          <div class="tip-wrap">
+            <div class="tip-icon">?</div>
+            <div class="tip-box">
+              <strong>第 99 百分位延遲</strong><br>
+              99% 的請求在此時間內完成，反映「最慢的 1%」使用者的體驗。
+              <div class="tip-threshold">
+                <div class="tip-t"><div class="tip-dot" style="background:#34d399"></div>&lt; 500ms：良好</div>
+                <div class="tip-t"><div class="tip-dot" style="background:#fbbf24"></div>500–1000ms：需注意</div>
+                <div class="tip-t"><div class="tip-dot" style="background:#f87171"></div>&gt; 1000ms：過慢</div>
+              </div>
+            </div>
+          </div>
+        </div>
         <div class="kpi-value" :class="latClass(finalResult?.p99_ms)">{{ finalResult?.p99_ms ?? 0 }}ms</div>
         <div class="kpi-footer">
           <div class="kpi-sub">p50 {{ finalResult?.p50_ms ?? 0 }}ms · Mean {{ finalResult?.mean_ms ?? 0 }}ms</div>
@@ -859,7 +965,21 @@
         </div>
       </div>
       <div class="kpi">
-        <div class="kpi-label-row"><div class="kpi-label">Error Rate</div></div>
+        <div class="kpi-label-row">
+          <div class="kpi-label">Error Rate</div>
+          <div class="tip-wrap">
+            <div class="tip-icon">?</div>
+            <div class="tip-box">
+              <strong>錯誤率</strong><br>
+              HTTP 4xx／5xx 或連線失敗佔總請求的比例。
+              <div class="tip-threshold">
+                <div class="tip-t"><div class="tip-dot" style="background:#34d399"></div>0%：完全正常</div>
+                <div class="tip-t"><div class="tip-dot" style="background:#fbbf24"></div>0–1%：需要調查</div>
+                <div class="tip-t"><div class="tip-dot" style="background:#f87171"></div>&gt; 1%：嚴重問題</div>
+              </div>
+            </div>
+          </div>
+        </div>
         <div class="kpi-value" :class="errClass(finalResult?.error_pct)">{{ fmt2(finalResult?.error_pct) }}%</div>
         <div class="kpi-footer">
           <div class="kpi-sub">{{ finalResult?.errors ?? 0 }} errors</div>
@@ -867,7 +987,16 @@
         </div>
       </div>
       <div class="kpi">
-        <div class="kpi-label-row"><div class="kpi-label">Duration</div></div>
+        <div class="kpi-label-row">
+          <div class="kpi-label">Duration</div>
+          <div class="tip-wrap">
+            <div class="tip-icon">?</div>
+            <div class="tip-box">
+              <strong>測試總時間</strong><br>
+              從第一個請求到最後一個請求完成的 wall-clock 時間。
+            </div>
+          </div>
+        </div>
         <div class="kpi-value accent">{{ fmtElapsed(finalResult?.wall_sec) }}</div>
         <div class="kpi-footer"><div class="kpi-sub">wall-clock time</div></div>
       </div>
@@ -875,32 +1004,92 @@
 
     <!-- Summary insight -->
     <div class="summary-section">
-      <div class="summary-title">Percentile Breakdown</div>
+      <div class="summary-title">延遲百分位分布</div>
       <div class="summary-grid">
         <div class="summary-item">
-          <div class="summary-key">p50 中位延遲</div>
-          <div class="summary-val">{{ finalResult?.p50_ms ?? 0 }}ms</div>
+          <div class="summary-key-row">
+            <span class="summary-key">p50 中位延遲</span>
+            <div class="tip-wrap">
+              <div class="tip-icon">?</div>
+              <div class="tip-box">50% 的請求在此時間內完成，代表典型使用者的日常體驗。</div>
+            </div>
+          </div>
+          <div class="summary-val-row">
+            <span class="summary-val" :class="latClass(finalResult?.p50_ms)">{{ finalResult?.p50_ms ?? 0 }}ms</span>
+            <span class="summary-health" :class="latClass(finalResult?.p50_ms)">{{ latLabel(finalResult?.p50_ms) }}</span>
+          </div>
         </div>
         <div class="summary-item">
-          <div class="summary-key">p90 延遲</div>
-          <div class="summary-val">{{ finalResult?.p90_ms ?? 0 }}ms</div>
+          <div class="summary-key-row">
+            <span class="summary-key">p90 延遲</span>
+            <div class="tip-wrap">
+              <div class="tip-icon">?</div>
+              <div class="tip-box">90% 的請求在此時間內完成，比 p50 更能反映「大多數」使用者的真實等待。</div>
+            </div>
+          </div>
+          <div class="summary-val-row">
+            <span class="summary-val" :class="latClass(finalResult?.p90_ms)">{{ finalResult?.p90_ms ?? 0 }}ms</span>
+            <span class="summary-health" :class="latClass(finalResult?.p90_ms)">{{ latLabel(finalResult?.p90_ms) }}</span>
+          </div>
         </div>
         <div class="summary-item">
-          <div class="summary-key">p95 延遲</div>
-          <div class="summary-val">{{ finalResult?.p95_ms ?? 0 }}ms</div>
+          <div class="summary-key-row">
+            <span class="summary-key">p95 延遲</span>
+            <div class="tip-wrap">
+              <div class="tip-icon">?</div>
+              <div class="tip-box">95% 的請求在此時間內完成，是 p99 前的重要預警指標。</div>
+            </div>
+          </div>
+          <div class="summary-val-row">
+            <span class="summary-val" :class="latClass(finalResult?.p95_ms)">{{ finalResult?.p95_ms ?? 0 }}ms</span>
+            <span class="summary-health" :class="latClass(finalResult?.p95_ms)">{{ latLabel(finalResult?.p95_ms) }}</span>
+          </div>
         </div>
         <div class="summary-item">
-          <div class="summary-key">p99 尾端延遲</div>
-          <div class="summary-val" :style="{ color: p99Color(finalResult?.p99_ms) }">{{ finalResult?.p99_ms ?? 0 }}ms</div>
+          <div class="summary-key-row">
+            <span class="summary-key">p99 尾端延遲</span>
+            <div class="tip-wrap">
+              <div class="tip-icon">?</div>
+              <div class="tip-box">99% 的請求在此時間內完成。這是「最慢的 1%」，能揭露偶發的長尾問題，是衡量系統穩定性的關鍵指標。</div>
+            </div>
+          </div>
+          <div class="summary-val-row">
+            <span class="summary-val" :class="latClass(finalResult?.p99_ms)">{{ finalResult?.p99_ms ?? 0 }}ms</span>
+            <span class="summary-health" :class="latClass(finalResult?.p99_ms)">{{ latLabel(finalResult?.p99_ms) }}</span>
+          </div>
         </div>
         <div class="summary-item">
-          <div class="summary-key">p99 / p50 倍數</div>
-          <div class="summary-val" :title="'p99 與 p50 差距越小，使用者體驗越一致'">{{ tailRatio(finalResult) }}x</div>
+          <div class="summary-key-row">
+            <span class="summary-key">p99 / p50 倍數</span>
+            <div class="tip-wrap">
+              <div class="tip-icon">?</div>
+              <div class="tip-box">此倍數反映延遲的均勻程度。越接近 1x 代表所有使用者體驗越一致；超過 3x 代表有少數請求異常緩慢，值得排查。</div>
+            </div>
+          </div>
+          <div class="summary-val-row">
+            <span class="summary-val" :class="ratioClass(finalResult)">{{ tailRatio(finalResult) }}x</span>
+            <span class="summary-health" :class="ratioClass(finalResult)">{{ ratioLabel(finalResult) }}</span>
+          </div>
         </div>
         <div class="summary-item">
-          <div class="summary-key">Mean 平均延遲</div>
-          <div class="summary-val">{{ finalResult?.mean_ms ?? 0 }}ms</div>
+          <div class="summary-key-row">
+            <span class="summary-key">Mean 平均延遲</span>
+            <div class="tip-wrap">
+              <div class="tip-icon">?</div>
+              <div class="tip-box">所有請求的算術平均值，容易被少數極慢請求拉高。建議優先參考 p50（中位數）而非 Mean。</div>
+            </div>
+          </div>
+          <div class="summary-val-row">
+            <span class="summary-val">{{ finalResult?.mean_ms ?? 0 }}ms</span>
+          </div>
         </div>
+      </div>
+      <div class="summary-benchmark">
+        <span class="bench-label">延遲基準</span>
+        <div class="bench-item"><div class="bench-dot" style="background:#34d399"></div>&lt; 200ms 優秀</div>
+        <div class="bench-item"><div class="bench-dot" style="background:#6ee7b7"></div>200–500ms 良好</div>
+        <div class="bench-item"><div class="bench-dot" style="background:#fbbf24"></div>500–1000ms 需注意</div>
+        <div class="bench-item"><div class="bench-dot" style="background:#f87171"></div>&gt; 1000ms 過慢</div>
       </div>
     </div>
 
@@ -909,6 +1098,7 @@
       <div class="verdict-badge" :class="finalVerdict.level">
         {{ finalVerdict.icon }}&nbsp;{{ finalVerdict.title }}
       </div>
+      <div class="verdict-basis">判斷依據：{{ finalVerdict.basis }}</div>
       <div class="verdict-desc">{{ finalVerdict.desc }}</div>
       <div class="verdict-next"><strong>下一步：</strong>{{ finalVerdict.next }}</div>
     </div>
@@ -1166,6 +1356,47 @@ createApp({
       if (!r || !r.p50_ms || r.p50_ms === 0) return '—';
       return (r.p99_ms / r.p50_ms).toFixed(1);
     }
+    function ratioClass(r) {
+      if (!r || !r.p50_ms || r.p50_ms === 0) return 'ok';
+      const v = r.p99_ms / r.p50_ms;
+      if (v > 5) return 'bad';
+      if (v > 2) return 'warn';
+      return 'ok';
+    }
+    function ratioLabel(r) {
+      if (!r || !r.p50_ms || r.p50_ms === 0) return '—';
+      const v = r.p99_ms / r.p50_ms;
+      if (v > 5) return '一致性偏低';
+      if (v > 2) return '輕微差距';
+      return '一致';
+    }
+
+    const nlSummary = computed(() => {
+      const r = finalResult.value;
+      if (!r) return null;
+      const vus = testVUs.value;
+      const rps = Math.round(r.rps ?? 0);
+      const p50 = r.p50_ms ?? 0;
+      const p99 = r.p99_ms ?? 0;
+      const errPct = r.error_pct ?? 0;
+      const ratio = p50 > 0 ? (p99 / p50) : 0;
+      const ratioStr = ratio.toFixed(1);
+      const p50q = p50 < 200 ? '快速' : p50 < 500 ? '正常' : p50 < 1000 ? '偏慢' : '過慢';
+
+      const s1 = `在 <span class="nl-hl">${vus} 個虛擬使用者</span>同時施壓下，系統每秒成功處理 <span class="nl-hl">${rps} 個請求</span>。`;
+
+      const s2 = ratio > 3
+        ? `大多數使用者（p50）在 <span class="nl-hl">${p50}ms</span> 內取得回應（${p50q}），但最慢的 1% 請求（p99）等待了 <span class="nl-hl">${p99}ms</span>，是典型體驗的 <span class="nl-hl">${ratioStr} 倍</span>，延遲一致性偏低，值得調查。`
+        : `大多數使用者（p50）在 <span class="nl-hl">${p50}ms</span> 內取得回應（${p50q}），尾端請求（p99）為 <span class="nl-hl">${p99}ms</span>，延遲分布${ratio <= 2 ? '均勻' : '尚可'}。`;
+
+      const s3 = errPct === 0
+        ? `錯誤率 <span class="nl-hl">0%</span>，所有請求均成功完成。`
+        : errPct < 1
+          ? `錯誤率 <span class="nl-hl">${errPct.toFixed(2)}%</span>，有少量失敗請求（${r.errors} 次），建議排查原因。`
+          : `錯誤率 <span class="nl-hl">${errPct.toFixed(2)}%</span>，共 ${r.errors} 次請求失敗，系統出現明顯錯誤，需立即排查。`;
+
+      return [s1, s2, s3];
+    });
 
     const finalVerdict = computed(() => {
       const r = finalResult.value;
@@ -1174,10 +1405,14 @@ createApp({
       const p99 = r.p99_ms ?? 0;
       const vus = testVUs.value;
       if (errPct >= 1 || p99 >= 1000) {
+        const reasons = [];
+        if (errPct >= 1) reasons.push(`error_rate ${errPct.toFixed(2)}% ≥ 1%`);
+        if (p99 >= 1000) reasons.push(`p99 ${p99}ms ≥ 1000ms`);
         return {
           level: 'overloaded',
           icon: '⚠',
           title: 'Overloaded — 系統超載',
+          basis: reasons.join('，'),
           desc: `錯誤率 ${errPct.toFixed(2)}%，p99 ${p99}ms，${vus} VU 已超過系統承載能力。`,
           next: `建議降低負載至 ${Math.max(1, Math.round(vus * 0.6))} VU 或先擴容，再重新測試找出穩定點。`,
         };
@@ -1187,6 +1422,7 @@ createApp({
           level: 'stable',
           icon: '✓',
           title: 'Stable — 系統穩定',
+          basis: `error_rate 0%，p99 ${p99}ms < 500ms`,
           desc: `無錯誤，p99 ${p99}ms，系統在 ${vus} VU 下表現穩定，尚有餘裕。`,
           next: `可嘗試提升至 ${Math.round(vus * 1.5)} VU 繼續探索系統上限。`,
         };
@@ -1195,6 +1431,7 @@ createApp({
         level: 'borderline',
         icon: '△',
         title: 'Borderline — 邊緣狀態',
+        basis: `error_rate ${errPct.toFixed(2)}%，p99 ${p99}ms（介於良好與過慢之間）`,
         desc: `錯誤率 ${errPct.toFixed(2)}%，p99 ${p99}ms，系統在 ${vus} VU 下接近承載邊界。`,
         next: '延遲偏高或有少量錯誤，建議先調查 p99 尾端根因或優化服務，再提高負載。',
       };
@@ -1207,11 +1444,11 @@ createApp({
 
     return {
       view, submitting, formError, form, finalResult, snap,
-      rpsCanvas, latCanvas, finalVerdict,
+      rpsCanvas, latCanvas, finalVerdict, nlSummary,
       runTest, stopTest, resetSetup,
       fmt1, fmt2, pct,
       latClass, latLabel, errClass, errLabel,
-      p99Color, tailRatio, fmtElapsed,
+      p99Color, tailRatio, ratioClass, ratioLabel, fmtElapsed,
     };
   },
 }).mount('#app');
