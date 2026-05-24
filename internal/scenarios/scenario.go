@@ -52,9 +52,19 @@ func (s *StatusCheck) Match(code int) bool {
 
 func (s *StatusCheck) String() string { return s.raw }
 
+// MarshalYAML serialises the check as a plain scalar (e.g. 2xx, 200).
+func (s *StatusCheck) MarshalYAML() (any, error) {
+	return s.raw, nil
+}
+
 // StatusExact creates a StatusCheck that matches a single HTTP status code.
 func StatusExact(code int) *StatusCheck {
 	return &StatusCheck{raw: strconv.Itoa(code)}
+}
+
+// StatusClass creates a StatusCheck for a wildcard class: "2xx", "3xx", "4xx", "5xx".
+func StatusClass(class string) *StatusCheck {
+	return &StatusCheck{raw: class}
 }
 
 // ScenarioHTTP allows per-scenario tuning of the HTTP connection pool and timeouts.

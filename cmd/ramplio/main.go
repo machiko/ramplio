@@ -16,6 +16,7 @@ var rootCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(newRunCmd())
+	rootCmd.AddCommand(newImportCmd())
 	rootCmd.AddCommand(newValidateCmd())
 	rootCmd.AddCommand(newReportCmd())
 	rootCmd.AddCommand(newMockServerCmd())
