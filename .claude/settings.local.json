@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go version *)",
+      "Bash(go mod *)",
+      "Bash(make build *)",
+      "Bash(make test *)",
+      "Bash(make race *)",
+      "Bash(./bin/ramplio run *)",
+      "Bash(make cover *)",
+      "Bash(go test *)",
+      "Bash(./bin/ramplio validate *)",
+      "Bash(go get *)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(./bin/ramplio report *)",
+      "Bash(go build *)",
+      "Bash(go tool *)",
+      "Bash(/tmp/ramplio run *)"
+    ]
+  }
+}

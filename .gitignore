@@ -1,0 +1,5 @@
+bin/
+coverage.out
+*.prof
+dist/
+dashboard/dist/

@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ramplio Report</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+           background: #0f1117; color: #e2e8f0; min-height: 100vh; padding: 2rem; }
+    h1 { font-size: 1.5rem; font-weight: 700; margin-bottom: 0.25rem; }
+    .meta { color: #64748b; font-size: 0.85rem; margin-bottom: 2rem; }
+    .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+                gap: 1rem; margin-bottom: 2rem; }
+    .kpi { background: #1e2330; border: 1px solid #2d3748; border-radius: 10px;
+           padding: 1.25rem; }
+    .kpi-label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: .05em;
+                 color: #64748b; margin-bottom: 0.4rem; }
+    .kpi-value { font-size: 1.75rem; font-weight: 700; }
+    .kpi-value.ok  { color: #34d399; }
+    .kpi-value.warn{ color: #fbbf24; }
+    .kpi-value.bad { color: #f87171; }
+    .card { background: #1e2330; border: 1px solid #2d3748; border-radius: 10px;
+            padding: 1.5rem; margin-bottom: 1.5rem; }
+    .card h2 { font-size: 1rem; font-weight: 600; margin-bottom: 1rem; color: #94a3b8; }
+    .chart-wrap { position: relative; height: 220px; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+    th, td { padding: 0.6rem 0.75rem; text-align: left; }
+    th { color: #64748b; font-weight: 500; border-bottom: 1px solid #2d3748; }
+    td { border-bottom: 1px solid #1a2030; }
+    tr:last-child td { border-bottom: none; }
+    .badge { display:inline-block; padding:2px 8px; border-radius:4px;
+             font-size:0.75rem; font-weight:600; }
+    .badge.ok  { background:#064e3b; color:#34d399; }
+    .badge.bad { background:#450a0a; color:#f87171; }
+  </style>
+</head>
+<body>
+  <h1>Ramplio Load Test Report</h1>
+  <p class="meta">Generated {{.GeneratedAt.Format "2006-01-02 15:04:05 UTC"}} &nbsp;·&nbsp; Duration {{printf "%.1f" .WallTimeSec}}s</p>
+
+  <div class="kpi-grid">
+    <div class="kpi">
+      <div class="kpi-label">Total Requests</div>
+      <div class="kpi-value">{{.Total}}</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Req / sec</div>
+      <div class="kpi-value">{{printf "%.1f" .RPS}}</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">Error Rate</div>
+      <div class="kpi-value {{if gt .ErrorRate 1.0}}bad{{else if gt .ErrorRate 0.0}}warn{{else}}ok{{end}}">
+        {{printf "%.2f" .ErrorRate}}%
+      </div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">p99 Latency</div>
+      <div class="kpi-value {{if gt .Latency.P99Ms 1000}}bad{{else if gt .Latency.P99Ms 500}}warn{{else}}ok{{end}}">
+        {{.Latency.P99Ms}}ms
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Latency Percentiles</h2>
+    <div class="chart-wrap">
+      <canvas id="latencyChart"></canvas>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Summary</h2>
+    <table>
+      <thead><tr><th>Metric</th><th>Value</th></tr></thead>
+      <tbody>
+        <tr><td>Total</td><td>{{.Total}}</td></tr>
+        <tr><td>Errors</td><td>{{.Errors}} <span class="badge {{if gt .Errors 0}}bad{{else}}ok{{end}}">{{printf "%.2f" .ErrorRate}}%</span></td></tr>
+        <tr><td>Min latency</td><td>{{.Latency.MinMs}}ms</td></tr>
+        <tr><td>Mean latency</td><td>{{.Latency.MeanMs}}ms</td></tr>
+        <tr><td>p50</td><td>{{.Latency.P50Ms}}ms</td></tr>
+        <tr><td>p90</td><td>{{.Latency.P90Ms}}ms</td></tr>
+        <tr><td>p95</td><td>{{.Latency.P95Ms}}ms</td></tr>
+        <tr><td>p99</td><td>{{.Latency.P99Ms}}ms</td></tr>
+        <tr><td>Max latency</td><td>{{.Latency.MaxMs}}ms</td></tr>
+        <tr><td>Data received</td><td>{{.BytesIn}} bytes</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <script>
+    const ctx = document.getElementById('latencyChart');
+    new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: ['p50', 'p90', 'p95', 'p99', 'max'],
+        datasets: [{
+          label: 'Latency (ms)',
+          data: [{{.Latency.P50Ms}}, {{.Latency.P90Ms}}, {{.Latency.P95Ms}}, {{.Latency.P99Ms}}, {{.Latency.MaxMs}}],
+          backgroundColor: ['#3b82f6','#6366f1','#8b5cf6','#a855f7','#ec4899'],
+          borderRadius: 6,
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { grid: { color: '#2d3748' }, ticks: { color: '#94a3b8' } },
+          y: { grid: { color: '#2d3748' }, ticks: { color: '#94a3b8',
+               callback: v => v + 'ms' } }
+        }
+      }
+    });
+  </script>
+</body>
+</html>

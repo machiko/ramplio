@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ramplio</title>
+  <script src="https://unpkg.com/vue@3.5/dist/vue.global.prod.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg:      #0f1117;
+      --surface: #161b27;
+      --card:    #1e2330;
+      --border:  #2d3748;
+      --accent:  #7c3aed;
+      --accent2: #a78bfa;
+      --text:    #e2e8f0;
+      --muted:   #64748b;
+      --green:   #34d399;
+      --amber:   #fbbf24;
+      --red:     #f87171;
+      --blue:    #60a5fa;
+
+      --radius:  8px;
+      --input-h: 40px;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+
+    /* ── Header ─────────────────────────────────────── */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      height: 52px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .logo {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+      color: var(--accent2);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .logo-dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 8px var(--accent);
+    }
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+    .stage-info {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .stage-label { color: var(--text); font-weight: 500; }
+    .progress-track {
+      width: 100px; height: 4px;
+      background: var(--border);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 2px;
+      transition: width 0.4s ease;
+    }
+    .status-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .status-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--muted);
+      transition: background 0.3s;
+    }
+    .status-dot.live { background: var(--green); box-shadow: 0 0 5px var(--green); }
+    .status-dot.done { background: var(--accent2); }
+    .status-dot.idle { background: var(--muted); }
+
+    /* ── Setup View ─────────────────────────────────── */
+    .setup-view {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 40px 24px;
+    }
+    .setup-card {
+      width: 100%;
+      max-width: 560px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 36px 40px;
+    }
+    .setup-title {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 28px;
+      color: var(--text);
+    }
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-bottom: 18px;
+    }
+    .field label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--muted);
+    }
+    .field input,
+    .field select {
+      height: var(--input-h);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-size: 14px;
+      padding: 0 12px;
+      outline: none;
+      transition: border-color 0.15s;
+      -webkit-appearance: none;
+    }
+    .field input:focus,
+    .field select:focus { border-color: var(--accent2); }
+    .field select { cursor: pointer; }
+    .field-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 12px;
+    }
+    .btn-run {
+      width: 100%;
+      height: 44px;
+      margin-top: 8px;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius);
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s, transform 0.1s;
+      letter-spacing: 0.01em;
+    }
+    .btn-run:hover:not(:disabled) { opacity: 0.88; }
+    .btn-run:active:not(:disabled) { transform: scale(0.99); }
+    .btn-run:disabled { opacity: 0.4; cursor: not-allowed; }
+    .error-msg {
+      margin-top: 12px;
+      padding: 10px 14px;
+      background: rgba(248, 113, 113, 0.1);
+      border: 1px solid rgba(248, 113, 113, 0.3);
+      border-radius: var(--radius);
+      color: var(--red);
+      font-size: 13px;
+    }
+
+    /* ── KPI row ─────────────────────────────────────── */
+    .kpi-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .kpi {
+      padding: 18px 24px;
+      border-right: 1px solid var(--border);
+    }
+    .kpi:last-child { border-right: none; }
+    .kpi-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+    .kpi-value {
+      font-size: 28px;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -0.5px;
+      line-height: 1.1;
+    }
+    .kpi-value.accent { color: var(--accent2); }
+    .kpi-value.ok     { color: var(--green); }
+    .kpi-value.warn   { color: var(--amber); }
+    .kpi-value.bad    { color: var(--red); }
+    .kpi-sub {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 4px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* ── Charts ──────────────────────────────────────── */
+    .charts {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0;
+      flex: 1;
+      min-height: 0;
+    }
+    .chart-card {
+      background: var(--card);
+      border-right: 1px solid var(--border);
+      padding: 20px 24px;
+      display: flex;
+      flex-direction: column;
+      min-height: 260px;
+    }
+    .chart-card:last-child { border-right: none; }
+    .chart-title {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--muted);
+      margin-bottom: 14px;
+      flex-shrink: 0;
+    }
+    .chart-wrap {
+      flex: 1;
+      position: relative;
+      min-height: 200px;
+    }
+
+    /* ── Live control bar ────────────────────────────── */
+    .control-bar {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      padding: 10px 24px;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .btn-stop {
+      height: 34px;
+      padding: 0 20px;
+      background: transparent;
+      border: 1px solid var(--red);
+      border-radius: var(--radius);
+      color: var(--red);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .btn-stop:hover { background: rgba(248, 113, 113, 0.1); }
+
+    /* ── Result View ─────────────────────────────────── */
+    .result-view {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+    .result-header {
+      padding: 24px 24px 0;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .result-title {
+      font-size: 18px;
+      font-weight: 700;
+    }
+    .result-pass { color: var(--green); }
+    .result-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      padding: 16px 24px;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .btn-again {
+      height: 36px;
+      padding: 0 24px;
+      background: var(--accent);
+      border: none;
+      border-radius: var(--radius);
+      color: #fff;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .btn-again:hover { opacity: 0.88; }
+
+    /* ── Footer ──────────────────────────────────────── */
+    .footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 24px;
+      font-size: 11px;
+      color: var(--muted);
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      flex-shrink: 0;
+      font-variant-numeric: tabular-nums;
+    }
+  </style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ── Header (always visible) ───────────────────── -->
+  <header class="header">
+    <div class="logo">
+      <div class="logo-dot"></div>
+      Ramplio
+    </div>
+    <div class="header-right">
+      <!-- Stage progress (live view only) -->
+      <div v-if="view === 'live' && snap.stage_total > 0" class="stage-info">
+        <span class="stage-label">Stage {{ snap.stage_current }}/{{ snap.stage_total }}</span>
+        <div class="progress-track">
+          <div class="progress-fill" :style="{ width: pct(snap.stage_pct) }"></div>
+        </div>
+        <span>{{ Math.round(snap.stage_pct * 100) }}%</span>
+      </div>
+      <!-- Status badge -->
+      <div class="status-badge">
+        <div class="status-dot" :class="view === 'live' ? 'live' : view === 'result' ? 'done' : 'idle'"></div>
+        {{ view === 'live' ? 'Live' : view === 'result' ? 'Done' : 'Ready' }}
+      </div>
+    </div>
+  </header>
+
+  <!-- ── Setup View ─────────────────────────────────── -->
+  <div v-if="view === 'setup'" class="setup-view">
+    <div class="setup-card">
+      <div class="setup-title">New Load Test</div>
+      <form @submit.prevent="runTest">
+        <div class="field">
+          <label>Target URL</label>
+          <input
+            v-model="form.url"
+            type="url"
+            placeholder="https://example.com/api/health"
+            required
+            autocomplete="off"
+          />
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label>Method</label>
+            <select v-model="form.method">
+              <option>GET</option>
+              <option>POST</option>
+              <option>PUT</option>
+              <option>DELETE</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Virtual Users</label>
+            <input v-model.number="form.vus" type="number" min="1" max="5000" placeholder="50" />
+          </div>
+          <div class="field">
+            <label>Duration</label>
+            <input v-model="form.duration" type="text" placeholder="30s" />
+          </div>
+        </div>
+        <button type="submit" class="btn-run" :disabled="submitting">
+          {{ submitting ? 'Starting…' : '▶  Run Test' }}
+        </button>
+      </form>
+      <div v-if="formError" class="error-msg">{{ formError }}</div>
+    </div>
+  </div>
+
+  <!-- ── Live View ──────────────────────────────────── -->
+  <template v-else-if="view === 'live'">
+    <div class="kpi-row">
+      <div class="kpi">
+        <div class="kpi-label">Requests / s</div>
+        <div class="kpi-value accent">{{ fmt1(snap.rps) }}</div>
+        <div class="kpi-sub">{{ (snap.total ?? 0).toLocaleString() }} total</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">p99 Latency</div>
+        <div class="kpi-value" :class="latClass(snap.p99_ms)">{{ snap.p99_ms ?? 0 }}ms</div>
+        <div class="kpi-sub">p50 {{ snap.p50_ms ?? 0 }}ms · p90 {{ snap.p90_ms ?? 0 }}ms</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Error Rate</div>
+        <div class="kpi-value" :class="errClass(snap.error_pct)">{{ fmt2(snap.error_pct) }}%</div>
+        <div class="kpi-sub">{{ snap.errors ?? 0 }} errors</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Active VUs</div>
+        <div class="kpi-value accent">{{ snap.active_vus ?? 0 }}</div>
+        <div class="kpi-sub">Mean {{ snap.mean_ms ?? 0 }}ms · {{ fmtElapsed(snap.elapsed_s) }}</div>
+      </div>
+    </div>
+    <div class="charts">
+      <div class="chart-card">
+        <div class="chart-title">Requests per Second</div>
+        <div class="chart-wrap"><canvas ref="rpsCanvas"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">Latency (ms) — p50 / p90 / p99</div>
+        <div class="chart-wrap"><canvas ref="latCanvas"></canvas></div>
+      </div>
+    </div>
+    <div class="control-bar">
+      <button class="btn-stop" @click="stopTest">■  Stop</button>
+    </div>
+  </template>
+
+  <!-- ── Result View ────────────────────────────────── -->
+  <div v-else-if="view === 'result'" class="result-view">
+    <div class="result-header">
+      <span class="result-title result-pass">✓</span>
+      <span class="result-title">Test Complete</span>
+    </div>
+    <div class="kpi-row" style="margin-top: 16px;">
+      <div class="kpi">
+        <div class="kpi-label">Requests / s</div>
+        <div class="kpi-value accent">{{ fmt1(finalResult?.rps) }}</div>
+        <div class="kpi-sub">{{ (finalResult?.total ?? 0).toLocaleString() }} total</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">p99 Latency</div>
+        <div class="kpi-value" :class="latClass(finalResult?.p99_ms)">{{ finalResult?.p99_ms ?? 0 }}ms</div>
+        <div class="kpi-sub">p50 {{ finalResult?.p50_ms ?? 0 }}ms · Mean {{ finalResult?.mean_ms ?? 0 }}ms</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Error Rate</div>
+        <div class="kpi-value" :class="errClass(finalResult?.error_pct)">{{ fmt2(finalResult?.error_pct) }}%</div>
+        <div class="kpi-sub">{{ finalResult?.errors ?? 0 }} errors</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi-label">Duration</div>
+        <div class="kpi-value accent">{{ fmtElapsed(finalResult?.wall_sec) }}</div>
+        <div class="kpi-sub">wall-clock time</div>
+      </div>
+    </div>
+    <!-- Keep the chart visible as a record -->
+    <div class="charts" style="flex: 1; min-height: 0;">
+      <div class="chart-card">
+        <div class="chart-title">Requests per Second</div>
+        <div class="chart-wrap"><canvas ref="rpsCanvas"></canvas></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">Latency (ms) — p50 / p90 / p99</div>
+        <div class="chart-wrap"><canvas ref="latCanvas"></canvas></div>
+      </div>
+    </div>
+    <div class="result-actions">
+      <button class="btn-again" @click="resetSetup">▶  Run Again</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const { createApp, ref, reactive, onMounted, onUnmounted, nextTick } = Vue;
+const MAX_PTS = 120;
+
+createApp({
+  setup() {
+    const view = ref('setup');           // 'setup' | 'live' | 'result'
+    const submitting = ref(false);
+    const formError = ref('');
+    const finalResult = ref(null);
+
+    const form = reactive({ url: '', method: 'GET', vus: 50, duration: '30s' });
+
+    const snap = reactive({
+      rps: 0, total: 0, errors: 0, error_pct: 0,
+      mean_ms: 0, p50_ms: 0, p90_ms: 0, p95_ms: 0, p99_ms: 0,
+      active_vus: 0, stage_current: 0, stage_total: 0, stage_pct: 0,
+      elapsed_s: 0,
+    });
+
+    const rpsCanvas = ref(null);
+    const latCanvas = ref(null);
+    let rpsChart = null;
+    let latChart = null;
+    const labels = [];
+    let ws;
+
+    // ── Chart setup ───────────────────────────────────
+    const baseOpts = {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 0 },
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: {
+          position: 'top', align: 'end',
+          labels: { color: '#64748b', boxWidth: 10, font: { size: 10 } },
+        },
+      },
+      scales: {
+        x: {
+          ticks: { color: '#3d4f63', maxTicksLimit: 8, font: { size: 10 } },
+          grid: { color: '#1a2035' },
+          border: { color: '#2d3748' },
+        },
+        y: {
+          ticks: { color: '#64748b', font: { size: 11 } },
+          grid: { color: '#1a2035' },
+          border: { color: '#2d3748' },
+          beginAtZero: true,
+        },
+      },
+    };
+
+    function mkLine(label, color, fill = false) {
+      return {
+        label, data: [],
+        borderColor: color,
+        backgroundColor: fill ? color + '22' : 'transparent',
+        borderWidth: 2, pointRadius: 0, tension: 0.35, fill,
+      };
+    }
+
+    function initCharts() {
+      if (!rpsCanvas.value || !latCanvas.value) return;
+      rpsChart = new Chart(rpsCanvas.value, {
+        type: 'line',
+        data: { labels, datasets: [mkLine('RPS', '#7c3aed', true)] },
+        options: { ...baseOpts },
+      });
+      latChart = new Chart(latCanvas.value, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [
+            mkLine('p50', '#34d399'),
+            mkLine('p90', '#fbbf24'),
+            mkLine('p99', '#f87171'),
+          ],
+        },
+        options: { ...baseOpts },
+      });
+    }
+
+    function resetCharts() {
+      labels.length = 0;
+      if (rpsChart) { rpsChart.data.datasets[0].data.length = 0; rpsChart.update('none'); }
+      if (latChart) { latChart.data.datasets.forEach(d => { d.data.length = 0; }); latChart.update('none'); }
+    }
+
+    function pushPoint(d) {
+      const lbl = fmtElapsed(d.elapsed_s);
+      labels.push(lbl);
+      if (labels.length > MAX_PTS) labels.shift();
+
+      rpsChart.data.datasets[0].data.push(parseFloat((d.rps ?? 0).toFixed(1)));
+      if (rpsChart.data.datasets[0].data.length > MAX_PTS) rpsChart.data.datasets[0].data.shift();
+
+      [d.p50_ms, d.p90_ms, d.p99_ms].forEach((v, i) => {
+        latChart.data.datasets[i].data.push(v ?? 0);
+        if (latChart.data.datasets[i].data.length > MAX_PTS) latChart.data.datasets[i].data.shift();
+      });
+
+      rpsChart.update('none');
+      latChart.update('none');
+    }
+
+    // ── WebSocket ─────────────────────────────────────
+    function connect() {
+      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      ws = new WebSocket(`${proto}//${location.host}/ws`);
+
+      ws.onclose = () => setTimeout(connect, 2000);
+
+      ws.onmessage = (e) => {
+        const d = JSON.parse(e.data);
+
+        // State transitions
+        if (d.state === 'running' && view.value !== 'live') {
+          resetCharts();
+          view.value = 'live';
+          nextTick(() => {
+            if (!rpsChart) initCharts();
+          });
+        }
+        if (d.state === 'done' && view.value === 'live') {
+          finalResult.value = d.result ?? null;
+          view.value = 'result';
+        }
+        // Sync snap on first load to restore correct view (e.g., after page refresh)
+        if (d.state === 'running' || d.state === 'idle') {
+          Object.assign(snap, d);
+        }
+        if (view.value === 'live') {
+          Object.assign(snap, d);
+          if (rpsChart && latChart) pushPoint(d);
+        }
+      };
+    }
+
+    // ── Actions ───────────────────────────────────────
+    async function runTest() {
+      submitting.value = true;
+      formError.value = '';
+      try {
+        const res = await fetch('/api/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            url: form.url,
+            method: form.method,
+            vus: form.vus,
+            duration: form.duration,
+          }),
+        });
+        if (!res.ok) {
+          formError.value = await res.text();
+          return;
+        }
+        // WS message will transition view to 'live'
+      } catch (err) {
+        formError.value = err.message || 'Connection error';
+      } finally {
+        submitting.value = false;
+      }
+    }
+
+    async function stopTest() {
+      await fetch('/api/stop', { method: 'POST' });
+    }
+
+    function resetSetup() {
+      view.value = 'setup';
+      formError.value = '';
+    }
+
+    // ── Lifecycle ─────────────────────────────────────
+    onMounted(async () => {
+      await nextTick();
+      initCharts();
+      connect();
+    });
+    onUnmounted(() => {
+      ws?.close();
+      rpsChart?.destroy();
+      latChart?.destroy();
+    });
+
+    // ── Formatters ────────────────────────────────────
+    const fmt1 = v => ((v ?? 0)).toFixed(1);
+    const fmt2 = v => ((v ?? 0)).toFixed(2);
+    const pct  = v => Math.min(Math.round((v ?? 0) * 100), 100) + '%';
+
+    function latClass(ms) {
+      if (!ms) return 'ok';
+      if (ms > 1000) return 'bad';
+      if (ms > 500)  return 'warn';
+      return 'ok';
+    }
+    function errClass(p) { return (p ?? 0) > 0 ? 'bad' : 'ok'; }
+    function fmtElapsed(s) {
+      s = Math.round(s ?? 0);
+      if (s < 60) return s + 's';
+      return Math.floor(s / 60) + 'm' + (s % 60) + 's';
+    }
+
+    return {
+      view, submitting, formError, form, finalResult, snap,
+      rpsCanvas, latCanvas,
+      runTest, stopTest, resetSetup,
+      fmt1, fmt2, pct,
+      latClass, errClass, fmtElapsed,
+    };
+  },
+}).mount('#app');
+</script>
+</body>
+</html>
