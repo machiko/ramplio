@@ -9,6 +9,25 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v1.0.0] — Production Ready (2026-05-24)
+
+### Added
+- **`mock-server` 指令** (`--port`, `--latency`): 內建本機 HTTP mock server，供自壓測與 CI smoke test 使用。
+- **`--version` 旗標**: `ramplio --version` 回傳目前版本號。
+- **`testdata/self-stress.yaml`**: 10,000 VU × 10 分鐘 4 階段自壓測場景。
+- **Web 控制面板 Run/Stop API** (`POST /api/run`, `POST /api/stop`, `GET /api/status`): PM 可直接從瀏覽器填表啟動測試，無需 CLI。
+- **Dashboard Controller 介面**: `dashboard.Controller` 統一管理引擎生命週期，支援 Setup → Live → Result 三視圖流程。
+
+### Changed
+- Dashboard 從純觀測模式升級為完整控制面板，可在瀏覽器中填入 URL、VUs、Duration 後點擊 Run。
+
+### Verified
+- `go test -race ./...` 全數通過。
+- 10,000 VU × 10 分鐘場景：heap 成長 < 5%（pprof 驗證）、error_rate < 1%、p99 < 500ms。
+- Dashboard overhead benchmark：有無 dashboard 的 p99 差距 < 1ms。
+
+---
+
 ## [v0.6.0] — Hardening
 
 ### Added
