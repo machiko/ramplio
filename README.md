@@ -110,8 +110,24 @@ ramplio run --scenario smoke.yaml
 ## 即時網頁儀表板
 
 ```bash
-ramplio run --scenario smoke.yaml --dashboard
-# Dashboard → http://localhost:9999
+# 啟動儀表板（預設 port 9999）
+ramplio run --dashboard
+
+# 指定 port
+ramplio run --dashboard --dashboard-port 8080
+
+# 停止儀表板（殺掉佔用該 port 的所有 process）
+ramplio stop
+ramplio stop --port 8080
+```
+
+或透過 Makefile：
+
+```bash
+make dashboard              # 啟動（port 9999）
+make dashboard PORT=8080    # 啟動（自訂 port）
+make stop-dashboard         # 停止（port 9999）
+make stop-dashboard PORT=8080
 ```
 
 RPS、延遲百分位數、錯誤率與活躍 VU 數的即時時序圖表——透過內嵌的 Vue 3 SPA 直接由執行檔提供服務，無需任何額外部署。
@@ -150,6 +166,13 @@ Flags:
       --prometheus string     公開 Prometheus 指標端點（例如 :9100）
 ```
 
+```
+ramplio stop [flags]
+
+Flags:
+      --port int   要停止的儀表板 port（預設 9999）
+```
+
 ---
 
 ## CI 整合
@@ -178,12 +201,14 @@ ramplio report --input results.json
 ## 開發
 
 ```bash
-make build    # 編譯 → ./bin/ramplio
-make install  # 編譯並安裝至 ~/.local/bin/ramplio
-make test     # 執行所有測試
-make race     # 以 -race 偵測器執行測試
-make cover    # 產生覆蓋率報告
-make lint     # golangci-lint
+make build           # 編譯 → ./bin/ramplio
+make install         # 編譯並安裝至 ~/.local/bin/ramplio
+make test            # 執行所有測試
+make race            # 以 -race 偵測器執行測試
+make cover           # 產生覆蓋率報告
+make lint            # golangci-lint
+make dashboard       # 啟動即時網頁儀表板（port 9999）
+make stop-dashboard  # 停止儀表板
 ```
 
 執行單一測試：

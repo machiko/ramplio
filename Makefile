@@ -4,7 +4,7 @@ CMD        := ./cmd/ramplio
 GO         := go
 GOFLAGS    :=
 
-.PHONY: all build test race lint clean run help
+.PHONY: all build test race lint clean run dashboard stop-dashboard help
 
 all: build
 
@@ -33,6 +33,14 @@ lint:
 ## run: build and run with a scenario file  (usage: make run SCENARIO=testdata/example.yaml)
 run: build
 	$(BUILD_DIR)/$(BINARY) run --scenario $(SCENARIO)
+
+## dashboard: build and start the live web dashboard  (usage: make dashboard PORT=9999)
+dashboard: build
+	$(BUILD_DIR)/$(BINARY) run --dashboard --dashboard-port $(or $(PORT),9999)
+
+## stop-dashboard: stop the running dashboard  (usage: make stop-dashboard PORT=9999)
+stop-dashboard: build
+	$(BUILD_DIR)/$(BINARY) stop --port $(or $(PORT),9999)
 
 ## install: build and copy binary to ~/.local/bin (already in PATH, no sudo needed)
 install: build

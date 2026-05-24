@@ -19,6 +19,7 @@ func init() {
 	rootCmd.AddCommand(newValidateCmd())
 	rootCmd.AddCommand(newReportCmd())
 	rootCmd.AddCommand(newMockServerCmd())
+	rootCmd.AddCommand(newStopCmd())
 }
 
 func main() {
