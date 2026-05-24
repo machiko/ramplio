@@ -6,9 +6,11 @@
 
 ## 功能特色
 
+- **HAR Import** — 從 Chrome/Firefox DevTools 錄製直接產生 scenario.yaml，自動偵測登入步驟並注入 bearer auth
+- **Per-step Metrics** — TUI 與 Dashboard 即時顯示每個步驟的 p50/p99/錯誤率，精確定位瓶頸步驟
 - **單行指令或 YAML 驅動** — 直接指定 URL，或描述複雜的多階段測試情境
 - **精確的百分位數** — 使用 HDR 直方圖計算 p50/p90/p95/p99，無近似誤差
-- **即時 TUI** — 終端機內的即時儀表板，顯示階段進度、RPS 與延遲
+- **即時 TUI** — 終端機內的即時儀表板，顯示階段進度、RPS、延遲與各步驟指標
 - **即時網頁儀表板** — 由執行檔本身提供的 Vue 3 + Chart.js SPA，零額外設定
 - **Prometheus 整合** — 將指標匯出至 Grafana 或任何相容 Prometheus 的監控系統
 - **CI 友善** — 閾值超標時以 exit code `1` 退出
@@ -105,6 +107,52 @@ thresholds:
 ramplio run --scenario smoke.yaml
 ```
 
+執行多步驟情境時，TUI 會在整體指標下方顯示 per-step 表格：
+
+```
+  Step                                Total       p50       p99   Err%
+  ──────────────────────────────────────────────────────────────────────
+  GET health                           3240      12ms      48ms    0.0%
+  POST order                           3240      85ms     340ms    0.2%
+```
+
+---
+
+## HAR Import
+
+從瀏覽器錄製直接產生 scenario.yaml，無需手寫：
+
+**錄製步驟（Chrome/Edge）：**
+1. DevTools → Network 分頁
+2. 執行要壓測的完整操作流程（登入、查詢、下單…）
+3. Network 面板空白處右鍵 → **Save all as HAR with content**
+
+```bash
+# 輸出到 stdout（預覽）
+ramplio import recording.har
+
+# 儲存到檔案
+ramplio import recording.har -o scenario.yaml
+
+# 不過濾靜態資源
+ramplio import recording.har --no-filter
+
+# 自訂測試時長
+ramplio import recording.har -o scenario.yaml -d 5m
+```
+
+Import 會自動：
+- **過濾靜態資源**（.js/.css/圖片/字型），只保留 API 呼叫
+- **偵測登入步驟**（評分系統），自動加入 `capture: token` 提取 JWT
+- **注入 bearer auth**，後續步驟的原始 token 替換為 `{{capture.token}}`
+
+產生的 scenario.yaml 可直接執行：
+
+```bash
+ramplio validate --scenario scenario.yaml
+ramplio run --scenario scenario.yaml
+```
+
 ---
 
 ## 即時網頁儀表板
@@ -158,12 +206,21 @@ Flags:
       --method string         HTTP 方法（預設 "GET"）
   -H, --header stringArray    HTTP 標頭，可重複使用：-H "Key: Value"
       --body string           請求 body
-  -o, --output string         將結果儲存為 JSON 檔案
+  -o, --output string         將結果儲存為 JSON 或 JUnit XML 檔案
       --timeout string        單次請求逾時，覆蓋情境設定（例如 10s）
       --dns-cache             快取 DNS 查詢（TTL 60 秒）
       --dashboard             開啟即時網頁儀表板
       --dashboard-port int    儀表板 HTTP 埠（預設 9999）
       --prometheus string     公開 Prometheus 指標端點（例如 :9100）
+```
+
+```
+ramplio import <recording.har> [flags]
+
+Flags:
+  -o, --output string     將 scenario YAML 寫入檔案（預設輸出到 stdout）
+      --no-filter         不過濾靜態資源（JS/CSS/圖片）
+  -d, --duration string   覆蓋預設測試時長（例如 2m、90s）
 ```
 
 ```
@@ -223,15 +280,16 @@ go test ./internal/engine/... -run TestRampUp -v
 
 ```
 ramplio/
-├── cmd/ramplio/       # cobra CLI 指令
+├── cmd/ramplio/       # cobra CLI 指令（run、import、validate、report…）
 ├── internal/
 │   ├── engine/          # VU 池與多階段 ramp 調度
-│   ├── protocols/       # HTTP executor、DNS 快取
-│   ├── metrics/         # HDR 直方圖收集器
+│   ├── protocols/       # HTTP executor、DNS 快取、per-VU cookie jar
+│   ├── metrics/         # HDR 直方圖收集器、per-step 分桶
 │   ├── scenarios/       # YAML 解析器與驗證器
-│   ├── reporter/        # 終端摘要、JSON、TUI、Prometheus
+│   ├── reporter/        # 終端摘要、JSON、JUnit XML、TUI、Prometheus
+│   ├── importer/        # HAR 解析、靜態資源過濾、登入偵測、Scenario 轉換
 │   └── dashboard/       # WebSocket 伺服器 + 內嵌 Vue SPA
-└── testdata/            # 測試用 YAML 情境檔案
+└── testdata/            # 測試用 YAML 情境與 HAR fixture
 ```
 
 每個虛擬使用者（VU）在獨立的 goroutine 中運行。Engine 透過 semaphore 控制每個階段的 VU 數量；指標樣本透過有緩衝的 channel 流向單一的聚合 goroutine。Context cancellation 在所有層之間乾淨地傳播。
