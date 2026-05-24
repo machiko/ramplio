@@ -13,10 +13,12 @@ type Request struct {
 }
 
 type Result struct {
-	StatusCode int
-	Latency    time.Duration
-	BytesRead  int64
-	Error      error
+	StatusCode      int
+	Latency         time.Duration
+	BytesRead       int64
+	Error           error
+	Body            []byte
+	ResponseHeaders map[string]string
 }
 
 type Executor interface {

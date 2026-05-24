@@ -60,6 +60,33 @@ Example workflow:
 				w.WriteHeader(http.StatusOK)
 				_, _ = w.Write([]byte("ok"))
 			})
+			// /login — returns a mock token for capture testing
+			mux.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
+				if delay > 0 {
+					time.Sleep(delay)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"data": map[string]any{"token": "mock-token-abc123"},
+				})
+			})
+			// /profile — requires Authorization header, returns 401 if missing
+			mux.HandleFunc("/profile", func(w http.ResponseWriter, r *http.Request) {
+				if delay > 0 {
+					time.Sleep(delay)
+				}
+				if r.Header.Get("Authorization") == "" {
+					http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+					return
+				}
+				reqCount.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"user": "test-user",
+				})
+			})
 
 			srv := &http.Server{
 				Addr:    fmt.Sprintf(":%d", port),

@@ -2,9 +2,11 @@ package engine
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
-	"fmt"
 	"math"
+	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -12,20 +14,24 @@ import (
 	"github.com/ramplio/ramplio/internal/metrics"
 	"github.com/ramplio/ramplio/internal/protocols"
 	"github.com/ramplio/ramplio/internal/scenarios"
+	"github.com/tidwall/gjson"
 )
 
 const rampTickInterval = 100 * time.Millisecond
 
-// RampStep pairs a request with optional per-request assertions.
+// RampStep pairs a request template with optional assertions, auth, and capture config.
 type RampStep struct {
 	Request    protocols.Request
 	Assertions *scenarios.Assertions
+	Auth       *scenarios.Auth
+	Capture    *scenarios.Capture
 }
 
 // RampConfig drives a stage-based load test.
 type RampConfig struct {
 	Stages   []scenarios.Stage
 	Steps    []RampStep
+	Vars     map[string]string // scenario-level vars available for template rendering
 	Executor protocols.Executor
 }
 
@@ -156,6 +162,10 @@ func (e *RampEngine) Run(ctx context.Context) metrics.Summary {
 }
 
 func (e *RampEngine) runVU(ctx context.Context) {
+	varCtx := &scenarios.VarContext{
+		Vars:     e.cfg.Vars,
+		Captures: make(map[string]string),
+	}
 	stepIdx := 0
 	for {
 		select {
@@ -165,14 +175,23 @@ func (e *RampEngine) runVU(ctx context.Context) {
 			step := e.cfg.Steps[stepIdx%len(e.cfg.Steps)]
 			stepIdx++
 
-			result := e.cfg.Executor.Execute(ctx, step.Request)
+			req, err := renderRequest(step, varCtx)
+			if err != nil {
+				e.collector.Add(metrics.Sample{Error: err, At: time.Now()})
+				continue
+			}
+
+			result := e.cfg.Executor.Execute(ctx, req)
 			if errors.Is(result.Error, context.Canceled) || errors.Is(result.Error, context.DeadlineExceeded) {
 				return
 			}
 
-			if result.Error == nil && step.Assertions != nil {
-				if err := checkAssertions(step.Assertions, result); err != nil {
-					result.Error = err
+			if result.Error == nil {
+				applyCaptures(step.Capture, result, varCtx)
+				if step.Assertions != nil {
+					if err := scenarios.EvalAssertions(step.Assertions, result); err != nil {
+						result.Error = err
+					}
 				}
 			}
 
@@ -187,9 +206,75 @@ func (e *RampEngine) runVU(ctx context.Context) {
 	}
 }
 
-func checkAssertions(a *scenarios.Assertions, result protocols.Result) error {
-	if a.Status != nil && result.StatusCode != *a.Status {
-		return fmt.Errorf("assertion failed: expected status %d, got %d", *a.Status, result.StatusCode)
+// renderRequest resolves template tokens in the step's URL, headers, and body,
+// then applies any auth helper.
+func renderRequest(step RampStep, ctx *scenarios.VarContext) (protocols.Request, error) {
+	url, err := scenarios.RenderString(step.Request.URL, ctx)
+	if err != nil {
+		return protocols.Request{}, err
 	}
-	return nil
+
+	headers, err := scenarios.RenderHeaders(step.Request.Headers, ctx)
+	if err != nil {
+		return protocols.Request{}, err
+	}
+	if headers == nil {
+		headers = make(map[string]string)
+	}
+
+	var body []byte
+	if len(step.Request.Body) > 0 {
+		rendered, err := scenarios.RenderString(string(step.Request.Body), ctx)
+		if err != nil {
+			return protocols.Request{}, err
+		}
+		body = []byte(rendered)
+	}
+
+	if step.Auth != nil {
+		if step.Auth.Bearer != nil {
+			token, err := scenarios.RenderString(*step.Auth.Bearer, ctx)
+			if err != nil {
+				return protocols.Request{}, err
+			}
+			headers["Authorization"] = "Bearer " + token
+		} else if step.Auth.Basic != nil {
+			username, err := scenarios.RenderString(step.Auth.Basic.Username, ctx)
+			if err != nil {
+				return protocols.Request{}, err
+			}
+			password, err := scenarios.RenderString(step.Auth.Basic.Password, ctx)
+			if err != nil {
+				return protocols.Request{}, err
+			}
+			headers["Authorization"] = basicAuthHeader(username, password)
+		}
+	}
+
+	return protocols.Request{
+		Method:  step.Request.Method,
+		URL:     url,
+		Headers: headers,
+		Body:    body,
+	}, nil
 }
+
+// applyCaptures extracts values from the result and stores them in varCtx.Captures.
+func applyCaptures(cap *scenarios.Capture, result protocols.Result, ctx *scenarios.VarContext) {
+	if cap == nil {
+		return
+	}
+	for key, expr := range cap.Values {
+		if after, ok := strings.CutPrefix(expr, "header:"); ok {
+			ctx.Captures[key] = result.ResponseHeaders[http.CanonicalHeaderKey(after)]
+		} else {
+			ctx.Captures[key] = gjson.GetBytes(result.Body, scenarios.JSONPathToGJSON(expr)).String()
+		}
+	}
+}
+
+func basicAuthHeader(username, password string) string {
+	creds := username + ":" + password
+	return "Basic " + base64.StdEncoding.EncodeToString([]byte(creds))
+}
+

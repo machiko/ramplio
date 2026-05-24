@@ -1,0 +1,39 @@
+name: Auth flow — login + bearer token
+
+vars:
+  base_url: "http://localhost:8080"
+
+stages:
+  - duration: 10s
+    target: 5
+  - duration: 10s
+    target: 5
+  - duration: 5s
+    target: 0
+
+steps:
+  - name: POST /login → capture token
+    method: POST
+    url: "{{vars.base_url}}/login"
+    headers:
+      Content-Type: application/json
+    assertions:
+      status: 200
+      body_json:
+        "$.data.token": "mock-token-abc123"
+    capture:
+      token: "$.data.token"
+
+  - name: GET /profile with bearer token
+    method: GET
+    url: "{{vars.base_url}}/profile"
+    auth:
+      bearer: "{{capture.token}}"
+    assertions:
+      status: 200
+      body_json:
+        "$.user": "test-user"
+
+thresholds:
+  error_rate_pct: 0.0
+  p99_ms: 200

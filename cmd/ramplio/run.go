@@ -218,6 +218,8 @@ func runScenario(path, promAddr string, httpCfg protocols.HTTPConfig) (metrics.S
 				Body:    []byte(s.Body),
 			},
 			Assertions: s.Assertions,
+			Auth:       s.Auth,
+			Capture:    s.Capture,
 		}
 	}
 
@@ -226,6 +228,7 @@ func runScenario(path, promAddr string, httpCfg protocols.HTTPConfig) (metrics.S
 	eng := engine.NewRamp(engine.RampConfig{
 		Stages:   sc.Stages,
 		Steps:    steps,
+		Vars:     sc.Vars,
 		Executor: protocols.NewHTTPExecutor(httpCfg),
 	}, col)
 

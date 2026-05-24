@@ -78,12 +78,21 @@ func (e *HTTPExecutor) Execute(ctx context.Context, req Request) Result {
 	}
 	defer resp.Body.Close()
 
-	n, _ := io.Copy(io.Discard, resp.Body)
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	latency := time.Since(start)
 
+	headers := make(map[string]string, len(resp.Header))
+	for k, vs := range resp.Header {
+		if len(vs) > 0 {
+			headers[http.CanonicalHeaderKey(k)] = vs[0]
+		}
+	}
+
 	return Result{
-		StatusCode: resp.StatusCode,
-		Latency:    latency,
-		BytesRead:  n,
+		StatusCode:      resp.StatusCode,
+		Latency:         latency,
+		BytesRead:       int64(len(body)),
+		Body:            body,
+		ResponseHeaders: headers,
 	}
 }
