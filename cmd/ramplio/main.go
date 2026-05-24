@@ -8,9 +8,10 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "ramplio",
-	Short: "Developer-first HTTP stress testing tool",
-	Long:  "Ramplio generates configurable load against HTTP APIs and websites, collecting real-time performance metrics.",
+	Use:     "ramplio",
+	Short:   "Developer-first HTTP stress testing tool",
+	Long:    "Ramplio generates configurable load against HTTP APIs and websites, collecting real-time performance metrics.",
+	Version: "1.0.0",
 }
 
 func init() {
