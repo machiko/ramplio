@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -23,6 +24,7 @@ func newRunCmd() *cobra.Command {
 		url            string
 		method         string
 		vus            int
+		rps            int
 		duration       string
 		headers        []string
 		body           string
@@ -53,9 +55,13 @@ func newRunCmd() *cobra.Command {
 				httpCfg.RequestTimeout = d
 			}
 
+			if vus != 1 && rps != 0 {
+				return fmt.Errorf("--vus and --rps are mutually exclusive")
+			}
+
 			// Dashboard mode: browser handles test setup and control.
 			if dashboardOn {
-				return runDashboard(url, method, vus, duration, scenarioFile, dashboardPort, httpCfg)
+				return runDashboard(url, method, vus, rps, duration, scenarioFile, dashboardPort, httpCfg)
 			}
 
 			// CLI mode: --url or --scenario required.
@@ -74,6 +80,8 @@ func newRunCmd() *cobra.Command {
 
 			if scenarioFile != "" {
 				sum, thresholds, err = runScenario(scenarioFile, prometheusAddr, httpCfg)
+			} else if rps > 0 {
+				sum, err = runRPS(url, method, rps, duration, headers, body, httpCfg)
 			} else {
 				sum, err = runURL(url, method, vus, duration, headers, body, httpCfg)
 			}
@@ -82,17 +90,22 @@ func newRunCmd() *cobra.Command {
 			}
 
 			reporter.PrintSummary(os.Stdout, sum)
+			thresholdMsg := checkThresholds(sum, thresholds)
 
 			if outputFile != "" {
-				if saveErr := saveJSON(outputFile, sum); saveErr != nil {
+				name := strings.TrimSuffix(scenarioFile, filepath.Ext(scenarioFile))
+				if name == "" {
+					name = url
+				}
+				if saveErr := saveResults(outputFile, sum, name, thresholdMsg); saveErr != nil {
 					fmt.Fprintf(os.Stderr, "warning: could not save results: %v\n", saveErr)
 				} else {
 					fmt.Printf("Results saved to %s\n", outputFile)
 				}
 			}
 
-			if exceeded := checkThresholds(sum, thresholds); exceeded != "" {
-				fmt.Fprintf(os.Stderr, "\nThreshold exceeded: %s\n", exceeded)
+			if thresholdMsg != "" {
+				fmt.Fprintf(os.Stderr, "\nThreshold exceeded: %s\n", thresholdMsg)
 				os.Exit(1)
 			}
 			if sum.ErrorRate() > 0 && thresholds == nil {
@@ -104,7 +117,8 @@ func newRunCmd() *cobra.Command {
 
 	cmd.Flags().StringVarP(&url, "url", "u", "", "Target URL")
 	cmd.Flags().StringVar(&method, "method", "GET", "HTTP method")
-	cmd.Flags().IntVar(&vus, "vus", 1, "Number of virtual users")
+	cmd.Flags().IntVar(&vus, "vus", 1, "Number of virtual users (mutually exclusive with --rps)")
+	cmd.Flags().IntVar(&rps, "rps", 0, "Target requests per second — rate mode (mutually exclusive with --vus)")
 	cmd.Flags().StringVarP(&duration, "duration", "d", "30s", "Test duration (e.g. 30s, 1m)")
 	cmd.Flags().StringArrayVarP(&headers, "header", "H", nil, "HTTP header (repeatable)")
 	cmd.Flags().StringVar(&body, "body", "", "Request body")
@@ -122,7 +136,7 @@ func newRunCmd() *cobra.Command {
 // runDashboard starts the web control panel and blocks until Ctrl+C.
 // If scenarioFile is set, the scenario is loaded and displayed in the browser (user clicks Run).
 // If url is set (and no scenario), the test auto-starts immediately.
-func runDashboard(url, method string, vus int, duration, scenarioFile string, port int, httpCfg protocols.HTTPConfig) error {
+func runDashboard(url, method string, vus, rps int, duration, scenarioFile string, port int, httpCfg protocols.HTTPConfig) error {
 	ctrl := newDashController(httpCfg)
 	srv := dashboard.New(ctrl, port)
 
@@ -159,15 +173,21 @@ func runDashboard(url, method string, vus int, duration, scenarioFile string, po
 		fmt.Println("Open the dashboard and click Run to start.")
 
 	case url != "":
-		if err := ctrl.Start(dashboard.RunRequest{
+		req := dashboard.RunRequest{
 			URL:      url,
 			Method:   method,
 			VUs:      vus,
+			RPS:      rps,
 			Duration: duration,
-		}); err != nil {
+		}
+		if err := ctrl.Start(req); err != nil {
 			return err
 		}
-		fmt.Printf("\nTest auto-started: %d VUs for %s → %s\n", vus, duration, url)
+		if rps > 0 {
+			fmt.Printf("\nTest auto-started: %d req/s for %s → %s\n", rps, duration, url)
+		} else {
+			fmt.Printf("\nTest auto-started: %d VUs for %s → %s\n", vus, duration, url)
+		}
 	}
 
 	<-ctx.Done()
@@ -232,6 +252,7 @@ func runScenario(path, promAddr string, httpCfg protocols.HTTPConfig) (metrics.S
 			Assertions: s.Assertions,
 			Auth:       s.Auth,
 			Capture:    s.Capture,
+			Pause:      s.Pause,
 		}
 	}
 
@@ -302,12 +323,65 @@ func runURL(url, method string, vus int, duration string, headers []string, body
 	return eng.Run(context.Background()), nil
 }
 
-func saveJSON(path string, sum metrics.Summary) error {
+// runRPS drives a rate-mode load test (fixed RPS via token bucket).
+// Stages: ramp-up 25% → hold 50% → ramp-down 25%.
+func runRPS(url, method string, targetRPS int, duration string, headers []string, body string, httpCfg protocols.HTTPConfig) (metrics.Summary, error) {
+	dur, err := time.ParseDuration(duration)
+	if err != nil {
+		return metrics.Summary{}, fmt.Errorf("invalid duration %q: %w", duration, err)
+	}
+
+	req := protocols.Request{
+		Method:  strings.ToUpper(method),
+		URL:     url,
+		Headers: parseHeaders(headers),
+	}
+	if body != "" {
+		req.Body = []byte(body)
+	}
+
+	rampDur := dur / 4
+	if rampDur < time.Second {
+		rampDur = time.Second
+	}
+	holdDur := dur - 2*rampDur
+
+	stgs := []scenarios.Stage{
+		{Duration: rampDur, TargetRPS: targetRPS},
+		{Duration: holdDur, TargetRPS: targetRPS},
+		{Duration: rampDur, TargetRPS: 0},
+	}
+	steps := []engine.RampStep{{Request: req}}
+
+	workerCount := targetRPS * 5
+	if workerCount < 10 {
+		workerCount = 10
+	}
+	if workerCount > 5000 {
+		workerCount = 5000
+	}
+	col := metrics.NewCollector(workerCount)
+	eng := engine.NewRamp(engine.RampConfig{
+		Stages:   stgs,
+		Steps:    steps,
+		Executor: protocols.NewHTTPExecutor(httpCfg),
+	}, col)
+
+	fmt.Printf("Running rate mode: %d req/s for %s → %s %s\n\n", targetRPS, duration, req.Method, url)
+	return eng.Run(context.Background()), nil
+}
+
+// saveResults writes results to path. Uses JUnit XML format for .xml files,
+// JSON for all other extensions.
+func saveResults(path string, sum metrics.Summary, scenarioName, thresholdMsg string) error {
 	f, err := os.Create(path)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
+	if filepath.Ext(path) == ".xml" {
+		return reporter.WriteJUnit(f, sum, scenarioName, thresholdMsg)
+	}
 	return reporter.WriteJSON(f, sum)
 }
 

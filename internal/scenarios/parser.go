@@ -28,6 +28,16 @@ func Parse(r io.Reader) (*Scenario, error) {
 		}
 		sc.Stages[i].Duration = d
 	}
+	for i := range sc.Steps {
+		if sc.Steps[i].PauseRaw == "" {
+			continue
+		}
+		d, err := time.ParseDuration(sc.Steps[i].PauseRaw)
+		if err != nil {
+			return nil, fmt.Errorf("step %d (%q): invalid pause %q: %w", i, sc.Steps[i].Name, sc.Steps[i].PauseRaw, err)
+		}
+		sc.Steps[i].Pause = d
+	}
 	return &sc, nil
 }
 
@@ -48,6 +58,7 @@ func validate(sc *Scenario) error {
 	if len(sc.Steps) == 0 {
 		return fmt.Errorf("scenario must have at least one step")
 	}
+	hasVU, hasRPS := false, false
 	for i, stage := range sc.Stages {
 		if stage.DurationRaw == "" {
 			return fmt.Errorf("stage %d: duration is required", i)
@@ -55,6 +66,21 @@ func validate(sc *Scenario) error {
 		if stage.Target < 0 {
 			return fmt.Errorf("stage %d: target must be >= 0, got %d", i, stage.Target)
 		}
+		if stage.TargetRPS < 0 {
+			return fmt.Errorf("stage %d: target_rps must be >= 0, got %d", i, stage.TargetRPS)
+		}
+		if stage.Target > 0 && stage.TargetRPS > 0 {
+			return fmt.Errorf("stage %d: target and target_rps are mutually exclusive", i)
+		}
+		if stage.Target > 0 {
+			hasVU = true
+		}
+		if stage.TargetRPS > 0 {
+			hasRPS = true
+		}
+	}
+	if hasVU && hasRPS {
+		return fmt.Errorf("cannot mix target (VU mode) and target_rps (rate mode) stages in the same scenario")
 	}
 	for i, step := range sc.Steps {
 		if step.URL == "" {

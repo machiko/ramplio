@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"time"
 )
 
@@ -55,6 +56,20 @@ func NewHTTPExecutor(cfg HTTPConfig) *HTTPExecutor {
 // connections to exit promptly instead of waiting for IdleConnTimeout.
 func (e *HTTPExecutor) CloseIdleConnections() {
 	e.client.CloseIdleConnections()
+}
+
+// NewSession returns an Executor with an isolated cookie jar that shares the
+// same underlying TCP connection pool and timeout settings. Use one session per
+// virtual user so cookies are not shared across VUs.
+func (e *HTTPExecutor) NewSession() *HTTPExecutor {
+	jar, _ := cookiejar.New(nil)
+	clone := &http.Client{
+		Transport:     e.client.Transport,
+		Timeout:       e.client.Timeout,
+		CheckRedirect: e.client.CheckRedirect,
+		Jar:           jar,
+	}
+	return &HTTPExecutor{client: clone}
 }
 
 func (e *HTTPExecutor) Execute(ctx context.Context, req Request) Result {

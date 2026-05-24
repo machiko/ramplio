@@ -12,8 +12,40 @@ func ptr[T any](v T) *T { return &v }
 
 func TestEvalAssertions_Status(t *testing.T) {
 	result := protocols.Result{StatusCode: 200}
-	require.NoError(t, EvalAssertions(&Assertions{Status: ptr(200)}, result))
-	assert.Error(t, EvalAssertions(&Assertions{Status: ptr(404)}, result))
+	require.NoError(t, EvalAssertions(&Assertions{Status: &StatusCheck{raw: "200"}}, result))
+	assert.Error(t, EvalAssertions(&Assertions{Status: &StatusCheck{raw: "404"}}, result))
+}
+
+func TestEvalAssertions_StatusWildcard(t *testing.T) {
+	tests := []struct {
+		pattern string
+		code    int
+		want    bool
+	}{
+		{"2xx", 200, true},
+		{"2xx", 201, true},
+		{"2xx", 299, true},
+		{"2xx", 300, false},
+		{"2xx", 404, false},
+		{"4xx", 404, true},
+		{"4xx", 200, false},
+		{"5xx", 500, true},
+		{"5xx", 503, true},
+		{"5xx", 200, false},
+		{"3xx", 301, true},
+		{"1xx", 100, true},
+		{"200", 200, true},
+		{"200", 201, false},
+	}
+	for _, tc := range tests {
+		result := protocols.Result{StatusCode: tc.code}
+		err := EvalAssertions(&Assertions{Status: &StatusCheck{raw: tc.pattern}}, result)
+		if tc.want {
+			require.NoError(t, err, "pattern=%s code=%d", tc.pattern, tc.code)
+		} else {
+			assert.Error(t, err, "pattern=%s code=%d", tc.pattern, tc.code)
+		}
+	}
 }
 
 func TestEvalAssertions_BodyContains(t *testing.T) {

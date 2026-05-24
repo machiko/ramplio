@@ -30,6 +30,7 @@ type dashController struct {
 	pendingSteps  []engine.RampStep
 	pendingStages []scenarios.Stage
 	pendingVars   map[string]string
+	lastProfile   *dashboard.GuidedProfile // non-nil while a guided test is running
 }
 
 func newDashController(httpCfg protocols.HTTPConfig) *dashController {
@@ -53,6 +54,12 @@ func (c *dashController) setScenario(
 	c.pendingSteps = steps
 	c.pendingStages = stages
 	c.pendingVars = vars
+}
+
+func (c *dashController) ActiveGuidedProfile() *dashboard.GuidedProfile {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.lastProfile
 }
 
 func (c *dashController) ScenarioInfo() *dashboard.ScenarioMeta {
@@ -107,6 +114,7 @@ func buildStepsFromScenario(sc *scenarios.Scenario) ([]engine.RampStep, []string
 			Assertions: s.Assertions,
 			Auth:       s.Auth,
 			Capture:    s.Capture,
+			Pause:      s.Pause,
 		}
 		name := s.Name
 		if name == "" {
@@ -148,6 +156,11 @@ func (c *dashController) Stop() {
 // If a scenario was pre-loaded via setScenario(), it runs in scenario mode (the
 // request body from the browser is ignored). Otherwise it uses URL mode.
 func (c *dashController) Start(req dashboard.RunRequest) error {
+	// Guided wizard mode takes priority when a profile is attached.
+	if req.Profile != nil {
+		return c.startGuided(req.Profile)
+	}
+
 	// Read scenario mode flag without holding write lock so validateRunRequest
 	// (which is pure computation) can run outside the critical section.
 	c.mu.RLock()
@@ -181,6 +194,38 @@ func (c *dashController) Start(req dashboard.RunRequest) error {
 			Stages:   c.pendingStages,
 			Steps:    c.pendingSteps,
 			Vars:     c.pendingVars,
+			Executor: protocols.NewHTTPExecutor(c.httpCfg),
+		}, col)
+	} else if req.RPS > 0 {
+		dur, _ := time.ParseDuration(req.Duration) // validated above
+		method := strings.ToUpper(req.Method)
+		if method == "" {
+			method = http.MethodGet
+		}
+		rampDur := dur / 4
+		if rampDur < time.Second {
+			rampDur = time.Second
+		}
+		holdDur := dur - 2*rampDur
+		stgs := []scenarios.Stage{
+			{Duration: rampDur, TargetRPS: req.RPS},
+			{Duration: holdDur, TargetRPS: req.RPS},
+			{Duration: rampDur, TargetRPS: 0},
+		}
+		steps := []engine.RampStep{{
+			Request: protocols.Request{Method: method, URL: req.URL},
+		}}
+		workerCount := req.RPS * 5
+		if workerCount < 10 {
+			workerCount = 10
+		}
+		if workerCount > 5000 {
+			workerCount = 5000
+		}
+		col = metrics.NewCollector(workerCount)
+		ramp = engine.NewRamp(engine.RampConfig{
+			Stages:   stgs,
+			Steps:    steps,
 			Executor: protocols.NewHTTPExecutor(c.httpCfg),
 		}, col)
 	} else {
@@ -226,9 +271,56 @@ func (c *dashController) Start(req dashboard.RunRequest) error {
 	return nil
 }
 
+// startGuided launches a test translated from a PM-facing GuidedProfile.
+func (c *dashController) startGuided(p *dashboard.GuidedProfile) error {
+	if p.URL == "" {
+		return fmt.Errorf("url is required")
+	}
+
+	plan := dashboard.TranslateProfile(*p)
+	method := strings.ToUpper(p.Method)
+	if method == "" {
+		method = dashboard.GuidedMethod(p.ScenarioKind)
+	}
+	steps := []engine.RampStep{{
+		Request: protocols.Request{Method: method, URL: p.URL},
+	}}
+
+	c.mu.Lock()
+	if c.state == dashboard.StateRunning {
+		c.mu.Unlock()
+		return fmt.Errorf("a test is already running; stop it first")
+	}
+
+	col := metrics.NewCollector(plan.MaxVUs)
+	ramp := engine.NewRamp(engine.RampConfig{
+		Stages:   plan.Stages,
+		Steps:    steps,
+		Executor: protocols.NewHTTPExecutor(c.httpCfg),
+	}, col)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	c.cancel = cancel
+	c.state = dashboard.StateRunning
+	c.result = nil
+	c.snapCache = reporter.LiveSnapshot{}
+	c.lastProfile = p
+	startedAt := time.Now()
+	c.mu.Unlock()
+
+	go c.runLoop(ctx, col, ramp, startedAt)
+	return nil
+}
+
 func validateRunRequest(req dashboard.RunRequest) error {
 	if req.URL == "" {
 		return fmt.Errorf("url is required")
+	}
+	if req.RPS > 0 && req.VUs > 1 {
+		return fmt.Errorf("vus and rps are mutually exclusive")
+	}
+	if req.RPS < 0 || req.RPS > 100000 {
+		return fmt.Errorf("rps must be between 1 and 100000")
 	}
 	if req.VUs < 0 || req.VUs > 5000 {
 		return fmt.Errorf("vus must be between 1 and 5000")
@@ -264,7 +356,7 @@ func (c *dashController) runLoop(
 			if sum.Total > 0 {
 				errPct = float64(sum.Errors) / float64(sum.Total) * 100
 			}
-			c.result = &dashboard.RunResult{
+			result := &dashboard.RunResult{
 				Total:    sum.Total,
 				Errors:   sum.Errors,
 				P50Ms:    sum.P50.Milliseconds(),
@@ -276,6 +368,12 @@ func (c *dashController) runLoop(
 				RPS:      sum.RPS(),
 				WallSec:  sum.WallTime.Seconds(),
 			}
+			if c.lastProfile != nil {
+				verdict := dashboard.InterpretResult(*c.lastProfile, *result)
+				result.GuidedVerdict = &verdict
+				c.lastProfile = nil
+			}
+			c.result = result
 			c.mu.Unlock()
 			return
 		}

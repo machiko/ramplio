@@ -732,6 +732,235 @@
     }
     .btn-clear-scenario:hover { border-color: var(--accent2); color: var(--accent2); }
 
+    /* ── Guided Wizard ───────────────────────────────── */
+    .wizard-progress {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      margin-bottom: 20px;
+    }
+    .wizard-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--border);
+      transition: background 0.2s;
+    }
+    .wizard-dot.active { background: var(--accent); }
+
+    .wizard-question {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 18px;
+      line-height: 1.4;
+    }
+    .wizard-nav {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin-top: 4px;
+    }
+    .btn-back {
+      height: 44px;
+      padding: 0 18px;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--muted);
+      font-size: 13px;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+      white-space: nowrap;
+    }
+    .btn-back:hover { border-color: var(--accent2); color: var(--text); }
+
+    /* radio-card: used for scenario kind + latency target */
+    .radio-cards {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+    .radio-card {
+      cursor: pointer;
+      border: 2px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 12px;
+      transition: border-color 0.15s, background 0.15s;
+      display: block;
+    }
+    .radio-card input { display: none; }
+    .radio-card:hover { border-color: var(--accent2); }
+    .radio-card.checked { border-color: var(--accent); background: rgba(124,58,237,.08); }
+    .radio-card-icon { font-size: 24px; margin-bottom: 8px; line-height: 1; }
+    .radio-card-title { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
+    .radio-card-desc  { font-size: 11px; color: var(--muted); line-height: 1.45; }
+
+    /* chips: user presets */
+    .chips-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+    .chip {
+      height: 30px;
+      padding: 0 14px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 15px;
+      color: var(--muted);
+      font-size: 12px;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s, background 0.15s;
+    }
+    .chip.active { border-color: var(--accent); color: var(--accent2); background: rgba(124,58,237,.1); }
+    .chip:hover:not(.active) { border-color: var(--accent2); color: var(--text); }
+
+    /* range slider */
+    .slider-wrap { margin-bottom: 20px; }
+    .slider {
+      width: 100%;
+      -webkit-appearance: none;
+      height: 4px;
+      background: var(--border);
+      border-radius: 2px;
+      outline: none;
+      margin-bottom: 10px;
+      cursor: pointer;
+    }
+    .slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 18px; height: 18px;
+      border-radius: 50%;
+      background: var(--accent);
+      cursor: pointer;
+      box-shadow: 0 0 4px rgba(124,58,237,.5);
+    }
+    .slider-value {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--accent2);
+      text-align: center;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* traffic shape cards with SVG sparklines */
+    .traffic-cards {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    .traffic-card {
+      cursor: pointer;
+      border: 2px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 12px;
+      text-align: center;
+      transition: border-color 0.15s, background 0.15s;
+      display: block;
+    }
+    .traffic-card input { display: none; }
+    .traffic-card:hover { border-color: var(--accent2); }
+    .traffic-card.checked { border-color: var(--accent); background: rgba(124,58,237,.08); }
+    .traffic-sparkline {
+      width: 100%; height: 32px;
+      color: var(--muted);
+      margin-bottom: 8px;
+      display: block;
+    }
+    .traffic-card.checked .traffic-sparkline { color: var(--accent2); }
+    .traffic-card-title { font-size: 12px; font-weight: 600; color: var(--text); margin-bottom: 3px; }
+    .traffic-card-desc  { font-size: 11px; color: var(--muted); }
+
+    /* pre-run summary box */
+    .guided-summary {
+      padding: 12px 16px;
+      background: rgba(124,58,237,.07);
+      border: 1px solid rgba(124,58,237,.22);
+      border-radius: var(--radius);
+      font-size: 13px;
+      color: var(--text);
+      line-height: 1.75;
+      margin-bottom: 16px;
+    }
+    .guided-summary strong { color: var(--accent2); }
+
+    /* guided verdict result card */
+    .guided-verdict-card {
+      margin: 0 24px 0;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px 24px;
+    }
+    .guided-verdict-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 13px;
+      font-weight: 700;
+      padding: 4px 14px;
+      border-radius: 20px;
+      margin-bottom: 12px;
+    }
+    .guided-verdict-badge.pass { background: rgba(52,211,153,.15); color: var(--green); }
+    .guided-verdict-badge.warn { background: rgba(251,191,36,.15);  color: var(--amber); }
+    .guided-verdict-badge.fail { background: rgba(248,113,113,.15); color: var(--red); }
+    .guided-verdict-headline {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 8px;
+      line-height: 1.5;
+    }
+    .guided-verdict-detail {
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.75;
+      margin-bottom: 10px;
+    }
+    .guided-next-step {
+      font-size: 12px;
+      color: var(--muted);
+      padding: 8px 12px;
+      background: rgba(255,255,255,.03);
+      border-left: 2px solid var(--accent);
+      border-radius: 0 4px 4px 0;
+      margin-bottom: 14px;
+      line-height: 1.6;
+    }
+    .guided-next-step strong { color: var(--text); }
+    .btn-retry-guided {
+      height: 36px;
+      padding: 0 20px;
+      background: var(--accent);
+      border: none;
+      border-radius: var(--radius);
+      color: #fff;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .btn-retry-guided:hover { opacity: 0.88; }
+
+    /* ── URL mode toggle (VU ⇄ Rate) ────────────────── */
+    .mode-toggle-inline {
+      margin-left: auto;
+      background: none;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--muted);
+      font-size: 10px;
+      padding: 1px 7px;
+      cursor: pointer;
+      transition: color 0.15s, border-color 0.15s;
+      white-space: nowrap;
+    }
+    .mode-toggle-inline:hover { color: var(--accent2); border-color: var(--accent2); }
+
     /* ── Scenario panel (Setup View / scenario mode) ── */
     .scenario-panel {
       background: var(--surface);
@@ -811,6 +1040,7 @@
       <div class="mode-tabs">
         <button class="mode-tab" :class="{ active: setupMode === 'url' }" @click="setupMode = 'url'">URL 模式</button>
         <button class="mode-tab" :class="{ active: setupMode === 'scenario' }" @click="setupMode = 'scenario'">Scenario 模式</button>
+        <button class="mode-tab" :class="{ active: setupMode === 'guided' }" @click="setupMode = 'guided'; wizardStep = 1">引導模式</button>
       </div>
 
       <!-- ── URL mode ── -->
@@ -839,9 +1069,15 @@
                 </select>
               </div>
               <div class="field">
-                <div class="field-label-row"><label>Virtual Users</label></div>
-                <input v-model.number="form.vus" type="number" min="1" max="5000" placeholder="50" />
-                <div class="field-hint">模擬同時上線的使用者數</div>
+                <div class="field-label-row">
+                  <label>{{ urlMode === 'vu' ? 'Virtual Users' : 'Target RPS' }}</label>
+                  <button type="button" class="mode-toggle-inline" @click="urlMode = urlMode === 'vu' ? 'rate' : 'vu'">
+                    {{ urlMode === 'vu' ? '切 Rate 模式 →' : '切 VU 模式 →' }}
+                  </button>
+                </div>
+                <input v-if="urlMode === 'vu'" v-model.number="form.vus" type="number" min="1" max="5000" placeholder="50" />
+                <input v-else v-model.number="form.rps" type="number" min="1" max="100000" placeholder="100" />
+                <div class="field-hint">{{ urlMode === 'vu' ? '模擬同時上線的使用者數' : '每秒固定請求數（token bucket）' }}</div>
               </div>
               <div class="field">
                 <div class="field-label-row"><label>Duration</label></div>
@@ -875,6 +1111,137 @@
               <div class="metric-guide-desc">99% 的請求在此時間內完成。越低代表所有人體驗都一致，不只是幸運的多數。</div>
             </div>
           </div>
+        </div>
+      </template>
+
+      <!-- ── Guided mode ── -->
+      <template v-else-if="setupMode === 'guided'">
+        <div class="setup-subtitle">幾個簡單問題，我們幫你設定測試。不需要了解技術細節。</div>
+
+        <!-- Progress dots -->
+        <div class="wizard-progress">
+          <div v-for="n in 4" :key="n" class="wizard-dot" :class="{ active: wizardStep >= n }"></div>
+        </div>
+
+        <div class="setup-form-box">
+
+          <!-- Step 1: service type + URL -->
+          <template v-if="wizardStep === 1">
+            <div class="wizard-question">你在測試哪種類型的服務？</div>
+            <div class="radio-cards">
+              <label class="radio-card" :class="{ checked: guided.scenario_kind === 'browse' }">
+                <input type="radio" v-model="guided.scenario_kind" value="browse" @change="guided.method='GET'" />
+                <div class="radio-card-icon">🌐</div>
+                <div class="radio-card-title">網站 / 頁面</div>
+                <div class="radio-card-desc">首頁、商品頁、部落格等</div>
+              </label>
+              <label class="radio-card" :class="{ checked: guided.scenario_kind === 'api' }">
+                <input type="radio" v-model="guided.scenario_kind" value="api" @change="guided.method='GET'" />
+                <div class="radio-card-icon">⚡</div>
+                <div class="radio-card-title">API 接口</div>
+                <div class="radio-card-desc">REST API、資料查詢等</div>
+              </label>
+              <label class="radio-card" :class="{ checked: guided.scenario_kind === 'checkout-like' }">
+                <input type="radio" v-model="guided.scenario_kind" value="checkout-like" @change="guided.method='POST'" />
+                <div class="radio-card-icon">🛒</div>
+                <div class="radio-card-title">表單 / 結帳</div>
+                <div class="radio-card-desc">送出表單、下訂單等</div>
+              </label>
+            </div>
+            <div class="field">
+              <div class="field-label-row"><label>輸入網址</label></div>
+              <input v-model="guided.url" type="url" :placeholder="guided.scenario_kind === 'checkout-like' ? 'https://example.com/api/orders' : 'https://example.com/api/products'" />
+            </div>
+            <button class="btn-run" @click="wizardNext" :disabled="!guided.url">下一步 →</button>
+          </template>
+
+          <!-- Step 2: concurrent users -->
+          <template v-if="wizardStep === 2">
+            <div class="wizard-question">預計最多幾人同時使用你的服務？</div>
+            <div class="chips-row">
+              <button type="button" class="chip" :class="{ active: guided.concurrent_users === 10 }" @click="guided.concurrent_users = 10">小型 ~10 人</button>
+              <button type="button" class="chip" :class="{ active: guided.concurrent_users === 100 }" @click="guided.concurrent_users = 100">活動期 ~100 人</button>
+              <button type="button" class="chip" :class="{ active: guided.concurrent_users === 500 }" @click="guided.concurrent_users = 500">大型促銷 ~500 人</button>
+            </div>
+            <div class="slider-wrap">
+              <input type="range" v-model.number="guided.concurrent_users" min="1" max="500" class="slider" />
+              <div class="slider-value">{{ guided.concurrent_users }} 位同時使用者</div>
+            </div>
+            <div class="wizard-nav">
+              <button type="button" class="btn-back" @click="wizardStep--">← 上一步</button>
+              <button type="button" class="btn-run" style="flex:1" @click="wizardNext">下一步 →</button>
+            </div>
+          </template>
+
+          <!-- Step 3: target latency -->
+          <template v-if="wizardStep === 3">
+            <div class="wizard-question">多快的回應速度算「夠快」？</div>
+            <div class="radio-cards">
+              <label class="radio-card" :class="{ checked: guided.target_latency_ms === 1000 }">
+                <input type="radio" v-model.number="guided.target_latency_ms" :value="1000" />
+                <div class="radio-card-title">即時 — 1 秒內</div>
+                <div class="radio-card-desc">像點按鈕立刻看到反應</div>
+              </label>
+              <label class="radio-card" :class="{ checked: guided.target_latency_ms === 3000 }">
+                <input type="radio" v-model.number="guided.target_latency_ms" :value="3000" />
+                <div class="radio-card-title">正常 — 3 秒內</div>
+                <div class="radio-card-desc">像送出表單等待結果</div>
+              </label>
+              <label class="radio-card" :class="{ checked: guided.target_latency_ms === 5000 }">
+                <input type="radio" v-model.number="guided.target_latency_ms" :value="5000" />
+                <div class="radio-card-title">可接受 — 5 秒內</div>
+                <div class="radio-card-desc">像等待報表產生</div>
+              </label>
+            </div>
+            <div class="wizard-nav">
+              <button type="button" class="btn-back" @click="wizardStep--">← 上一步</button>
+              <button type="button" class="btn-run" style="flex:1" @click="wizardNext">下一步 →</button>
+            </div>
+          </template>
+
+          <!-- Step 4: traffic shape + pre-run summary -->
+          <template v-if="wizardStep === 4">
+            <div class="wizard-question">流量的樣子比較像哪種？</div>
+            <div class="traffic-cards">
+              <label class="traffic-card" :class="{ checked: guided.traffic_shape === 'steady' }">
+                <input type="radio" v-model="guided.traffic_shape" value="steady" />
+                <svg class="traffic-sparkline" viewBox="0 0 60 30" fill="none">
+                  <polyline points="0,26 8,20 16,15 30,14 44,15 52,20 60,26" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+                </svg>
+                <div class="traffic-card-title">平穩日常</div>
+                <div class="traffic-card-desc">一般正常流量</div>
+              </label>
+              <label class="traffic-card" :class="{ checked: guided.traffic_shape === 'spike' }">
+                <input type="radio" v-model="guided.traffic_shape" value="spike" />
+                <svg class="traffic-sparkline" viewBox="0 0 60 30" fill="none">
+                  <polyline points="0,28 8,26 16,6 24,6 32,16 44,24 60,28" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+                </svg>
+                <div class="traffic-card-title">突然湧入</div>
+                <div class="traffic-card-desc">行銷活動、新聞曝光</div>
+              </label>
+              <label class="traffic-card" :class="{ checked: guided.traffic_shape === 'soak' }">
+                <input type="radio" v-model="guided.traffic_shape" value="soak" />
+                <svg class="traffic-sparkline" viewBox="0 0 60 30" fill="none">
+                  <polyline points="0,28 6,14 12,12 48,12 54,14 60,28" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+                </svg>
+                <div class="traffic-card-title">長時間壓力</div>
+                <div class="traffic-card-desc">活動持續數小時</div>
+              </label>
+            </div>
+
+            <div class="guided-summary">
+              我們將模擬 <strong>{{ guided.concurrent_users }} 位用戶</strong>以「<strong>{{ shapeLabel(guided.traffic_shape) }}</strong>」模式訪問你的服務，測試時間約 <strong>{{ wizardDuration }}</strong>。
+            </div>
+
+            <div class="wizard-nav">
+              <button type="button" class="btn-back" @click="wizardStep--">← 上一步</button>
+              <button type="button" class="btn-run" style="flex:1" :disabled="submitting" @click="startGuided">
+                {{ submitting ? 'Starting…' : '▶ 開始測試' }}
+              </button>
+            </div>
+            <div v-if="formError" class="error-msg">{{ formError }}</div>
+          </template>
+
         </div>
       </template>
 
@@ -1004,15 +1371,15 @@
         </div>
       </div>
 
-      <!-- Active VUs -->
+      <!-- Active VUs / In-flight -->
       <div class="kpi">
         <div class="kpi-label-row">
-          <div class="kpi-label">Active VUs</div>
+          <div class="kpi-label">{{ testMode === 'rate' ? 'In-flight' : 'Active VUs' }}</div>
           <div class="tip-wrap">
             <div class="tip-icon">?</div>
             <div class="tip-box">
-              <strong>虛擬使用者數</strong><br>
-              目前同時發送請求的模擬使用者數量。Ramp-up 期間此值會逐漸增加，讓你觀察系統在不同負載下的行為。
+              <strong>{{ testMode === 'rate' ? '進行中請求數（In-flight）' : '虛擬使用者數' }}</strong><br>
+              {{ testMode === 'rate' ? '目前等待回應的請求數量。Rate 模式以 token bucket 控制發送速率，此數字反映系統的並發處理量。' : '目前同時發送請求的模擬使用者數量。Ramp-up 期間此值會逐漸增加，讓你觀察系統在不同負載下的行為。' }}
             </div>
           </div>
         </div>
@@ -1092,8 +1459,8 @@
       <span class="result-verdict">共執行 {{ fmtElapsed(finalResult?.wall_sec) }}</span>
     </div>
 
-    <!-- 白話解讀 -->
-    <div v-if="nlSummary" class="nl-summary">
+    <!-- 白話解讀（Guided 模式由 guided-verdict-card 取代） -->
+    <div v-if="nlSummary && !finalResult?.guided_verdict" class="nl-summary">
       <div class="nl-summary-title">白話解讀</div>
       <div v-for="s in nlSummary" class="nl-sentence" v-html="s"></div>
     </div>
@@ -1173,6 +1540,20 @@
         <div class="kpi-value accent">{{ fmtElapsed(finalResult?.wall_sec) }}</div>
         <div class="kpi-footer"><div class="kpi-sub">wall-clock time</div></div>
       </div>
+    </div>
+
+    <!-- Guided verdict (only shown when started via wizard) -->
+    <div v-if="finalResult?.guided_verdict" class="guided-verdict-card">
+      <div class="guided-verdict-badge" :class="finalResult.guided_verdict.level">
+        {{ finalResult.guided_verdict.level === 'pass' ? '✓' : finalResult.guided_verdict.level === 'warn' ? '△' : '✗' }}
+        {{ finalResult.guided_verdict.level === 'pass' ? '系統穩定' : finalResult.guided_verdict.level === 'warn' ? '接近極限' : '系統超載' }}
+      </div>
+      <div class="guided-verdict-headline">{{ finalResult.guided_verdict.headline }}</div>
+      <div class="guided-verdict-detail">{{ finalResult.guided_verdict.detail }}</div>
+      <div class="guided-next-step"><strong>下一步：</strong>{{ finalResult.guided_verdict.next_step }}</div>
+      <button v-if="finalResult.guided_verdict.suggested_retry" class="btn-retry-guided" @click="loadRetry(finalResult.guided_verdict.suggested_retry)">
+        重新測試（調整後的設定）
+      </button>
     </div>
 
     <!-- Summary insight -->
@@ -1267,7 +1648,7 @@
     </div>
 
     <!-- Verdict Card -->
-    <div v-if="finalVerdict" class="verdict-card">
+    <div v-if="finalVerdict && !finalResult?.guided_verdict" class="verdict-card">
       <div class="verdict-badge" :class="finalVerdict.level">
         {{ finalVerdict.icon }}&nbsp;{{ finalVerdict.title }}
       </div>
@@ -1305,14 +1686,25 @@ createApp({
   setup() {
     const view = ref('setup');
     const setupMode = ref('url');
+    const urlMode = ref('vu'); // 'vu' or 'rate' — URL mode only
     const submitting = ref(false);
     const uploadLoading = ref(false);
     const formError = ref('');
     const finalResult = ref(null);
     const scenarioInfo = ref(null);
     const fileInput = ref(null);
+    const testMode = ref('vu'); // 'vu' | 'rate' | 'guided' — set when test starts
+    const testRPS = ref(0);    // set when rate test starts
 
-    const form = reactive({ url: '', method: 'GET', vus: 50, duration: '30s' });
+    // Guided wizard state
+    const wizardStep = ref(1);
+    const guided = reactive({
+      url: '', method: 'GET', scenario_kind: 'api',
+      concurrent_users: 100, target_latency_ms: 3000, traffic_shape: 'steady',
+    });
+    const activeGuidedProfile = ref(null); // received from WS while guided test runs
+
+    const form = reactive({ url: '', method: 'GET', vus: 50, rps: 100, duration: '30s' });
 
     const snap = reactive({
       rps: 0, total: 0, errors: 0, error_pct: 0,
@@ -1455,6 +1847,11 @@ createApp({
           setupMode.value = 'scenario';
         }
 
+        if (d.guided_profile) {
+          activeGuidedProfile.value = d.guided_profile;
+          testMode.value = 'guided';
+        }
+
         if (d.state === 'running' && view.value !== 'live') {
           resetCharts();
           view.value = 'live';
@@ -1462,6 +1859,8 @@ createApp({
         }
         if (d.state === 'done' && view.value === 'live') {
           finalResult.value = d.result ?? null;
+          if (d.result?.guided_verdict) testMode.value = 'guided';
+          activeGuidedProfile.value = null;
           rpsChart?.destroy(); rpsChart = null;
           latChart?.destroy(); latChart = null;
           view.value = 'result';
@@ -1481,13 +1880,23 @@ createApp({
       submitting.value = true;
       formError.value = '';
       try {
+        const isRate = urlMode.value === 'rate';
+        const payload = {
+          url: form.url,
+          method: form.method,
+          duration: form.duration,
+          vus: isRate ? 0 : form.vus,
+          rps: isRate ? form.rps : 0,
+        };
         const res = await fetch('/api/run', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: form.url, method: form.method, vus: form.vus, duration: form.duration }),
+          body: JSON.stringify(payload),
         });
         if (!res.ok) { formError.value = await res.text(); return; }
-        testVUs.value = form.vus;
+        testMode.value = urlMode.value;
+        testVUs.value = isRate ? 0 : form.vus;
+        testRPS.value = isRate ? form.rps : 0;
       } catch (err) {
         formError.value = err.message || 'Connection error';
       } finally {
@@ -1512,6 +1921,74 @@ createApp({
         submitting.value = false;
       }
     }
+
+    // ── Guided wizard ──────────────────────────────────
+    function wizardNext() {
+      if (wizardStep.value < 4) wizardStep.value++;
+    }
+
+    async function startGuided() {
+      submitting.value = true;
+      formError.value = '';
+      try {
+        const profile = {
+          url: guided.url,
+          method: guided.method || (guided.scenario_kind === 'checkout-like' ? 'POST' : 'GET'),
+          concurrent_users: guided.concurrent_users,
+          target_latency_ms: guided.target_latency_ms,
+          traffic_shape: guided.traffic_shape,
+          scenario_kind: guided.scenario_kind,
+        };
+        const res = await fetch('/api/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ profile }),
+        });
+        if (!res.ok) { formError.value = await res.text(); return; }
+        testMode.value = 'guided';
+        testVUs.value = guided.concurrent_users;
+      } catch (err) {
+        formError.value = err.message || 'Connection error';
+      } finally {
+        submitting.value = false;
+      }
+    }
+
+    function loadRetry(profile) {
+      Object.assign(guided, {
+        url: profile.url,
+        method: profile.method || 'GET',
+        scenario_kind: profile.scenario_kind || 'api',
+        concurrent_users: profile.concurrent_users,
+        target_latency_ms: profile.target_latency_ms,
+        traffic_shape: profile.traffic_shape,
+      });
+      setupMode.value = 'guided';
+      wizardStep.value = 4;
+      view.value = 'setup';
+    }
+
+    function shapeLabel(shape) {
+      const m = { steady: '平穩日常', spike: '突然湧入', soak: '長時間壓力' };
+      return m[shape] || shape;
+    }
+
+    const wizardDuration = computed(() => {
+      const u = guided.concurrent_users > 0 ? guided.concurrent_users : 1;
+      let secs;
+      if (guided.traffic_shape === 'spike') {
+        secs = 60;
+      } else if (guided.traffic_shape === 'soak') {
+        secs = 300;
+      } else {
+        const base = Math.max(30, u * 0.3);
+        secs = base;
+      }
+      secs = Math.round(secs);
+      if (secs < 60) return secs + ' 秒';
+      const m = Math.floor(secs / 60), r = secs % 60;
+      return r === 0 ? m + ' 分鐘' : m + ' 分 ' + r + ' 秒';
+    });
 
     function triggerFileInput() { fileInput.value?.click(); }
 
@@ -1611,7 +2088,6 @@ createApp({
     const nlSummary = computed(() => {
       const r = finalResult.value;
       if (!r) return null;
-      const vus = testVUs.value;
       const rps = Math.round(r.rps ?? 0);
       const p50 = r.p50_ms ?? 0;
       const p99 = r.p99_ms ?? 0;
@@ -1620,7 +2096,9 @@ createApp({
       const ratioStr = ratio.toFixed(1);
       const p50q = p50 < 200 ? '快速' : p50 < 500 ? '正常' : p50 < 1000 ? '偏慢' : '過慢';
 
-      const s1 = `在 <span class="nl-hl">${vus} 個虛擬使用者</span>同時施壓下，系統每秒成功處理 <span class="nl-hl">${rps} 個請求</span>。`;
+      const s1 = testMode.value === 'rate'
+        ? `以 <span class="nl-hl">${testRPS.value} req/s</span> 的固定速率施壓，系統實際每秒完成 <span class="nl-hl">${rps} 個請求</span>。`
+        : `在 <span class="nl-hl">${testVUs.value} 個虛擬使用者</span>同時施壓下，系統每秒成功處理 <span class="nl-hl">${rps} 個請求</span>。`;
 
       const s2 = ratio > 3
         ? `大多數使用者（p50）在 <span class="nl-hl">${p50}ms</span> 內取得回應（${p50q}），但最慢的 1% 請求（p99）等待了 <span class="nl-hl">${p99}ms</span>，是典型體驗的 <span class="nl-hl">${ratioStr} 倍</span>，延遲一致性偏低，值得調查。`
@@ -1640,7 +2118,14 @@ createApp({
       if (!r) return null;
       const errPct = r.error_pct ?? 0;
       const p99 = r.p99_ms ?? 0;
-      const vus = testVUs.value;
+      const isRate = testMode.value === 'rate';
+      const loadCtx = isRate ? `${testRPS.value} req/s` : `${testVUs.value} VU`;
+      const nextLoad = isRate
+        ? `${Math.max(1, Math.round(testRPS.value * 0.6))} req/s`
+        : `${Math.max(1, Math.round(testVUs.value * 0.6))} VU`;
+      const moreLoad = isRate
+        ? `${Math.round(testRPS.value * 1.5)} req/s`
+        : `${Math.round(testVUs.value * 1.5)} VU`;
       if (errPct >= 1 || p99 >= 1000) {
         const reasons = [];
         if (errPct >= 1) reasons.push(`error_rate ${errPct.toFixed(2)}% ≥ 1%`);
@@ -1650,8 +2135,8 @@ createApp({
           icon: '⚠',
           title: 'Overloaded — 系統超載',
           basis: reasons.join('，'),
-          desc: `錯誤率 ${errPct.toFixed(2)}%，p99 ${p99}ms，${vus} VU 已超過系統承載能力。`,
-          next: `建議降低負載至 ${Math.max(1, Math.round(vus * 0.6))} VU 或先擴容，再重新測試找出穩定點。`,
+          desc: `錯誤率 ${errPct.toFixed(2)}%，p99 ${p99}ms，${loadCtx} 已超過系統承載能力。`,
+          next: `建議降低負載至 ${nextLoad} 或先擴容，再重新測試找出穩定點。`,
         };
       }
       if (errPct === 0 && p99 < 500) {
@@ -1660,8 +2145,8 @@ createApp({
           icon: '✓',
           title: 'Stable — 系統穩定',
           basis: `error_rate 0%，p99 ${p99}ms < 500ms`,
-          desc: `無錯誤，p99 ${p99}ms，系統在 ${vus} VU 下表現穩定，尚有餘裕。`,
-          next: `可嘗試提升至 ${Math.round(vus * 1.5)} VU 繼續探索系統上限。`,
+          desc: `無錯誤，p99 ${p99}ms，系統在 ${loadCtx} 下表現穩定，尚有餘裕。`,
+          next: `可嘗試提升至 ${moreLoad} 繼續探索系統上限。`,
         };
       }
       return {
@@ -1669,7 +2154,7 @@ createApp({
         icon: '△',
         title: 'Borderline — 邊緣狀態',
         basis: `error_rate ${errPct.toFixed(2)}%，p99 ${p99}ms（介於良好與過慢之間）`,
-        desc: `錯誤率 ${errPct.toFixed(2)}%，p99 ${p99}ms，系統在 ${vus} VU 下接近承載邊界。`,
+        desc: `錯誤率 ${errPct.toFixed(2)}%，p99 ${p99}ms，系統在 ${loadCtx} 下接近承載邊界。`,
         next: '延遲偏高或有少量錯誤，建議先調查 p99 尾端根因或優化服務，再提高負載。',
       };
     });
@@ -1680,11 +2165,14 @@ createApp({
     }
 
     return {
-      view, setupMode, submitting, uploadLoading, formError,
+      view, setupMode, urlMode, submitting, uploadLoading, formError,
       form, finalResult, snap, scenarioInfo, fileInput,
+      testMode, testRPS,
+      wizardStep, guided, activeGuidedProfile, wizardDuration,
       rpsCanvas, latCanvas, finalVerdict, nlSummary,
       runTest, startScenario, stopTest, resetSetup,
       triggerFileInput, handleFileChange, handleDrop, clearScenario,
+      startGuided, wizardNext, loadRetry, shapeLabel,
       fmt1, fmt2, pct,
       latClass, latLabel, errClass, errLabel,
       p99Color, tailRatio, ratioClass, ratioLabel, fmtElapsed,

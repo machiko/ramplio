@@ -126,12 +126,13 @@ func (c *benchController) Snapshot() reporter.LiveSnapshot {
 		Elapsed:      time.Since(c.startedAt),
 	}
 }
-func (c *benchController) Start(_ dashboard.RunRequest) error        { return nil }
-func (c *benchController) Stop()                                      {}
-func (c *benchController) State() dashboard.State                     { return dashboard.StateRunning }
-func (c *benchController) Result() *dashboard.RunResult               { return nil }
-func (c *benchController) ScenarioInfo() *dashboard.ScenarioMeta      { return nil }
-func (c *benchController) LoadScenario(_ []byte) error                { return nil }
+func (c *benchController) Start(_ dashboard.RunRequest) error               { return nil }
+func (c *benchController) Stop()                                             {}
+func (c *benchController) State() dashboard.State                            { return dashboard.StateRunning }
+func (c *benchController) Result() *dashboard.RunResult                      { return nil }
+func (c *benchController) ScenarioInfo() *dashboard.ScenarioMeta             { return nil }
+func (c *benchController) LoadScenario(_ []byte) error                       { return nil }
+func (c *benchController) ActiveGuidedProfile() *dashboard.GuidedProfile     { return nil }
 
 // BenchmarkRampEngine_WithDashboard runs the same ramp profile as BenchmarkRampEngine
 // but with a live dashboard server and one active WebSocket consumer attached.

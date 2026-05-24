@@ -18,11 +18,12 @@ steps:
     headers:
       Content-Type: application/json
     assertions:
-      status: 200
+      status: 2xx
       body_json:
         "$.data.token": "mock-token-abc123"
     capture:
       token: "$.data.token"
+    pause: 200ms  # think time: simulate user reading the page before next action
 
   - name: GET /profile with bearer token
     method: GET
@@ -30,7 +31,7 @@ steps:
     auth:
       bearer: "{{capture.token}}"
     assertions:
-      status: 200
+      status: 2xx
       body_json:
         "$.user": "test-user"
 

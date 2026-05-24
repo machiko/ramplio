@@ -12,25 +12,29 @@ const (
 )
 
 // RunRequest describes a URL-based load test started from the web UI.
+// Either VUs, RPS, or Profile must be set; the three modes are mutually exclusive.
 type RunRequest struct {
-	URL      string `json:"url"`
-	Method   string `json:"method"`
-	VUs      int    `json:"vus"`
-	Duration string `json:"duration"`
+	URL      string         `json:"url"`
+	Method   string         `json:"method"`
+	VUs      int            `json:"vus"`
+	RPS      int            `json:"rps"`
+	Duration string         `json:"duration"`
+	Profile  *GuidedProfile `json:"profile,omitempty"` // non-nil → guided wizard mode
 }
 
 // RunResult holds aggregate metrics after a test completes.
 type RunResult struct {
-	Total    int64   `json:"total"`
-	Errors   int64   `json:"errors"`
-	P50Ms    int64   `json:"p50_ms"`
-	P90Ms    int64   `json:"p90_ms"`
-	P95Ms    int64   `json:"p95_ms"`
-	P99Ms    int64   `json:"p99_ms"`
-	ErrorPct float64 `json:"error_pct"`
-	MeanMs   int64   `json:"mean_ms"`
-	RPS      float64 `json:"rps"`
-	WallSec  float64 `json:"wall_sec"`
+	Total         int64          `json:"total"`
+	Errors        int64          `json:"errors"`
+	P50Ms         int64          `json:"p50_ms"`
+	P90Ms         int64          `json:"p90_ms"`
+	P95Ms         int64          `json:"p95_ms"`
+	P99Ms         int64          `json:"p99_ms"`
+	ErrorPct      float64        `json:"error_pct"`
+	MeanMs        int64          `json:"mean_ms"`
+	RPS           float64        `json:"rps"`
+	WallSec       float64        `json:"wall_sec"`
+	GuidedVerdict *GuidedVerdict `json:"guided_verdict,omitempty"` // set when started via guided wizard
 }
 
 // ScenarioMeta holds display metadata for a YAML scenario loaded via --scenario flag.
@@ -59,4 +63,7 @@ type Controller interface {
 	// LoadScenario parses raw YAML content and loads it as the active scenario.
 	// Returns an error if the YAML is invalid or a test is already running.
 	LoadScenario(yaml []byte) error
+	// ActiveGuidedProfile returns the GuidedProfile for the currently running guided test,
+	// or nil when the test was not started via the wizard.
+	ActiveGuidedProfile() *GuidedProfile
 }

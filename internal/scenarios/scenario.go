@@ -1,6 +1,11 @@
 package scenarios
 
-import "time"
+import (
+	"strconv"
+	"time"
+
+	"gopkg.in/yaml.v3"
+)
 
 type Scenario struct {
 	Name       string            `yaml:"name"`
@@ -9,6 +14,47 @@ type Scenario struct {
 	Vars       map[string]string `yaml:"vars,omitempty"`
 	Thresholds *Thresholds       `yaml:"thresholds,omitempty"`
 	HTTP       *ScenarioHTTP     `yaml:"http,omitempty"`
+}
+
+// StatusCheck holds a status assertion: either an exact code ("200") or a
+// class wildcard ("2xx", "3xx", "4xx", "5xx"). It accepts both quoted and
+// unquoted YAML values so `status: 200` and `status: 2xx` both work.
+type StatusCheck struct {
+	raw string
+}
+
+func (s *StatusCheck) UnmarshalYAML(value *yaml.Node) error {
+	s.raw = value.Value
+	return nil
+}
+
+// Match reports whether code satisfies the check.
+func (s *StatusCheck) Match(code int) bool {
+	switch s.raw {
+	case "1xx":
+		return code >= 100 && code < 200
+	case "2xx":
+		return code >= 200 && code < 300
+	case "3xx":
+		return code >= 300 && code < 400
+	case "4xx":
+		return code >= 400 && code < 500
+	case "5xx":
+		return code >= 500 && code < 600
+	default:
+		n, err := strconv.Atoi(s.raw)
+		if err != nil {
+			return false
+		}
+		return code == n
+	}
+}
+
+func (s *StatusCheck) String() string { return s.raw }
+
+// StatusExact creates a StatusCheck that matches a single HTTP status code.
+func StatusExact(code int) *StatusCheck {
+	return &StatusCheck{raw: strconv.Itoa(code)}
 }
 
 // ScenarioHTTP allows per-scenario tuning of the HTTP connection pool and timeouts.
@@ -20,7 +66,8 @@ type ScenarioHTTP struct {
 
 type Stage struct {
 	DurationRaw string        `yaml:"duration"`
-	Target      int           `yaml:"target"`
+	Target      int           `yaml:"target,omitempty"`
+	TargetRPS   int           `yaml:"target_rps,omitempty"`
 	Duration    time.Duration `yaml:"-"`
 }
 
@@ -30,6 +77,10 @@ type Step struct {
 	URL        string            `yaml:"url"`
 	Headers    map[string]string `yaml:"headers,omitempty"`
 	Body       string            `yaml:"body,omitempty"`
+	// Pause specifies think time after this step (e.g. "500ms", "1s").
+	// Parsed from PauseRaw by the scenario parser.
+	PauseRaw   string            `yaml:"pause,omitempty"`
+	Pause      time.Duration     `yaml:"-"`
 	Auth       *Auth             `yaml:"auth,omitempty"`
 	Capture    *Capture          `yaml:"capture,omitempty"`
 	Assertions *Assertions       `yaml:"assertions,omitempty"`
@@ -59,7 +110,8 @@ func (c *Capture) UnmarshalYAML(unmarshal func(any) error) error {
 // Assertions holds per-request pass/fail checks.
 // Percentile-based assertions (latency_p95_ms etc.) require HDR histogram and are handled as Thresholds.
 type Assertions struct {
-	Status       *int              `yaml:"status,omitempty"`
+	// Status accepts an exact code (200) or a wildcard class (2xx, 3xx, 4xx, 5xx).
+	Status       *StatusCheck      `yaml:"status,omitempty"`
 	BodyContains *string           `yaml:"body_contains,omitempty"`
 	BodyMatches  *string           `yaml:"body_matches,omitempty"`
 	BodyJSON     map[string]string `yaml:"body_json,omitempty"`

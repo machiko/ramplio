@@ -44,7 +44,7 @@ func TestParse_ValidScenario(t *testing.T) {
 	assert.Equal(t, "GET", sc.Steps[0].Method)
 	assert.Equal(t, "https://example.com/health", sc.Steps[0].URL)
 	require.NotNil(t, sc.Steps[0].Assertions)
-	assert.Equal(t, 200, *sc.Steps[0].Assertions.Status)
+	assert.Equal(t, scenarios.StatusExact(200), sc.Steps[0].Assertions.Status)
 
 	require.NotNil(t, sc.Thresholds)
 	assert.InDelta(t, 1.0, *sc.Thresholds.ErrorRatePct, 0.001)
@@ -126,4 +126,63 @@ steps:
 func TestParseFile_NotFound(t *testing.T) {
 	_, err := scenarios.ParseFile("/nonexistent/path.yaml")
 	require.Error(t, err)
+}
+
+func TestParse_ThinkTime(t *testing.T) {
+	yaml := `
+name: think time test
+stages:
+  - duration: 10s
+    target: 2
+steps:
+  - name: step one
+    method: GET
+    url: https://example.com/
+    pause: 500ms
+  - name: step two
+    method: GET
+    url: https://example.com/api
+`
+	sc, err := scenarios.Parse(strings.NewReader(yaml))
+	require.NoError(t, err)
+	assert.Equal(t, 500*time.Millisecond, sc.Steps[0].Pause)
+	assert.Equal(t, time.Duration(0), sc.Steps[1].Pause)
+}
+
+func TestParse_InvalidPause(t *testing.T) {
+	yaml := `
+name: bad pause
+stages:
+  - duration: 10s
+    target: 2
+steps:
+  - name: step
+    method: GET
+    url: https://example.com/
+    pause: "not-a-duration"
+`
+	_, err := scenarios.Parse(strings.NewReader(yaml))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "pause")
+}
+
+func TestParse_StatusWildcard(t *testing.T) {
+	yaml := `
+name: wildcard test
+stages:
+  - duration: 10s
+    target: 1
+steps:
+  - name: get
+    method: GET
+    url: https://example.com/
+    assertions:
+      status: 2xx
+`
+	sc, err := scenarios.Parse(strings.NewReader(yaml))
+	require.NoError(t, err)
+	require.NotNil(t, sc.Steps[0].Assertions.Status)
+	assert.True(t, sc.Steps[0].Assertions.Status.Match(200))
+	assert.True(t, sc.Steps[0].Assertions.Status.Match(204))
+	assert.False(t, sc.Steps[0].Assertions.Status.Match(404))
 }

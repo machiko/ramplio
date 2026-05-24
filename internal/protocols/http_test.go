@@ -81,3 +81,77 @@ func TestHTTPExecutor_RespectsContextCancellation(t *testing.T) {
 
 	assert.Error(t, result.Error)
 }
+
+func TestHTTPExecutor_NewSession_IsolatedCookies(t *testing.T) {
+	// Server sets a cookie on first request and verifies it on second.
+	var receivedCookie string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/set" {
+			http.SetCookie(w, &http.Cookie{Name: "session", Value: "abc123"})
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if c, err := r.Cookie("session"); err == nil {
+			receivedCookie = c.Value
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	ex := protocols.NewHTTPExecutor(protocols.DefaultHTTPConfig())
+	session := ex.NewSession()
+
+	// First request sets the cookie.
+	res := session.Execute(context.Background(), protocols.Request{
+		Method: http.MethodGet,
+		URL:    server.URL + "/set",
+	})
+	require.NoError(t, res.Error)
+
+	// Second request should carry the cookie automatically.
+	res = session.Execute(context.Background(), protocols.Request{
+		Method: http.MethodGet,
+		URL:    server.URL + "/check",
+	})
+	require.NoError(t, res.Error)
+	assert.Equal(t, "abc123", receivedCookie)
+}
+
+func TestHTTPExecutor_NewSession_SeparateJarsPerSession(t *testing.T) {
+	// Two sessions must not share cookies.
+	cookiesReceived := make(map[string]int)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/set" {
+			http.SetCookie(w, &http.Cookie{Name: "tok", Value: "secret"})
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		if _, err := r.Cookie("tok"); err == nil {
+			cookiesReceived["found"]++
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	ex := protocols.NewHTTPExecutor(protocols.DefaultHTTPConfig())
+	s1 := ex.NewSession()
+	s2 := ex.NewSession()
+
+	// s1 gets a cookie.
+	s1.Execute(context.Background(), protocols.Request{Method: http.MethodGet, URL: server.URL + "/set"})
+
+	// s2 should NOT have the cookie.
+	s2.Execute(context.Background(), protocols.Request{Method: http.MethodGet, URL: server.URL + "/check"})
+
+	assert.Equal(t, 0, cookiesReceived["found"], "s2 should not see s1's cookies")
+
+	// s1 should carry the cookie.
+	s1.Execute(context.Background(), protocols.Request{Method: http.MethodGet, URL: server.URL + "/check"})
+	assert.Equal(t, 1, cookiesReceived["found"])
+}
+
+func TestHTTPExecutor_CloseIdleConnections(t *testing.T) {
+	ex := protocols.NewHTTPExecutor(protocols.DefaultHTTPConfig())
+	// Should not panic.
+	assert.NotPanics(t, ex.CloseIdleConnections)
+}

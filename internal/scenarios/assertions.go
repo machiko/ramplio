@@ -16,8 +16,8 @@ func EvalAssertions(a *Assertions, result protocols.Result) error {
 		return nil
 	}
 
-	if a.Status != nil && result.StatusCode != *a.Status {
-		return fmt.Errorf("assertion failed: expected status %d, got %d", *a.Status, result.StatusCode)
+	if a.Status != nil && !a.Status.Match(result.StatusCode) {
+		return fmt.Errorf("assertion failed: expected status %s, got %d", a.Status, result.StatusCode)
 	}
 
 	if a.BodyContains != nil {
