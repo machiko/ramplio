@@ -446,6 +446,46 @@
     }
 
     /* ── Live control bar ────────────────────────────── */
+    .step-table-wrap {
+      padding: 12px 24px 4px;
+    }
+    .step-table-title {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 8px;
+    }
+    .step-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    .step-table thead th {
+      text-align: right;
+      color: var(--muted);
+      font-weight: 500;
+      padding: 4px 10px;
+      border-bottom: 1px solid var(--border);
+    }
+    .step-table thead th.st-name { text-align: left; }
+    .step-table tbody tr:hover { background: var(--hover, rgba(255,255,255,0.03)); }
+    .step-table td {
+      padding: 5px 10px;
+      text-align: right;
+      border-bottom: 1px solid var(--border);
+      font-variant-numeric: tabular-nums;
+    }
+    .step-table td.st-name {
+      text-align: left;
+      color: var(--text);
+      max-width: 280px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .step-table td.st-num { color: var(--muted); }
     .control-bar {
       display: flex;
       align-items: center;
@@ -1442,6 +1482,33 @@
       </div>
     </div>
 
+    <!-- Per-step metrics table (scenario mode only) -->
+    <div v-if="snap.step_metrics && snap.step_metrics.length > 0" class="step-table-wrap">
+      <div class="step-table-title">Per-step Metrics</div>
+      <table class="step-table">
+        <thead>
+          <tr>
+            <th class="st-name">Step</th>
+            <th class="st-num">Total</th>
+            <th class="st-num">p50</th>
+            <th class="st-num">p90</th>
+            <th class="st-num">p99</th>
+            <th class="st-num">Err%</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="s in snap.step_metrics" :key="s.name">
+            <td class="st-name">{{ s.name }}</td>
+            <td class="st-num">{{ s.total.toLocaleString() }}</td>
+            <td class="st-num">{{ s.p50_ms }}ms</td>
+            <td class="st-num">{{ s.p90_ms }}ms</td>
+            <td class="st-num" :class="latClass(s.p99_ms)">{{ s.p99_ms }}ms</td>
+            <td class="st-num" :class="errClass(s.err_pct)">{{ fmt2(s.err_pct) }}%</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
     <div class="control-bar">
       <div class="control-left">
         <span>已執行 {{ fmtElapsed(snap.elapsed_s) }}</span>
@@ -1711,6 +1778,7 @@ createApp({
       mean_ms: 0, p50_ms: 0, p90_ms: 0, p95_ms: 0, p99_ms: 0,
       active_vus: 0, stage_current: 0, stage_total: 0, stage_pct: 0,
       elapsed_s: 0,
+      step_metrics: [],
     });
 
     const rpsCanvas = ref(null);

@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -155,8 +157,10 @@ func runDashboard(url, method string, vus, rps int, duration, scenarioFile strin
 		return fmt.Errorf("dashboard: %w", err)
 	}
 
-	fmt.Printf("Dashboard → http://%s\n\n", srv.Addr())
-	fmt.Println("Open the URL above in your browser. Press Ctrl+C to exit.")
+	dashURL := "http://" + srv.Addr()
+	fmt.Printf("Dashboard → %s\n\n", dashURL)
+	fmt.Println("Press Ctrl+C to exit.")
+	openBrowser(dashURL)
 
 	switch {
 	case scenarioFile != "":
@@ -219,6 +223,7 @@ func (p *rampProvider) Snapshot() reporter.LiveSnapshot {
 		StageTotal:   total,
 		StagePct:     pct,
 		Elapsed:      time.Since(p.startedAt),
+		StepMetrics:  p.col.LiveStepMetrics(),
 	}
 }
 
@@ -242,7 +247,12 @@ func runScenario(path, promAddr string, httpCfg protocols.HTTPConfig) (metrics.S
 
 	steps := make([]engine.RampStep, len(sc.Steps))
 	for i, s := range sc.Steps {
+		name := s.Name
+		if name == "" {
+			name = strings.ToUpper(s.Method) + " " + s.URL
+		}
 		steps[i] = engine.RampStep{
+			Name: name,
 			Request: protocols.Request{
 				Method:  strings.ToUpper(s.Method),
 				URL:     s.URL,
@@ -407,6 +417,21 @@ func parseHeaders(raw []string) map[string]string {
 		}
 	}
 	return headers
+}
+
+// openBrowser opens url in the default system browser. Failures are silently
+// ignored — the URL is already printed so the user can open it manually.
+func openBrowser(url string) {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	default:
+		cmd = exec.Command("xdg-open", url)
+	}
+	_ = cmd.Start()
 }
 
 func maxTarget(stages []scenarios.Stage) int {

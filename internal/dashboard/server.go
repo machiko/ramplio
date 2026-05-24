@@ -8,7 +8,18 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/ramplio/ramplio/internal/metrics"
 )
+
+// StepMetric is the per-step metrics payload in a wsMessage.
+type StepMetric struct {
+	Name   string  `json:"name"`
+	Total  int64   `json:"total"`
+	P50Ms  int64   `json:"p50_ms"`
+	P90Ms  int64   `json:"p90_ms"`
+	P99Ms  int64   `json:"p99_ms"`
+	ErrPct float64 `json:"err_pct"`
+}
 
 // wsMessage is the JSON payload pushed to every connected dashboard client.
 type wsMessage struct {
@@ -26,10 +37,11 @@ type wsMessage struct {
 	StageTotal     int            `json:"stage_total"`
 	StagePct       float64        `json:"stage_pct"`
 	ElapsedS       float64        `json:"elapsed_s"`
-	State          State          `json:"state"`
-	Result         *RunResult     `json:"result,omitempty"`
-	ScenarioInfo   *ScenarioMeta  `json:"scenario_info,omitempty"`
-	GuidedProfile  *GuidedProfile `json:"guided_profile,omitempty"` // non-nil during a guided test
+	State         State          `json:"state"`
+	Result        *RunResult     `json:"result,omitempty"`
+	ScenarioInfo  *ScenarioMeta  `json:"scenario_info,omitempty"`
+	GuidedProfile *GuidedProfile `json:"guided_profile,omitempty"` // non-nil during a guided test
+	StepMetrics   []StepMetric   `json:"step_metrics,omitempty"`
 }
 
 // Server serves the embedded dashboard HTML and streams live metrics over WebSocket.
@@ -182,24 +194,47 @@ func (s *Server) buildWSMessage() wsMessage {
 	if snap.Total > 0 {
 		errPct = float64(snap.Errors) / float64(snap.Total) * 100
 	}
-	return wsMessage{
-		RPS:          snap.RPS,
-		Total:        snap.Total,
-		Errors:       snap.Errors,
-		ErrorPct:     errPct,
-		MeanMs:       snap.MeanLatency.Milliseconds(),
-		P50Ms:        snap.P50.Milliseconds(),
-		P90Ms:        snap.P90.Milliseconds(),
-		P95Ms:        snap.P95.Milliseconds(),
-		P99Ms:        snap.P99.Milliseconds(),
-		ActiveVUs:    snap.ActiveVUs,
-		StageCurrent: snap.StageCurrent,
-		StageTotal:   snap.StageTotal,
-		StagePct:     snap.StagePct,
-		ElapsedS:     snap.Elapsed.Seconds(),
+	msg := wsMessage{
+		RPS:           snap.RPS,
+		Total:         snap.Total,
+		Errors:        snap.Errors,
+		ErrorPct:      errPct,
+		MeanMs:        snap.MeanLatency.Milliseconds(),
+		P50Ms:         snap.P50.Milliseconds(),
+		P90Ms:         snap.P90.Milliseconds(),
+		P95Ms:         snap.P95.Milliseconds(),
+		P99Ms:         snap.P99.Milliseconds(),
+		ActiveVUs:     snap.ActiveVUs,
+		StageCurrent:  snap.StageCurrent,
+		StageTotal:    snap.StageTotal,
+		StagePct:      snap.StagePct,
+		ElapsedS:      snap.Elapsed.Seconds(),
 		State:         s.ctrl.State(),
 		Result:        s.ctrl.Result(),
 		ScenarioInfo:  s.ctrl.ScenarioInfo(),
 		GuidedProfile: s.ctrl.ActiveGuidedProfile(),
 	}
+	if len(snap.StepMetrics) > 0 {
+		msg.StepMetrics = toWSStepMetrics(snap.StepMetrics)
+	}
+	return msg
+}
+
+func toWSStepMetrics(steps []metrics.StepSummary) []StepMetric {
+	out := make([]StepMetric, len(steps))
+	for i, s := range steps {
+		errPct := 0.0
+		if s.Total > 0 {
+			errPct = float64(s.Errors) / float64(s.Total) * 100
+		}
+		out[i] = StepMetric{
+			Name:   s.Name,
+			Total:  s.Total,
+			P50Ms:  s.P50.Milliseconds(),
+			P90Ms:  s.P90.Milliseconds(),
+			P99Ms:  s.P99.Milliseconds(),
+			ErrPct: errPct,
+		}
+	}
+	return out
 }

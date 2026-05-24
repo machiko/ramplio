@@ -8,6 +8,7 @@ type Sample struct {
 	BytesRead  int64
 	Error      error
 	At         time.Time
+	StepName   string // "" = URL mode; non-empty enables per-step bucketing
 }
 
 func (s Sample) isError() bool {

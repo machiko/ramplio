@@ -8,6 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/ramplio/ramplio/internal/metrics"
 )
 
 // LiveSnapshot is a point-in-time view of a running load test.
@@ -25,6 +26,8 @@ type LiveSnapshot struct {
 	StageTotal   int
 	StagePct     float64 // 0–1 progress within current stage
 	Elapsed      time.Duration
+	// StepMetrics is non-nil only when running a multi-step scenario.
+	StepMetrics []metrics.StepSummary
 }
 
 // LiveProvider supplies live snapshots during a running load test.
@@ -108,7 +111,32 @@ func (m tuiModel) View() string {
 		Padding(0, 1)
 
 	inner := line1 + "\n" + line2 + "\n" + line3
-	return "\n" + titleStyle.Render("Ramplio") + "\n" + boxStyle.Render(inner) + "\n"
+	out := "\n" + titleStyle.Render("Ramplio") + "\n" + boxStyle.Render(inner) + "\n"
+	if len(s.StepMetrics) > 0 {
+		out += renderStepTable(s.StepMetrics)
+	}
+	return out
+}
+
+func renderStepTable(steps []metrics.StepSummary) string {
+	const nameW = 34
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("  %-*s  %7s  %7s  %7s  %6s\n",
+		nameW, "Step", "Total", "p50", "p99", "Err%"))
+	sb.WriteString("  " + strings.Repeat("─", nameW+36) + "\n")
+	for _, s := range steps {
+		errPct := 0.0
+		if s.Total > 0 {
+			errPct = float64(s.Errors) / float64(s.Total) * 100
+		}
+		name := s.Name
+		if len(name) > nameW {
+			name = name[:nameW-3] + "..."
+		}
+		sb.WriteString(fmt.Sprintf("  %-*s  %7d  %7s  %7s  %5.1f%%\n",
+			nameW, name, s.Total, fmtLatency(s.P50), fmtLatency(s.P99), errPct))
+	}
+	return sb.String()
 }
 
 // RunTUI starts the bubbletea program and blocks until the test ends or Ctrl+C is pressed.

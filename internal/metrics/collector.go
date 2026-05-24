@@ -7,6 +7,16 @@ import (
 	hdrhistogram "github.com/HdrHistogram/hdrhistogram-go"
 )
 
+// StepSummary holds live metrics for a single named scenario step.
+type StepSummary struct {
+	Name   string
+	Total  int64
+	Errors int64
+	P50    time.Duration
+	P90    time.Duration
+	P99    time.Duration
+}
+
 const (
 	bufMultiplier = 10
 	histMinNs     = 1                // 1 nanosecond
@@ -23,6 +33,10 @@ type Collector struct {
 	hist      *hdrhistogram.Histogram
 	once      sync.Once
 	startedAt time.Time
+	// Per-step tracking; only populated when samples carry a non-empty StepName.
+	stepHists map[string]*hdrhistogram.Histogram
+	stepSums  map[string]Summary
+	stepOrder []string // insertion-ordered step names for stable display
 }
 
 func NewCollector(maxVUs int) *Collector {
@@ -35,6 +49,8 @@ func NewCollector(maxVUs int) *Collector {
 		stopped:   make(chan struct{}),
 		hist:      hdrhistogram.New(histMinNs, histMaxNs, histSigFigs),
 		startedAt: time.Now(),
+		stepHists: make(map[string]*hdrhistogram.Histogram),
+		stepSums:  make(map[string]Summary),
 	}
 	go c.aggregate()
 	return c
@@ -116,6 +132,45 @@ func (c *Collector) recordSample(s Sample) {
 	if ns := int64(s.Latency); ns > 0 {
 		_ = c.hist.RecordValue(ns)
 	}
+	if s.StepName != "" {
+		if _, ok := c.stepHists[s.StepName]; !ok {
+			c.stepHists[s.StepName] = hdrhistogram.New(histMinNs, histMaxNs, histSigFigs)
+			c.stepOrder = append(c.stepOrder, s.StepName)
+		}
+		sum := c.stepSums[s.StepName]
+		sum.record(s)
+		c.stepSums[s.StepName] = sum
+		if ns := int64(s.Latency); ns > 0 {
+			_ = c.stepHists[s.StepName].RecordValue(ns)
+		}
+	}
+}
+
+// LiveStepMetrics returns a snapshot of per-step metrics in scenario step order.
+// Returns nil when no samples with StepName have been recorded.
+func (c *Collector) LiveStepMetrics() []StepSummary {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if len(c.stepOrder) == 0 {
+		return nil
+	}
+	result := make([]StepSummary, 0, len(c.stepOrder))
+	for _, name := range c.stepOrder {
+		hist := c.stepHists[name]
+		sum := c.stepSums[name]
+		ss := StepSummary{
+			Name:   name,
+			Total:  sum.Total,
+			Errors: sum.Errors,
+		}
+		if hist.TotalCount() > 0 {
+			ss.P50 = nsToD(hist.ValueAtQuantile(50))
+			ss.P90 = nsToD(hist.ValueAtQuantile(90))
+			ss.P99 = nsToD(hist.ValueAtQuantile(99))
+		}
+		result = append(result, ss)
+	}
+	return result
 }
 
 func nsToD(ns int64) time.Duration {

@@ -104,7 +104,12 @@ func buildStepsFromScenario(sc *scenarios.Scenario) ([]engine.RampStep, []string
 	steps := make([]engine.RampStep, len(sc.Steps))
 	names := make([]string, len(sc.Steps))
 	for i, s := range sc.Steps {
+		name := s.Name
+		if name == "" {
+			name = strings.ToUpper(s.Method) + " " + s.URL
+		}
 		steps[i] = engine.RampStep{
+			Name: name,
 			Request: protocols.Request{
 				Method:  strings.ToUpper(s.Method),
 				URL:     s.URL,
@@ -115,10 +120,6 @@ func buildStepsFromScenario(sc *scenarios.Scenario) ([]engine.RampStep, []string
 			Auth:       s.Auth,
 			Capture:    s.Capture,
 			Pause:      s.Pause,
-		}
-		name := s.Name
-		if name == "" {
-			name = strings.ToUpper(s.Method) + " " + s.URL
 		}
 		names[i] = name
 	}
@@ -398,6 +399,7 @@ func (c *dashController) refreshSnap(col *metrics.Collector, ramp *engine.RampEn
 		StageTotal:   total,
 		StagePct:     pct,
 		Elapsed:      time.Since(startedAt),
+		StepMetrics:  col.LiveStepMetrics(),
 	}
 	c.mu.Lock()
 	c.snapCache = snap

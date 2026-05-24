@@ -22,12 +22,13 @@ const rampTickInterval = 100 * time.Millisecond
 
 // RampStep pairs a request template with optional assertions, auth, capture config, and think time.
 type RampStep struct {
+	Name       string // display name; used as per-step metric bucket key
 	Request    protocols.Request
 	Assertions *scenarios.Assertions
 	Auth       *scenarios.Auth
 	Capture    *scenarios.Capture
 	// Pause is the think time after this step completes (0 = no delay).
-	Pause      time.Duration
+	Pause time.Duration
 }
 
 // RampConfig drives a stage-based load test.
@@ -301,6 +302,7 @@ func (e *RampEngine) runRateWorker(ctx context.Context, lim *rate.Limiter) {
 			BytesRead:  result.BytesRead,
 			Error:      result.Error,
 			At:         time.Now(),
+			StepName:   step.Name,
 		})
 		e.activeVUs.Add(-1)
 
@@ -361,6 +363,7 @@ func (e *RampEngine) runVU(ctx context.Context) {
 				BytesRead:  result.BytesRead,
 				Error:      result.Error,
 				At:         time.Now(),
+				StepName:   step.Name,
 			})
 
 			if step.Pause > 0 {
