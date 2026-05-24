@@ -1,0 +1,41 @@
+name: self-stress 10k VUs
+
+# M6 hardening scenario: Ramplio stress-testing the built-in mock server.
+#
+# Prerequisites:
+#   ramplio mock-server --port 8080
+#
+# Run:
+#   ramplio run --scenario testdata/self-stress.yaml
+#
+# Expected DoD (M6):
+#   - Runs 10 minutes without OOM or crash
+#   - pprof heap profile shows < 5% growth over baseline
+#   - error_rate < 1%
+#   - p99 < 500ms
+
+stages:
+  - duration: 2m
+    target: 2500
+  - duration: 4m
+    target: 10000
+  - duration: 2m
+    target: 10000
+  - duration: 2m
+    target: 0
+
+steps:
+  - name: GET /
+    method: GET
+    url: http://localhost:8080/
+    assertions:
+      - status: 200
+
+thresholds:
+  error_rate_pct: 1.0
+  p99_ms: 500
+
+http:
+  max_idle_conns: 20000
+  max_idle_conns_per_host: 10000
+  request_timeout_ms: 5000
