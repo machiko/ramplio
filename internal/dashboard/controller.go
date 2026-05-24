@@ -56,4 +56,7 @@ type Controller interface {
 	Result() *RunResult
 	// ScenarioInfo returns metadata about the loaded YAML scenario, or nil in URL mode.
 	ScenarioInfo() *ScenarioMeta
+	// LoadScenario parses raw YAML content and loads it as the active scenario.
+	// Returns an error if the YAML is invalid or a test is already running.
+	LoadScenario(yaml []byte) error
 }

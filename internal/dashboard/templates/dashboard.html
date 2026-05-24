@@ -664,6 +664,74 @@
       font-variant-numeric: tabular-nums;
     }
 
+    /* ── Mode tabs (URL / Scenario 切換) ───────────── */
+    .mode-tabs {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 20px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 0;
+    }
+    .mode-tab {
+      padding: 7px 16px;
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: color 0.15s, border-color 0.15s;
+      margin-bottom: -1px;
+    }
+    .mode-tab:hover { color: var(--text); }
+    .mode-tab.active { color: var(--accent2); border-bottom-color: var(--accent2); }
+
+    /* ── File upload zone ────────────────────────────── */
+    .upload-zone {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      border: 2px dashed var(--border);
+      border-radius: var(--radius);
+      padding: 36px 24px;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+      margin-bottom: 12px;
+    }
+    .upload-zone:hover {
+      border-color: var(--accent2);
+      background: rgba(124,58,237,.05);
+    }
+    .upload-icon { font-size: 28px; line-height: 1; }
+    .upload-label { font-size: 14px; font-weight: 500; color: var(--text); }
+    .upload-hint  { font-size: 11px; color: var(--muted); }
+    .upload-loading {
+      margin-top: 10px;
+      padding: 8px 14px;
+      background: rgba(124,58,237,.1);
+      border: 1px solid rgba(124,58,237,.3);
+      border-radius: var(--radius);
+      color: var(--accent2);
+      font-size: 13px;
+      text-align: center;
+    }
+    .btn-clear-scenario {
+      width: 100%;
+      height: 36px;
+      margin-top: 8px;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--muted);
+      font-size: 12px;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .btn-clear-scenario:hover { border-color: var(--accent2); color: var(--accent2); }
+
     /* ── Scenario panel (Setup View / scenario mode) ── */
     .scenario-panel {
       background: var(--surface);
@@ -739,42 +807,19 @@
   <div v-if="view === 'setup'" class="setup-view">
     <div class="setup-card">
 
-      <!-- Scenario mode: pre-loaded via --scenario flag -->
-      <template v-if="scenarioInfo">
-        <div class="setup-title">Scenario Ready</div>
-        <div class="setup-subtitle">已從 CLI 載入 YAML Scenario，點擊執行開始壓測。</div>
-        <div class="setup-form-box">
-          <div class="scenario-panel">
-            <div class="scenario-name">{{ scenarioInfo.name }}</div>
-            <div class="scenario-meta">
-              {{ scenarioInfo.stage_count }} 個 stage ·
-              {{ scenarioInfo.max_vus }} max VUs ·
-              {{ fmtElapsed(scenarioInfo.total_sec) }}
-            </div>
-            <div class="scenario-steps">
-              <div v-for="(name, i) in scenarioInfo.step_names" :key="i" class="scenario-step">
-                <span class="step-num">{{ i + 1 }}</span>
-                <span class="step-name">{{ name }}</span>
-              </div>
-            </div>
-          </div>
-          <button class="btn-run" :disabled="submitting" @click="startScenario">
-            {{ submitting ? 'Starting…' : '▶  Run Scenario' }}
-          </button>
-          <div v-if="formError" class="error-msg">{{ formError }}</div>
-        </div>
-      </template>
+      <!-- Mode tabs -->
+      <div class="mode-tabs">
+        <button class="mode-tab" :class="{ active: setupMode === 'url' }" @click="setupMode = 'url'">URL 模式</button>
+        <button class="mode-tab" :class="{ active: setupMode === 'scenario' }" @click="setupMode = 'scenario'">Scenario 模式</button>
+      </div>
 
-      <!-- URL mode: normal form -->
-      <template v-else>
-        <div class="setup-title">New Load Test</div>
+      <!-- ── URL mode ── -->
+      <template v-if="setupMode === 'url'">
         <div class="setup-subtitle">發送大量並發請求到目標 URL，量測回應速度與穩定性。</div>
         <div class="setup-form-box">
           <form @submit.prevent="runTest">
             <div class="field">
-              <div class="field-label-row">
-                <label>Target URL</label>
-              </div>
+              <div class="field-label-row"><label>Target URL</label></div>
               <input
                 v-model="form.url"
                 type="url"
@@ -810,8 +855,6 @@
           </form>
           <div v-if="formError" class="error-msg">{{ formError }}</div>
         </div>
-
-        <!-- Metric guide -->
         <div class="metric-guide">
           <div class="metric-guide-title">測試結果會顯示哪些指標？</div>
           <div class="metric-guide-grid">
@@ -834,6 +877,60 @@
           </div>
         </div>
       </template>
+
+      <!-- ── Scenario mode ── -->
+      <template v-else>
+        <div class="setup-subtitle">上傳 YAML Scenario，執行多步驟的真實使用者流程壓測。</div>
+        <div class="setup-form-box">
+
+          <!-- Scenario not yet loaded: show file upload -->
+          <template v-if="!scenarioInfo">
+            <div
+              class="upload-zone"
+              @click="triggerFileInput"
+              @dragover.prevent
+              @drop.prevent="handleDrop"
+            >
+              <div class="upload-icon">📄</div>
+              <div class="upload-label">點擊或拖曳 YAML 檔案</div>
+              <div class="upload-hint">.yaml / .yml</div>
+            </div>
+            <input
+              ref="fileInput"
+              type="file"
+              accept=".yaml,.yml"
+              style="display:none"
+              @change="handleFileChange"
+            />
+            <div v-if="uploadLoading" class="upload-loading">正在解析 Scenario…</div>
+            <div v-if="formError" class="error-msg">{{ formError }}</div>
+          </template>
+
+          <!-- Scenario loaded: show metadata and Run button -->
+          <template v-else>
+            <div class="scenario-panel">
+              <div class="scenario-name">{{ scenarioInfo.name }}</div>
+              <div class="scenario-meta">
+                {{ scenarioInfo.stage_count }} 個 stage ·
+                {{ scenarioInfo.max_vus }} max VUs ·
+                {{ fmtElapsed(scenarioInfo.total_sec) }}
+              </div>
+              <div class="scenario-steps">
+                <div v-for="(name, i) in scenarioInfo.step_names" :key="i" class="scenario-step">
+                  <span class="step-num">{{ i + 1 }}</span>
+                  <span class="step-name">{{ name }}</span>
+                </div>
+              </div>
+            </div>
+            <button class="btn-run" :disabled="submitting" @click="startScenario">
+              {{ submitting ? 'Starting…' : '▶  Run Scenario' }}
+            </button>
+            <button class="btn-clear-scenario" @click="clearScenario">↺  換一個 Scenario</button>
+            <div v-if="formError" class="error-msg">{{ formError }}</div>
+          </template>
+        </div>
+      </template>
+
     </div>
   </div>
 
@@ -1207,10 +1304,13 @@ const MAX_PTS = 120;
 createApp({
   setup() {
     const view = ref('setup');
+    const setupMode = ref('url');
     const submitting = ref(false);
+    const uploadLoading = ref(false);
     const formError = ref('');
     const finalResult = ref(null);
     const scenarioInfo = ref(null);
+    const fileInput = ref(null);
 
     const form = reactive({ url: '', method: 'GET', vus: 50, duration: '30s' });
 
@@ -1350,7 +1450,10 @@ createApp({
       ws.onmessage = (e) => {
         const d = JSON.parse(e.data);
 
-        if (d.scenario_info) scenarioInfo.value = d.scenario_info;
+        if (d.scenario_info) {
+          scenarioInfo.value = d.scenario_info;
+          setupMode.value = 'scenario';
+        }
 
         if (d.state === 'running' && view.value !== 'live') {
           resetCharts();
@@ -1408,6 +1511,43 @@ createApp({
       } finally {
         submitting.value = false;
       }
+    }
+
+    function triggerFileInput() { fileInput.value?.click(); }
+
+    async function uploadScenario(file) {
+      uploadLoading.value = true;
+      formError.value = '';
+      try {
+        const text = await file.text();
+        const res = await fetch('/api/scenario', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/yaml' },
+          body: text,
+        });
+        if (!res.ok) { formError.value = await res.text(); }
+        // scenarioInfo will be updated via WebSocket on success
+      } catch (err) {
+        formError.value = err.message || 'Upload failed';
+      } finally {
+        uploadLoading.value = false;
+      }
+    }
+
+    function handleFileChange(e) {
+      const file = e.target.files?.[0];
+      if (file) uploadScenario(file);
+      e.target.value = '';
+    }
+
+    function handleDrop(e) {
+      const file = e.dataTransfer.files?.[0];
+      if (file) uploadScenario(file);
+    }
+
+    function clearScenario() {
+      scenarioInfo.value = null;
+      formError.value = '';
     }
 
     async function stopTest() { await fetch('/api/stop', { method: 'POST' }); }
@@ -1540,9 +1680,11 @@ createApp({
     }
 
     return {
-      view, submitting, formError, form, finalResult, snap, scenarioInfo,
+      view, setupMode, submitting, uploadLoading, formError,
+      form, finalResult, snap, scenarioInfo, fileInput,
       rpsCanvas, latCanvas, finalVerdict, nlSummary,
       runTest, startScenario, stopTest, resetSetup,
+      triggerFileInput, handleFileChange, handleDrop, clearScenario,
       fmt1, fmt2, pct,
       latClass, latLabel, errClass, errLabel,
       p99Color, tailRatio, ratioClass, ratioLabel, fmtElapsed,

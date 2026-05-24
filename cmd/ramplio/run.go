@@ -146,26 +146,16 @@ func runDashboard(url, method string, vus int, duration, scenarioFile string, po
 
 	switch {
 	case scenarioFile != "":
-		sc, err := scenarios.ParseFile(scenarioFile)
+		yamlBytes, err := os.ReadFile(scenarioFile)
 		if err != nil {
-			return fmt.Errorf("loading scenario: %w", err)
+			return fmt.Errorf("reading scenario: %w", err)
 		}
-		steps, stepNames := buildDashSteps(sc, httpCfg)
-		maxVUs := maxTarget(sc.Stages)
-		var totalSec float64
-		for _, stg := range sc.Stages {
-			totalSec += stg.Duration.Seconds()
+		if err := ctrl.LoadScenario(yamlBytes); err != nil {
+			return err
 		}
-		meta := &dashboard.ScenarioMeta{
-			Name:       sc.Name,
-			StepNames:  stepNames,
-			MaxVUs:     maxVUs,
-			TotalSec:   totalSec,
-			StageCount: len(sc.Stages),
-		}
-		ctrl.setScenario(meta, steps, sc.Stages, sc.Vars)
+		meta := ctrl.ScenarioInfo()
 		fmt.Printf("Scenario loaded: %q — %d step(s), %d stage(s), %d max VUs\n",
-			sc.Name, len(steps), len(sc.Stages), maxVUs)
+			meta.Name, len(meta.StepNames), meta.StageCount, meta.MaxVUs)
 		fmt.Println("Open the dashboard and click Run to start.")
 
 	case url != "":
@@ -182,32 +172,6 @@ func runDashboard(url, method string, vus int, duration, scenarioFile string, po
 
 	<-ctx.Done()
 	return nil
-}
-
-// buildDashSteps converts a parsed scenario into engine steps and returns
-// their display names for the dashboard UI.
-func buildDashSteps(sc *scenarios.Scenario, _ protocols.HTTPConfig) ([]engine.RampStep, []string) {
-	steps := make([]engine.RampStep, len(sc.Steps))
-	names := make([]string, len(sc.Steps))
-	for i, s := range sc.Steps {
-		steps[i] = engine.RampStep{
-			Request: protocols.Request{
-				Method:  strings.ToUpper(s.Method),
-				URL:     s.URL,
-				Headers: s.Headers,
-				Body:    []byte(s.Body),
-			},
-			Assertions: s.Assertions,
-			Auth:       s.Auth,
-			Capture:    s.Capture,
-		}
-		name := s.Name
-		if name == "" {
-			name = strings.ToUpper(s.Method) + " " + s.URL
-		}
-		names[i] = name
-	}
-	return steps, names
 }
 
 // rampProvider supplies live metrics snapshots from a running scenario (TUI / Prometheus path).

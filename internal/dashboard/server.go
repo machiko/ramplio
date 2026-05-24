@@ -3,6 +3,7 @@ package dashboard
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"time"
 
@@ -63,6 +64,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/run", s.handleRun)
 	mux.HandleFunc("/api/stop", s.handleStop)
 	mux.HandleFunc("/api/status", s.handleStatus)
+	mux.HandleFunc("/api/scenario", s.handleScenario)
 
 	srv := &http.Server{Handler: mux}
 	s.ctx = ctx
@@ -142,6 +144,23 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	}
 	s.ctrl.Stop()
 	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) handleScenario(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20)) // 1 MB limit
+	if err != nil {
+		http.Error(w, "failed to read body", http.StatusBadRequest)
+		return
+	}
+	if err := s.ctrl.LoadScenario(body); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.WriteHeader(http.StatusAccepted)
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {

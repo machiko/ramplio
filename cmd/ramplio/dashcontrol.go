@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
@@ -58,6 +59,62 @@ func (c *dashController) ScenarioInfo() *dashboard.ScenarioMeta {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.scenarioMeta
+}
+
+// LoadScenario parses raw YAML and replaces the active scenario. Rejected while
+// a test is running so the browser always sees a consistent state.
+func (c *dashController) LoadScenario(yaml []byte) error {
+	c.mu.RLock()
+	running := c.state == dashboard.StateRunning
+	c.mu.RUnlock()
+	if running {
+		return fmt.Errorf("cannot load scenario while a test is running; stop it first")
+	}
+
+	sc, err := scenarios.Parse(bytes.NewReader(yaml))
+	if err != nil {
+		return fmt.Errorf("invalid scenario YAML: %w", err)
+	}
+
+	steps, stepNames := buildStepsFromScenario(sc)
+	maxVUs := maxTarget(sc.Stages)
+	var totalSec float64
+	for _, stg := range sc.Stages {
+		totalSec += stg.Duration.Seconds()
+	}
+	meta := &dashboard.ScenarioMeta{
+		Name:       sc.Name,
+		StepNames:  stepNames,
+		MaxVUs:     maxVUs,
+		TotalSec:   totalSec,
+		StageCount: len(sc.Stages),
+	}
+	c.setScenario(meta, steps, sc.Stages, sc.Vars)
+	return nil
+}
+
+func buildStepsFromScenario(sc *scenarios.Scenario) ([]engine.RampStep, []string) {
+	steps := make([]engine.RampStep, len(sc.Steps))
+	names := make([]string, len(sc.Steps))
+	for i, s := range sc.Steps {
+		steps[i] = engine.RampStep{
+			Request: protocols.Request{
+				Method:  strings.ToUpper(s.Method),
+				URL:     s.URL,
+				Headers: s.Headers,
+				Body:    []byte(s.Body),
+			},
+			Assertions: s.Assertions,
+			Auth:       s.Auth,
+			Capture:    s.Capture,
+		}
+		name := s.Name
+		if name == "" {
+			name = strings.ToUpper(s.Method) + " " + s.URL
+		}
+		names[i] = name
+	}
+	return steps, names
 }
 
 func (c *dashController) Snapshot() reporter.LiveSnapshot {
