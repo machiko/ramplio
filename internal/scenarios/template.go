@@ -15,6 +15,7 @@ import (
 type VarContext struct {
 	Vars     map[string]string // scenario-level vars block
 	Captures map[string]string // values captured from previous step responses
+	Data     map[string]string // current data file row (from vars_from)
 }
 
 var tokenRe = regexp.MustCompile(`\{\{([^}]+)\}\}`)
@@ -28,6 +29,7 @@ var tokenRe = regexp.MustCompile(`\{\{([^}]+)\}\}`)
 //	{{env "VAR"}}         — os.Getenv("VAR")
 //	{{vars.key}}          — ctx.Vars["key"]
 //	{{capture.key}}       — ctx.Captures["key"]
+//	{{data.column}}       — ctx.Data["column"] (from vars_from data file)
 func RenderString(s string, ctx *VarContext) (string, error) {
 	var renderErr error
 	result := tokenRe.ReplaceAllStringFunc(s, func(match string) string {
@@ -77,6 +79,15 @@ func resolveToken(token string, ctx *VarContext) (string, error) {
 			}
 		}
 		return "", fmt.Errorf("template: capture.%s not captured yet", key)
+
+	case strings.HasPrefix(token, "data."):
+		key := strings.TrimPrefix(token, "data.")
+		if ctx != nil {
+			if v, ok := ctx.Data[key]; ok {
+				return v, nil
+			}
+		}
+		return "", fmt.Errorf("template: data.%s not found in data file row", key)
 
 	default:
 		return "", fmt.Errorf("template: unknown token %q", token)

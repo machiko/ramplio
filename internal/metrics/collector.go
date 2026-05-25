@@ -79,6 +79,21 @@ func (c *Collector) Stop() Summary {
 		c.sum.P95 = nsToD(c.hist.ValueAtQuantile(95))
 		c.sum.P99 = nsToD(c.hist.ValueAtQuantile(99))
 	}
+	if len(c.stepOrder) > 0 {
+		steps := make([]StepSummary, 0, len(c.stepOrder))
+		for _, name := range c.stepOrder {
+			hist := c.stepHists[name]
+			sum := c.stepSums[name]
+			ss := StepSummary{Name: name, Total: sum.Total, Errors: sum.Errors}
+			if hist.TotalCount() > 0 {
+				ss.P50 = nsToD(hist.ValueAtQuantile(50))
+				ss.P90 = nsToD(hist.ValueAtQuantile(90))
+				ss.P99 = nsToD(hist.ValueAtQuantile(99))
+			}
+			steps = append(steps, ss)
+		}
+		c.sum.Steps = steps
+	}
 	return c.sum
 }
 

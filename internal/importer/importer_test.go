@@ -132,6 +132,101 @@ func TestConvert_UserAgentFiltered(t *testing.T) {
 	assert.NotContains(t, string(out), "User-Agent")
 }
 
+// ─── pre-auth token (CSRF / nonce) ───────────────────────────────────────────
+
+// preAuthHAR builds a HAR with:
+//  1. GET /api/csrf → JSON response with a long _token value
+//  2. POST /login → body contains that _token verbatim
+//  3. GET /dashboard → plain API call after login
+func preAuthHAR() []byte {
+	const csrfToken = "csrf_token_value_abc123xyz987_unique"
+	entries := []any{
+		map[string]any{
+			"request": map[string]any{
+				"method":  "GET",
+				"url":     "https://app.example.com/api/csrf",
+				"headers": []any{},
+			},
+			"response": map[string]any{
+				"status": 200,
+				"headers": []any{
+					map[string]string{"name": "Content-Type", "value": "application/json"},
+				},
+				"content": map[string]any{
+					"mimeType": "application/json",
+					"text":     `{"_token": "` + csrfToken + `"}`,
+				},
+			},
+		},
+		map[string]any{
+			"request": map[string]any{
+				"method": "POST",
+				"url":    "https://app.example.com/api/login",
+				"headers": []any{
+					map[string]string{"name": "Content-Type", "value": "application/x-www-form-urlencoded"},
+				},
+				"postData": map[string]string{
+					"mimeType": "application/x-www-form-urlencoded",
+					"text":     "email=user%40example.com&password=secret&_token=" + csrfToken,
+				},
+			},
+			"response": map[string]any{
+				"status": 200,
+				"headers": []any{
+					map[string]string{"name": "Content-Type", "value": "application/json"},
+				},
+				"content": map[string]any{
+					"mimeType": "application/json",
+					"text":     `{"status": "ok"}`,
+				},
+			},
+		},
+		map[string]any{
+			"request": map[string]any{
+				"method":  "GET",
+				"url":     "https://app.example.com/api/dashboard",
+				"headers": []any{},
+			},
+			"response": map[string]any{
+				"status":  200,
+				"headers": []any{},
+				"content": map[string]any{"mimeType": "application/json", "text": `{}`},
+			},
+		},
+	}
+	h := map[string]any{"log": map[string]any{"entries": entries}}
+	b, err := json.Marshal(h)
+	if err != nil {
+		panic(fmt.Sprintf("preAuthHAR: %v", err))
+	}
+	return b
+}
+
+func TestPreAuth_CaptureAdded(t *testing.T) {
+	out, err := importer.ConvertBytes(preAuthHAR(), importer.DefaultOptions(), "test")
+	require.NoError(t, err)
+
+	y := string(out)
+	assert.Contains(t, y, "capture:", "GET /api/csrf step should have capture")
+	assert.Contains(t, y, "$._token", "should capture the _token JSONPath")
+}
+
+func TestPreAuth_TokenReplacedInLoginBody(t *testing.T) {
+	out, err := importer.ConvertBytes(preAuthHAR(), importer.DefaultOptions(), "test")
+	require.NoError(t, err)
+
+	y := string(out)
+	assert.Contains(t, y, "{{capture._token}}", "POST /login body should use template variable")
+	assert.NotContains(t, y, "csrf_token_value_abc123xyz987_unique", "raw CSRF token must not appear in YAML")
+}
+
+func TestPreAuth_StepCount(t *testing.T) {
+	out, err := importer.ConvertBytes(preAuthHAR(), importer.DefaultOptions(), "test")
+	require.NoError(t, err)
+
+	assert.Equal(t, 3, strings.Count(string(out), "- name:"))
+}
+
 // ─── from file ───────────────────────────────────────────────────────────────
 
 func TestConvert_FromFile(t *testing.T) {

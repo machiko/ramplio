@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -20,17 +21,19 @@ import (
 // dashController implements dashboard.Controller, managing the load test lifecycle
 // for tests triggered from the web UI or pre-started from CLI flags.
 type dashController struct {
-	mu            sync.RWMutex
-	state         dashboard.State
-	result        *dashboard.RunResult
-	cancel        context.CancelFunc
-	snapCache     reporter.LiveSnapshot
-	httpCfg       protocols.HTTPConfig
-	scenarioMeta  *dashboard.ScenarioMeta
-	pendingSteps  []engine.RampStep
-	pendingStages []scenarios.Stage
-	pendingVars   map[string]string
-	lastProfile   *dashboard.GuidedProfile // non-nil while a guided test is running
+	mu             sync.RWMutex
+	state          dashboard.State
+	result         *dashboard.RunResult
+	cancel         context.CancelFunc
+	snapCache      reporter.LiveSnapshot
+	httpCfg        protocols.HTTPConfig
+	scenarioMeta   *dashboard.ScenarioMeta
+	pendingSteps   []engine.RampStep
+	pendingStages  []scenarios.Stage
+	pendingVars    map[string]string
+	lastProfile    *dashboard.GuidedProfile // non-nil while a guided test is running
+	lastSummary    metrics.Summary
+	lastSummarySet bool
 }
 
 func newDashController(httpCfg protocols.HTTPConfig) *dashController {
@@ -186,13 +189,36 @@ func (c *dashController) Start(req dashboard.RunRequest) error {
 	)
 
 	if c.scenarioMeta != nil {
+		stages := c.pendingStages
 		maxVUs := c.scenarioMeta.MaxVUs
+
+		if req.OverrideVUs > 0 || req.OverrideDuration != "" {
+			vus := req.OverrideVUs
+			if vus <= 0 {
+				vus = maxVUs
+			}
+			if vus <= 0 {
+				vus = 1
+			}
+			var totalDur time.Duration
+			if req.OverrideDuration != "" {
+				totalDur, _ = time.ParseDuration(req.OverrideDuration)
+			}
+			if totalDur <= 0 {
+				for _, s := range c.pendingStages {
+					totalDur += s.Duration
+				}
+			}
+			stages = buildOverrideStages(vus, totalDur)
+			maxVUs = vus
+		}
+
 		if maxVUs <= 0 {
 			maxVUs = 1
 		}
 		col = metrics.NewCollector(maxVUs)
 		ramp = engine.NewRamp(engine.RampConfig{
-			Stages:   c.pendingStages,
+			Stages:   stages,
 			Steps:    c.pendingSteps,
 			Vars:     c.pendingVars,
 			Executor: protocols.NewHTTPExecutor(c.httpCfg),
@@ -375,10 +401,41 @@ func (c *dashController) runLoop(
 				c.lastProfile = nil
 			}
 			c.result = result
+			c.lastSummary = sum
+			c.lastSummarySet = true
 			c.mu.Unlock()
 			return
 		}
 	}
+}
+
+// buildOverrideStages creates a simple 3-stage ramp-hold-ramp profile for
+// scenario mode when the user overrides VUs or duration from the dashboard.
+func buildOverrideStages(vus int, total time.Duration) []scenarios.Stage {
+	ramp := total / 4
+	if ramp < time.Second {
+		ramp = time.Second
+	}
+	hold := total - 2*ramp
+	if hold < time.Second {
+		hold = time.Second
+	}
+	return []scenarios.Stage{
+		{Duration: ramp, Target: vus},
+		{Duration: hold, Target: vus},
+		{Duration: ramp, Target: 0},
+	}
+}
+
+func (c *dashController) WriteReport(w io.Writer) error {
+	c.mu.RLock()
+	sum := c.lastSummary
+	set := c.lastSummarySet
+	c.mu.RUnlock()
+	if !set {
+		return fmt.Errorf("no completed test run")
+	}
+	return reporter.WriteHTML(w, sum)
 }
 
 func (c *dashController) refreshSnap(col *metrics.Collector, ramp *engine.RampEngine, startedAt time.Time) {

@@ -32,6 +32,7 @@ func newRunCmd() *cobra.Command {
 		body           string
 		scenarioFile   string
 		outputFile     string
+		reportFile     string
 		dashboardOn    bool
 		dashboardPort  int
 		dnsCache       bool
@@ -106,6 +107,20 @@ func newRunCmd() *cobra.Command {
 				}
 			}
 
+			if reportFile != "" {
+				if f, createErr := os.Create(reportFile); createErr != nil {
+					fmt.Fprintf(os.Stderr, "warning: could not create report file: %v\n", createErr)
+				} else {
+					writeErr := reporter.WriteHTML(f, sum)
+					f.Close()
+					if writeErr != nil {
+						fmt.Fprintf(os.Stderr, "warning: could not write report: %v\n", writeErr)
+					} else {
+						fmt.Printf("Report saved to %s\n", reportFile)
+					}
+				}
+			}
+
 			if thresholdMsg != "" {
 				fmt.Fprintf(os.Stderr, "\nThreshold exceeded: %s\n", thresholdMsg)
 				os.Exit(1)
@@ -126,6 +141,7 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().StringVar(&body, "body", "", "Request body")
 	cmd.Flags().StringVarP(&scenarioFile, "scenario", "s", "", "Path to scenario YAML file")
 	cmd.Flags().StringVarP(&outputFile, "output", "o", "", "Save JSON results to file")
+	cmd.Flags().StringVarP(&reportFile, "report", "r", "", "Save HTML report to file (e.g. report.html)")
 	cmd.Flags().BoolVar(&dashboardOn, "dashboard", false, "Open live web dashboard (PM control panel)")
 	cmd.Flags().IntVar(&dashboardPort, "dashboard-port", 9999, "Dashboard port")
 	cmd.Flags().BoolVar(&dnsCache, "dns-cache", false, "Cache DNS lookups to reduce latency measurement noise")
@@ -266,12 +282,30 @@ func runScenario(path, promAddr string, httpCfg protocols.HTTPConfig) (metrics.S
 		}
 	}
 
+	var dataRows []map[string]string
+	var dataMode string
+	if sc.VarsFrom != nil && sc.VarsFrom.File != "" {
+		dataFile := sc.VarsFrom.File
+		if !filepath.IsAbs(dataFile) {
+			dataFile = filepath.Join(filepath.Dir(path), dataFile)
+		}
+		rows, err := scenarios.LoadDataFile(dataFile)
+		if err != nil {
+			return metrics.Summary{}, nil, fmt.Errorf("loading data file: %w", err)
+		}
+		dataRows = rows
+		dataMode = sc.VarsFrom.Mode
+		fmt.Printf("Data file: %s (%d rows, mode=%s)\n", sc.VarsFrom.File, len(rows), dataMode)
+	}
+
 	maxVUs := maxTarget(sc.Stages)
 	col := metrics.NewCollector(maxVUs)
 	eng := engine.NewRamp(engine.RampConfig{
 		Stages:   sc.Stages,
 		Steps:    steps,
 		Vars:     sc.Vars,
+		DataRows: dataRows,
+		DataMode: dataMode,
 		Executor: protocols.NewHTTPExecutor(httpCfg),
 	}, col)
 

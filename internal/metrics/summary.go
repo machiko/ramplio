@@ -16,6 +16,9 @@ type Summary struct {
 	P95 time.Duration `json:"-"`
 	P99 time.Duration `json:"-"`
 
+	// Per-step breakdown; nil when no step names were recorded (single URL mode).
+	Steps []StepSummary `json:"-"`
+
 	sumLatency time.Duration
 }
 

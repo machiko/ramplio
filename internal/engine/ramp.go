@@ -6,6 +6,7 @@ import (
 	"errors"
 	"math"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -36,13 +37,40 @@ type RampConfig struct {
 	Stages   []scenarios.Stage
 	Steps    []RampStep
 	Vars     map[string]string // scenario-level vars available for template rendering
+	DataRows []map[string]string // rows from vars_from data file; nil = no data file
+	DataMode string              // "sequential" (default) or "random"
 	Executor protocols.Executor
+}
+
+// dataSource distributes data file rows to VUs.
+type dataSource struct {
+	rows    []map[string]string
+	mode    string
+	counter atomic.Int64
+}
+
+func newDataSource(rows []map[string]string, mode string) *dataSource {
+	return &dataSource{rows: rows, mode: mode}
+}
+
+func (ds *dataSource) next() map[string]string {
+	if len(ds.rows) == 0 {
+		return nil
+	}
+	if ds.mode == "random" {
+		// Use counter as a cheap pseudo-random index (avoids math/rand lock contention).
+		idx := ds.counter.Add(1) - 1
+		return ds.rows[int(idx*2654435761)%len(ds.rows)]
+	}
+	idx := ds.counter.Add(1) - 1
+	return ds.rows[int(idx)%len(ds.rows)]
 }
 
 // RampEngine runs multi-stage load with linear VU interpolation between stages.
 type RampEngine struct {
 	cfg            RampConfig
 	collector      *metrics.Collector
+	data           *dataSource
 	activeVUs      atomic.Int32
 	stageCurrent   atomic.Int32
 	stageTotal     atomic.Int32
@@ -53,6 +81,9 @@ type RampEngine struct {
 func NewRamp(cfg RampConfig, collector *metrics.Collector) *RampEngine {
 	e := &RampEngine{cfg: cfg, collector: collector}
 	e.stageTotal.Store(int32(len(cfg.Stages)))
+	if len(cfg.DataRows) > 0 {
+		e.data = newDataSource(cfg.DataRows, cfg.DataMode)
+	}
 	return e
 }
 
@@ -264,6 +295,9 @@ func (e *RampEngine) runRateWorker(ctx context.Context, lim *rate.Limiter) {
 		Vars:     e.cfg.Vars,
 		Captures: make(map[string]string),
 	}
+	if e.data != nil {
+		varCtx.Data = e.data.next()
+	}
 	stepIdx := 0
 	for {
 		if err := lim.Wait(ctx); err != nil {
@@ -327,6 +361,9 @@ func (e *RampEngine) runVU(ctx context.Context) {
 	varCtx := &scenarios.VarContext{
 		Vars:     e.cfg.Vars,
 		Captures: make(map[string]string),
+	}
+	if e.data != nil {
+		varCtx.Data = e.data.next()
 	}
 	stepIdx := 0
 	for {
@@ -436,9 +473,17 @@ func applyCaptures(cap *scenarios.Capture, result protocols.Result, ctx *scenari
 		return
 	}
 	for key, expr := range cap.Values {
-		if after, ok := strings.CutPrefix(expr, "header:"); ok {
-			ctx.Captures[key] = result.ResponseHeaders[http.CanonicalHeaderKey(after)]
-		} else {
+		switch {
+		case strings.HasPrefix(expr, "header:"):
+			ctx.Captures[key] = result.ResponseHeaders[http.CanonicalHeaderKey(strings.TrimPrefix(expr, "header:"))]
+		case strings.HasPrefix(expr, "regex:"):
+			pattern := strings.TrimPrefix(expr, "regex:")
+			if re, err := regexp.Compile(pattern); err == nil {
+				if m := re.FindSubmatch(result.Body); len(m) > 1 {
+					ctx.Captures[key] = string(m[1])
+				}
+			}
+		default:
 			ctx.Captures[key] = gjson.GetBytes(result.Body, scenarios.JSONPathToGJSON(expr)).String()
 		}
 	}

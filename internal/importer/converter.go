@@ -56,8 +56,9 @@ func buildScenario(entries []harEntry, opts Options, sourceName string) scenario
 		Stages: buildStages(opts.Duration),
 	}
 
+	preAuthIdx, preAuthVar, preAuthPath, preAuthRaw := findPreAuthToken(entries)
 	loginIdx := findLoginEntry(entries)
-	var tokenPath, captureVar string
+	var captureVar, tokenPath string
 	if loginIdx >= 0 {
 		tokenPath = extractTokenPath(entries[loginIdx].Response.Content.Text)
 		captureVar = "token"
@@ -67,12 +68,29 @@ func buildScenario(entries []harEntry, opts Options, sourceName string) scenario
 	for i, e := range entries {
 		step := entryToStep(e)
 
-		switch {
-		case i == loginIdx:
+		// Pre-auth token provider step (e.g. GET /csrf)
+		if i == preAuthIdx {
+			step.Capture = &scenarios.Capture{
+				Values: map[string]string{preAuthVar: preAuthPath},
+			}
+		}
+
+		// Replace pre-auth token literal with template variable in steps that follow
+		if preAuthIdx >= 0 && i > preAuthIdx && preAuthRaw != "" {
+			if step.Body != "" {
+				step.Body = strings.ReplaceAll(step.Body, preAuthRaw, "{{capture."+preAuthVar+"}}")
+			}
+			if strings.Contains(step.URL, preAuthRaw) {
+				step.URL = strings.ReplaceAll(step.URL, preAuthRaw, "{{capture."+preAuthVar+"}}")
+			}
+		}
+
+		// JWT login capture
+		if i == loginIdx {
 			step.Capture = &scenarios.Capture{
 				Values: map[string]string{captureVar: tokenPath},
 			}
-		case loginIdx >= 0 && i > loginIdx:
+		} else if loginIdx >= 0 && i > loginIdx {
 			if rawBearer := extractBearerFromHeaders(step.Headers); rawBearer != "" {
 				delete(step.Headers, canonicalAuthKey(step.Headers))
 				bearer := "{{capture." + captureVar + "}}"
@@ -131,6 +149,7 @@ var skipHeaders = map[string]bool{
 	"user-agent":      true,
 	"cache-control":   true,
 	"pragma":          true,
+	"cookie":          true, // handled automatically by the per-VU cookie jar
 }
 
 func extractHeaders(headers []harHeader) map[string]string {

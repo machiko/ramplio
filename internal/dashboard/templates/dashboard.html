@@ -772,6 +772,52 @@
     }
     .btn-clear-scenario:hover { border-color: var(--accent2); color: var(--accent2); }
 
+    /* ── Scenario settings ──────────────────────────── */
+    .scenario-settings {
+      margin: 12px 0 4px;
+      padding: 14px 16px;
+      background: rgba(255,255,255,.03);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+
+    /* ── HAR Import ─────────────────────────────────── */
+    .har-zone { border-color: #2d4a6e; }
+    .har-zone:hover, .har-zone.dragging {
+      border-color: var(--blue);
+      background: rgba(96,165,250,.05);
+    }
+    .har-steps-hint {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-top: 16px;
+      padding: 14px 16px;
+      background: rgba(255,255,255,.03);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+    .har-hint-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+    .har-hint-num {
+      flex-shrink: 0;
+      width: 18px; height: 18px;
+      background: var(--border);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--text);
+    }
+
     /* ── Guided Wizard ───────────────────────────────── */
     .wizard-progress {
       display: flex;
@@ -1079,7 +1125,7 @@
       <!-- Mode tabs -->
       <div class="mode-tabs">
         <button class="mode-tab" :class="{ active: setupMode === 'url' }" @click="setupMode = 'url'">URL 模式</button>
-        <button class="mode-tab" :class="{ active: setupMode === 'scenario' }" @click="setupMode = 'scenario'">Scenario 模式</button>
+        <button class="mode-tab" :class="{ active: setupMode === 'scenario' }" @click="setupMode = 'scenario'; clearScenario()">情境模式</button>
         <button class="mode-tab" :class="{ active: setupMode === 'guided' }" @click="setupMode = 'guided'; wizardStep = 1">引導模式</button>
       </div>
 
@@ -1285,43 +1331,51 @@
         </div>
       </template>
 
-      <!-- ── Scenario mode ── -->
-      <template v-else>
-        <div class="setup-subtitle">上傳 YAML Scenario，執行多步驟的真實使用者流程壓測。</div>
+      <!-- ── Scenario / HAR mode ── -->
+      <template v-else-if="setupMode === 'scenario'">
+        <div class="setup-subtitle">上傳 HAR 錄製或 YAML 情境檔，自動偵測登入流程、支援多步驟壓測。</div>
         <div class="setup-form-box">
 
-          <!-- Scenario not yet loaded: show file upload -->
+          <!-- Not yet loaded: unified drop zone -->
           <template v-if="!scenarioInfo">
             <div
               class="upload-zone"
-              @click="triggerFileInput"
-              @dragover.prevent
-              @drop.prevent="handleDrop"
+              :class="{ 'har-zone': true, dragging: scenarioDragging }"
+              @click="triggerScenarioInput"
+              @dragover.prevent="scenarioDragging = true"
+              @dragleave="scenarioDragging = false"
+              @drop.prevent="handleScenarioDrop"
             >
-              <div class="upload-icon">📄</div>
-              <div class="upload-label">點擊或拖曳 YAML 檔案</div>
-              <div class="upload-hint">.yaml / .yml</div>
+              <div class="upload-icon">📂</div>
+              <div class="upload-label">點擊或拖曳檔案</div>
+              <div class="upload-hint">.har　或　.yaml / .yml</div>
             </div>
             <input
-              ref="fileInput"
+              ref="scenarioInput"
               type="file"
-              accept=".yaml,.yml"
+              accept=".har,.yaml,.yml"
               style="display:none"
-              @change="handleFileChange"
+              @change="handleScenarioFileChange"
             />
-            <div v-if="uploadLoading" class="upload-loading">正在解析 Scenario…</div>
+            <div v-if="uploadLoading" class="upload-loading">正在解析，自動偵測登入流程…</div>
             <div v-if="formError" class="error-msg">{{ formError }}</div>
+
+            <div class="har-steps-hint">
+              <div class="har-hint-item">
+                <span class="har-hint-num">HAR</span>
+                <span>DevTools → Network → 空白處右鍵 → Save all as HAR with content</span>
+              </div>
+              <div class="har-hint-item">
+                <span class="har-hint-num">YAML</span>
+                <span>用 <code style="color:var(--accent2)">ramplio import recording.har -o scenario.yaml</code> 產生，或手寫 Scenario</span>
+              </div>
+            </div>
           </template>
 
-          <!-- Scenario loaded: show metadata and Run button -->
+          <!-- Loaded: preview + settings -->
           <template v-else>
             <div class="scenario-panel">
               <div class="scenario-name">{{ scenarioInfo.name }}</div>
-              <div class="scenario-meta">
-                {{ scenarioInfo.stage_count }} 個 stage ·
-                {{ scenarioInfo.max_vus }} max VUs ·
-                {{ fmtElapsed(scenarioInfo.total_sec) }}
-              </div>
               <div class="scenario-steps">
                 <div v-for="(name, i) in scenarioInfo.step_names" :key="i" class="scenario-step">
                   <span class="step-num">{{ i + 1 }}</span>
@@ -1329,10 +1383,25 @@
                 </div>
               </div>
             </div>
+
+            <!-- Override settings -->
+            <div class="scenario-settings">
+              <div class="field-row">
+                <div class="field">
+                  <div class="field-label-row"><label>VUs（虛擬用戶數）</label></div>
+                  <input type="number" v-model.number="scenarioVUs" min="1" max="5000" />
+                </div>
+                <div class="field">
+                  <div class="field-label-row"><label>Duration（總時長）</label></div>
+                  <input type="text" v-model="scenarioDuration" placeholder="例：2m、90s" />
+                </div>
+              </div>
+            </div>
+
             <button class="btn-run" :disabled="submitting" @click="startScenario">
-              {{ submitting ? 'Starting…' : '▶  Run Scenario' }}
+              {{ submitting ? 'Starting…' : '▶  Run' }}
             </button>
-            <button class="btn-clear-scenario" @click="clearScenario">↺  換一個 Scenario</button>
+            <button class="btn-clear-scenario" @click="clearScenario">↺  換一個檔案</button>
             <div v-if="formError" class="error-msg">{{ formError }}</div>
           </template>
         </div>
@@ -1756,10 +1825,16 @@ createApp({
     const urlMode = ref('vu'); // 'vu' or 'rate' — URL mode only
     const submitting = ref(false);
     const uploadLoading = ref(false);
+    const harDragging   = ref(false);
     const formError = ref('');
     const finalResult = ref(null);
     const scenarioInfo = ref(null);
-    const fileInput = ref(null);
+    const fileInput     = ref(null);
+    const harInput      = ref(null);
+    const scenarioInput = ref(null);
+    const scenarioDragging = ref(false);
+    const scenarioVUs      = ref(10);
+    const scenarioDuration = ref('2m');
     const testMode = ref('vu'); // 'vu' | 'rate' | 'guided' — set when test starts
     const testRPS = ref(0);    // set when rate test starts
 
@@ -1911,8 +1986,15 @@ createApp({
         const d = JSON.parse(e.data);
 
         if (d.scenario_info) {
+          const prev = scenarioInfo.value;
           scenarioInfo.value = d.scenario_info;
           setupMode.value = 'scenario';
+          // Sync default override values only on first load
+          if (!prev) {
+            scenarioVUs.value      = d.scenario_info.max_vus || 10;
+            const s = Math.round(d.scenario_info.total_sec || 120);
+            scenarioDuration.value = s % 60 === 0 ? (s / 60) + 'm' : s + 's';
+          }
         }
 
         if (d.guided_profile) {
@@ -1976,13 +2058,17 @@ createApp({
       submitting.value = true;
       formError.value = '';
       try {
+        const payload = {
+          override_vus:      scenarioVUs.value      || 0,
+          override_duration: scenarioDuration.value || '',
+        };
         const res = await fetch('/api/run', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: '{}',
+          body: JSON.stringify(payload),
         });
         if (!res.ok) { formError.value = await res.text(); return; }
-        testVUs.value = scenarioInfo.value?.max_vus ?? 0;
+        testVUs.value = scenarioVUs.value || scenarioInfo.value?.max_vus || 0;
       } catch (err) {
         formError.value = err.message || 'Connection error';
       } finally {
@@ -2058,7 +2144,63 @@ createApp({
       return r === 0 ? m + ' 分鐘' : m + ' 分 ' + r + ' 秒';
     });
 
-    function triggerFileInput() { fileInput.value?.click(); }
+    function triggerFileInput()     { fileInput.value?.click(); }
+    function triggerHarInput()      { harInput.value?.click(); }
+    function triggerScenarioInput() { scenarioInput.value?.click(); }
+
+    async function uploadHAR(file) {
+      uploadLoading.value = true;
+      harDragging.value   = false;
+      formError.value     = '';
+      try {
+        const data = await file.arrayBuffer();
+        const res  = await fetch('/api/import-har', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/octet-stream' },
+          body: data,
+        });
+        if (!res.ok) { formError.value = await res.text(); }
+        // scenarioInfo updated via WebSocket
+      } catch (err) {
+        formError.value = err.message || 'Import failed';
+      } finally {
+        uploadLoading.value = false;
+      }
+    }
+
+    function handleHarFileChange(e) {
+      const file = e.target.files?.[0];
+      if (file) uploadHAR(file);
+      e.target.value = '';
+    }
+
+    function handleHarDrop(e) {
+      harDragging.value = false;
+      const file = e.dataTransfer.files?.[0];
+      if (file) uploadHAR(file);
+    }
+
+    // Unified handler: auto-detects HAR vs YAML by file extension
+    async function uploadScenarioFile(file) {
+      if (!file) return;
+      if (file.name.toLowerCase().endsWith('.har')) {
+        await uploadHAR(file);
+      } else {
+        await uploadScenario(file);
+      }
+    }
+
+    function handleScenarioFileChange(e) {
+      const file = e.target.files?.[0];
+      if (file) uploadScenarioFile(file);
+      e.target.value = '';
+    }
+
+    function handleScenarioDrop(e) {
+      scenarioDragging.value = false;
+      const file = e.dataTransfer.files?.[0];
+      if (file) uploadScenarioFile(file);
+    }
 
     async function uploadScenario(file) {
       uploadLoading.value = true;
@@ -2097,6 +2239,7 @@ createApp({
 
     async function stopTest() { await fetch('/api/stop', { method: 'POST' }); }
     function resetSetup() { view.value = 'setup'; formError.value = ''; }
+
 
     onMounted(async () => { await nextTick(); initCharts(); connect(); });
     onUnmounted(() => { ws?.close(); rpsChart?.destroy(); latChart?.destroy(); });
@@ -2235,11 +2378,15 @@ createApp({
     return {
       view, setupMode, urlMode, submitting, uploadLoading, formError,
       form, finalResult, snap, scenarioInfo, fileInput,
+      harInput, harDragging,
+      scenarioInput, scenarioDragging, scenarioVUs, scenarioDuration,
       testMode, testRPS,
       wizardStep, guided, activeGuidedProfile, wizardDuration,
       rpsCanvas, latCanvas, finalVerdict, nlSummary,
       runTest, startScenario, stopTest, resetSetup,
       triggerFileInput, handleFileChange, handleDrop, clearScenario,
+      triggerHarInput, handleHarFileChange, handleHarDrop,
+      triggerScenarioInput, handleScenarioFileChange, handleScenarioDrop,
       startGuided, wizardNext, loadRetry, shapeLabel,
       fmt1, fmt2, pct,
       latClass, latLabel, errClass, errLabel,

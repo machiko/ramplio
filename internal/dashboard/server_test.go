@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -34,6 +35,13 @@ func (m *mockController) ScenarioInfo() *dashboard.ScenarioMeta         { return
 func (m *mockController) LoadScenario(_ []byte) error                   { return nil }
 func (m *mockController) ActiveGuidedProfile() *dashboard.GuidedProfile { return nil }
 func (m *mockController) Stop()                                         { m.stopCalled = true }
+func (m *mockController) WriteReport(w io.Writer) error {
+	if m.result == nil {
+		return fmt.Errorf("no completed test run")
+	}
+	_, err := io.WriteString(w, "<html>mock report</html>")
+	return err
+}
 func (m *mockController) Start(req dashboard.RunRequest) error {
 	if m.startErr != nil {
 		return m.startErr
@@ -222,4 +230,34 @@ func TestServer_StatusAPI_ReturnsCurrentState(t *testing.T) {
 	result, ok := payload["result"].(map[string]any)
 	require.True(t, ok)
 	assert.InDelta(t, 10.0, result["rps"], 0.01)
+}
+
+func TestServer_ReportAPI_DownloadsHTML(t *testing.T) {
+	res := &dashboard.RunResult{Total: 500, RPS: 25.0}
+	ctrl := &mockController{state: dashboard.StateDone, result: res}
+	srv, _ := newTestServer(t, ctrl)
+
+	resp, err := http.Get(fmt.Sprintf("http://%s/api/report", srv.Addr()))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Contains(t, resp.Header.Get("Content-Type"), "text/html")
+	assert.Contains(t, resp.Header.Get("Content-Disposition"), "attachment")
+	assert.NotEmpty(t, resp.Header.Get("Content-Length"))
+
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	assert.Contains(t, string(body), "<html")
+}
+
+func TestServer_ReportAPI_404WhenNoTestRun(t *testing.T) {
+	ctrl := &mockController{state: dashboard.StateIdle}
+	srv, _ := newTestServer(t, ctrl)
+
+	resp, err := http.Get(fmt.Sprintf("http://%s/api/report", srv.Addr()))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 }

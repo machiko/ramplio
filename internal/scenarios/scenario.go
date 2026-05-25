@@ -12,8 +12,16 @@ type Scenario struct {
 	Stages     []Stage           `yaml:"stages"`
 	Steps      []Step            `yaml:"steps"`
 	Vars       map[string]string `yaml:"vars,omitempty"`
+	VarsFrom   *VarsFrom         `yaml:"vars_from,omitempty"`
 	Thresholds *Thresholds       `yaml:"thresholds,omitempty"`
 	HTTP       *ScenarioHTTP     `yaml:"http,omitempty"`
+}
+
+// VarsFrom loads per-VU data rows from an external CSV or JSON file.
+// Accessible in templates as {{data.column_name}}.
+type VarsFrom struct {
+	File string `yaml:"file"`
+	Mode string `yaml:"mode,omitempty"` // "sequential" (default) or "random"
 }
 
 // StatusCheck holds a status assertion: either an exact code ("200") or a

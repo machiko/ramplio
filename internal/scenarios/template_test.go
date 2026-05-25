@@ -73,6 +73,24 @@ func TestRenderString_NoTokens(t *testing.T) {
 	assert.Equal(t, "plain string", out)
 }
 
+func TestRenderString_Data(t *testing.T) {
+	ctx := &VarContext{Data: map[string]string{"email": "user@example.com", "password": "secret"}}
+	out, err := RenderString("{{data.email}}", ctx)
+	require.NoError(t, err)
+	assert.Equal(t, "user@example.com", out)
+}
+
+func TestRenderString_DataMissing(t *testing.T) {
+	ctx := &VarContext{Data: map[string]string{}}
+	_, err := RenderString("{{data.missing}}", ctx)
+	assert.Error(t, err)
+}
+
+func TestRenderString_DataNilContext(t *testing.T) {
+	_, err := RenderString("{{data.foo}}", nil)
+	assert.Error(t, err)
+}
+
 func TestRenderHeaders(t *testing.T) {
 	ctx := &VarContext{Captures: map[string]string{"token": "tok_xyz"}}
 	headers := map[string]string{

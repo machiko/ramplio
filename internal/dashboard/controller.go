@@ -1,6 +1,10 @@
 package dashboard
 
-import "github.com/ramplio/ramplio/internal/reporter"
+import (
+	"io"
+
+	"github.com/ramplio/ramplio/internal/reporter"
+)
 
 // State is the lifecycle state of a dashboard-controlled load test.
 type State string
@@ -13,13 +17,17 @@ const (
 
 // RunRequest describes a URL-based load test started from the web UI.
 // Either VUs, RPS, or Profile must be set; the three modes are mutually exclusive.
+// OverrideVUs and OverrideDuration are optional and apply only in scenario mode:
+// they rebuild the stages while keeping the imported steps.
 type RunRequest struct {
-	URL      string         `json:"url"`
-	Method   string         `json:"method"`
-	VUs      int            `json:"vus"`
-	RPS      int            `json:"rps"`
-	Duration string         `json:"duration"`
-	Profile  *GuidedProfile `json:"profile,omitempty"` // non-nil → guided wizard mode
+	URL              string         `json:"url"`
+	Method           string         `json:"method"`
+	VUs              int            `json:"vus"`
+	RPS              int            `json:"rps"`
+	Duration         string         `json:"duration"`
+	Profile          *GuidedProfile `json:"profile,omitempty"`
+	OverrideVUs      int            `json:"override_vus,omitempty"`
+	OverrideDuration string         `json:"override_duration,omitempty"`
 }
 
 // RunResult holds aggregate metrics after a test completes.
@@ -66,4 +74,7 @@ type Controller interface {
 	// ActiveGuidedProfile returns the GuidedProfile for the currently running guided test,
 	// or nil when the test was not started via the wizard.
 	ActiveGuidedProfile() *GuidedProfile
+	// WriteReport generates an HTML report for the last completed test and writes it to w.
+	// Returns an error if no test has completed yet.
+	WriteReport(w io.Writer) error
 }

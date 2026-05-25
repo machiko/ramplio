@@ -1,13 +1,16 @@
 package dashboard
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/ramplio/ramplio/internal/importer"
 	"github.com/ramplio/ramplio/internal/metrics"
 )
 
@@ -78,6 +81,8 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/stop", s.handleStop)
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/scenario", s.handleScenario)
+	mux.HandleFunc("/api/import-har", s.handleImportHAR)
+	mux.HandleFunc("/api/report", s.handleReport)
 
 	srv := &http.Server{Handler: mux}
 	s.ctx = ctx
@@ -159,6 +164,28 @@ func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+func (s *Server) handleImportHAR(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	data, err := io.ReadAll(io.LimitReader(r.Body, 10<<20)) // 10 MB
+	if err != nil {
+		http.Error(w, "failed to read body", http.StatusBadRequest)
+		return
+	}
+	yaml, err := importer.ConvertBytes(data, importer.DefaultOptions(), "upload.har")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := s.ctrl.LoadScenario(yaml); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.WriteHeader(http.StatusAccepted)
+}
+
 func (s *Server) handleScenario(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -174,6 +201,26 @@ func (s *Server) handleScenario(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusAccepted)
+}
+
+func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	// Generate into a buffer first so any template error returns a clean HTTP
+	// error before headers are sent. Writing partial HTML to w and then calling
+	// http.Error leaves the browser with an incomplete response that hangs.
+	var buf bytes.Buffer
+	if err := s.ctrl.WriteReport(&buf); err != nil {
+		http.Error(w, "report not available: run a test first", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="ramplio-report.html"`)
+	w.Header().Set("Content-Length", strconv.Itoa(buf.Len()))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(buf.Bytes())
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
