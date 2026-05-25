@@ -1,0 +1,68 @@
+name: 登入後主要功能壓力測試
+
+# 使用前請先執行：
+#   BASE_URL=https://your-site.com \
+#   LOGIN_PATH=/auth/login \
+#   COOKIE_NAME=session \
+#   COUNT=200 \
+#   ./scripts/generate_sessions.sh
+#
+# 然後執行：
+#   go run ./cmd/ramplio run --scenario testdata/post-login-load.yaml
+
+vars:
+  base_url: "https://example.com"
+
+vars_from:
+  file: sessions.csv    # session_cookie,user_id（由 generate_sessions.sh 產生）
+  mode: sequential      # 每個 VU 輪流分配一個 session，CSV 行數需 >= 最大 VU 數
+
+stages:
+  - duration: 30s
+    target: 10           # 緩慢升溫，確認 session 有效
+  - duration: 3m
+    target: 100          # 持續負載；調整此數字 <= sessions.csv 的行數
+  - duration: 30s
+    target: 0
+
+steps:
+  - name: GET /dashboard
+    method: GET
+    url: "{{vars.base_url}}/dashboard"
+    headers:
+      Cookie: "{{data.session_cookie}}"
+    assertions:
+      status: 200
+    group: main_flow
+    pause: 200ms
+
+  - name: GET /api/profile
+    method: GET
+    url: "{{vars.base_url}}/api/profile"
+    headers:
+      Cookie: "{{data.session_cookie}}"
+    assertions:
+      status: 2xx
+    group: api_reads
+
+  - name: POST /api/action
+    method: POST
+    url: "{{vars.base_url}}/api/action"
+    headers:
+      Content-Type: application/json
+      Cookie: "{{data.session_cookie}}"
+    body: '{"user_id": "{{data.user_id}}"}'
+    assertions:
+      status: 2xx
+    group: api_writes
+    pause: 500ms
+
+thresholds:
+  error_rate_pct: 1.0
+  p95_ms: 500
+  steps:
+    "GET /dashboard":
+      p99_ms: 800
+      error_rate_pct: 0.5
+    "POST /api/action":
+      p99_ms: 1000

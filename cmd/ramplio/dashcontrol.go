@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -29,9 +31,13 @@ type dashController struct {
 	snapCache      reporter.LiveSnapshot
 	httpCfg        protocols.HTTPConfig
 	scenarioMeta   *dashboard.ScenarioMeta
-	pendingSteps   []engine.RampStep
-	pendingStages  []scenarios.Stage
-	pendingVars    map[string]string
+	pendingSteps         []engine.RampStep
+	pendingSetupSteps    []engine.RampStep
+	pendingTeardownSteps []engine.RampStep
+	pendingStages        []scenarios.Stage
+	pendingVars          map[string]string
+	pendingDataRows      []map[string]string
+	pendingDataMode      string
 	lastProfile    *dashboard.GuidedProfile // non-nil while a guided test is running
 	lastSummary    metrics.Summary
 	lastSummarySet bool
@@ -56,16 +62,22 @@ func newDashController(httpCfg protocols.HTTPConfig) *dashController {
 // its metadata and start it by sending POST /api/run with an empty body.
 func (c *dashController) setScenario(
 	meta *dashboard.ScenarioMeta,
-	steps []engine.RampStep,
+	steps, setupSteps, teardownSteps []engine.RampStep,
 	stages []scenarios.Stage,
 	vars map[string]string,
+	dataRows []map[string]string,
+	dataMode string,
 ) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.scenarioMeta = meta
 	c.pendingSteps = steps
+	c.pendingSetupSteps = setupSteps
+	c.pendingTeardownSteps = teardownSteps
 	c.pendingStages = stages
 	c.pendingVars = vars
+	c.pendingDataRows = dataRows
+	c.pendingDataMode = dataMode
 }
 
 func (c *dashController) ActiveGuidedProfile() *dashboard.GuidedProfile {
@@ -82,7 +94,8 @@ func (c *dashController) ScenarioInfo() *dashboard.ScenarioMeta {
 
 // LoadScenario parses raw YAML and replaces the active scenario. Rejected while
 // a test is running so the browser always sees a consistent state.
-func (c *dashController) LoadScenario(yaml []byte) error {
+// scenarioDir is used to resolve relative paths in vars_from; pass "" to use cwd.
+func (c *dashController) LoadScenario(yaml []byte, scenarioDir string) error {
 	c.mu.RLock()
 	running := c.state == dashboard.StateRunning
 	c.mu.RUnlock()
@@ -96,6 +109,28 @@ func (c *dashController) LoadScenario(yaml []byte) error {
 	}
 
 	steps, stepNames := buildStepsFromScenario(sc)
+	setupSteps, _ := buildStepsFromScenario(&scenarios.Scenario{Steps: sc.Setup})
+	teardownSteps, _ := buildStepsFromScenario(&scenarios.Scenario{Steps: sc.Teardown})
+
+	var dataRows []map[string]string
+	var dataMode string
+	if sc.VarsFrom != nil && sc.VarsFrom.File != "" {
+		dataFile := sc.VarsFrom.File
+		if !filepath.IsAbs(dataFile) {
+			base := scenarioDir
+			if base == "" {
+				base, _ = os.Getwd()
+			}
+			dataFile = filepath.Join(base, dataFile)
+		}
+		rows, err := scenarios.LoadDataFile(dataFile)
+		if err != nil {
+			return fmt.Errorf("loading data file %q: %w", sc.VarsFrom.File, err)
+		}
+		dataRows = rows
+		dataMode = sc.VarsFrom.Mode
+	}
+
 	maxVUs := maxTarget(sc.Stages)
 	var totalSec float64
 	for _, stg := range sc.Stages {
@@ -110,7 +145,7 @@ func (c *dashController) LoadScenario(yaml []byte) error {
 		SetupCount:    len(sc.Setup),
 		TeardownCount: len(sc.Teardown),
 	}
-	c.setScenario(meta, steps, sc.Stages, sc.Vars)
+	c.setScenario(meta, steps, setupSteps, teardownSteps, sc.Stages, sc.Vars, dataRows, dataMode)
 	return nil
 }
 
@@ -234,10 +269,15 @@ func (c *dashController) Start(req dashboard.RunRequest) error {
 		}
 		col = metrics.NewCollector(maxVUs)
 		ramp = engine.NewRamp(engine.RampConfig{
-			Stages:   stages,
-			Steps:    c.pendingSteps,
-			Vars:     c.pendingVars,
-			Executor: protocols.NewHTTPExecutor(c.httpCfg),
+			Stages:        stages,
+			Steps:         c.pendingSteps,
+			SetupSteps:    c.pendingSetupSteps,
+			TeardownSteps: c.pendingTeardownSteps,
+			Vars:          c.pendingVars,
+			DataRows:      c.pendingDataRows,
+			DataMode:      c.pendingDataMode,
+			Executor:      protocols.NewHTTPExecutor(c.httpCfg),
+			WSExecutor:    protocols.NewWSExecutor(),
 		}, col)
 	} else if req.RPS > 0 {
 		dur, _ := time.ParseDuration(req.Duration) // validated above

@@ -217,7 +217,7 @@ func runDashboard(url, method string, vus, rps int, duration, scenarioFile strin
 		if err != nil {
 			return fmt.Errorf("reading scenario: %w", err)
 		}
-		if err := ctrl.LoadScenario(yamlBytes); err != nil {
+		if err := ctrl.LoadScenario(yamlBytes, filepath.Dir(scenarioFile)); err != nil {
 			return err
 		}
 		meta := ctrl.ScenarioInfo()

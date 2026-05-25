@@ -19,6 +19,7 @@ type Result struct {
 	Error           error
 	Body            []byte
 	ResponseHeaders map[string]string
+	RawSetCookies   []string
 }
 
 type Executor interface {

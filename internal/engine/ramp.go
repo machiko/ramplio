@@ -627,6 +627,14 @@ func applyCaptures(cap *scenarios.Capture, result protocols.Result, ctx *scenari
 	}
 	for key, expr := range cap.Values {
 		switch {
+		case strings.HasPrefix(expr, "cookie:"):
+			cookieName := strings.TrimPrefix(expr, "cookie:")
+			for _, raw := range result.RawSetCookies {
+				if c, err := http.ParseSetCookie(raw); err == nil && c.Name == cookieName {
+					ctx.Captures[key] = c.Value
+					break
+				}
+			}
 		case strings.HasPrefix(expr, "header:"):
 			ctx.Captures[key] = result.ResponseHeaders[http.CanonicalHeaderKey(strings.TrimPrefix(expr, "header:"))]
 		case strings.HasPrefix(expr, "regex:"):

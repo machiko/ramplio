@@ -109,5 +109,6 @@ func (e *HTTPExecutor) Execute(ctx context.Context, req Request) Result {
 		BytesRead:       int64(len(body)),
 		Body:            body,
 		ResponseHeaders: headers,
+		RawSetCookies:   resp.Header["Set-Cookie"],
 	}
 }

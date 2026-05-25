@@ -133,7 +133,7 @@ func (c *benchController) Stop()                                             {}
 func (c *benchController) State() dashboard.State                            { return dashboard.StateRunning }
 func (c *benchController) Result() *dashboard.RunResult                      { return nil }
 func (c *benchController) ScenarioInfo() *dashboard.ScenarioMeta             { return nil }
-func (c *benchController) LoadScenario(_ []byte) error                       { return nil }
+func (c *benchController) LoadScenario(_ []byte, _ string) error                       { return nil }
 func (c *benchController) ActiveGuidedProfile() *dashboard.GuidedProfile     { return nil }
 func (c *benchController) WriteReport(_ io.Writer) error                     { return fmt.Errorf("no report") }
 func (c *benchController) StartDiscover(_ dashboard.DiscoverRequest) error   { return nil }

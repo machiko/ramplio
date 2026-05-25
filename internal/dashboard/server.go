@@ -197,7 +197,7 @@ func (s *Server) handleImportHAR(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if err := s.ctrl.LoadScenario(yaml); err != nil {
+	if err := s.ctrl.LoadScenario(yaml, ""); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -214,7 +214,7 @@ func (s *Server) handleScenario(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to read body", http.StatusBadRequest)
 		return
 	}
-	if err := s.ctrl.LoadScenario(body); err != nil {
+	if err := s.ctrl.LoadScenario(body, ""); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}

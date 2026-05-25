@@ -33,14 +33,14 @@ func TestPrintSummary_ContainsKeyFields(t *testing.T) {
 	assert.Contains(t, out, "10ms")     // min latency
 	assert.Contains(t, out, "500ms")    // max latency
 	assert.Contains(t, out, "2.0%")     // error rate
-	assert.True(t, strings.Contains(out, "Results"))
-	assert.True(t, strings.Contains(out, "Latency"))
-	assert.True(t, strings.Contains(out, "Status"))
+	assert.True(t, strings.Contains(out, "測試結果"))
+	assert.True(t, strings.Contains(out, "延遲分佈"))
+	assert.True(t, strings.Contains(out, "回應狀態"))
 }
 
 func TestPrintSummary_ZeroTotal(t *testing.T) {
 	var buf bytes.Buffer
 	reporter.PrintSummary(&buf, metrics.Summary{})
 	// 不應 panic，輸出結構正常
-	assert.Contains(t, buf.String(), "Results")
+	assert.Contains(t, buf.String(), "測試結果")
 }

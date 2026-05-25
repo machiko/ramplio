@@ -101,8 +101,9 @@ type Controller interface {
 	// ScenarioInfo returns metadata about the loaded YAML scenario, or nil in URL mode.
 	ScenarioInfo() *ScenarioMeta
 	// LoadScenario parses raw YAML content and loads it as the active scenario.
+	// scenarioDir is used to resolve relative paths (e.g. vars_from file); pass "" for cwd.
 	// Returns an error if the YAML is invalid or a test is already running.
-	LoadScenario(yaml []byte) error
+	LoadScenario(yaml []byte, scenarioDir string) error
 	// ActiveGuidedProfile returns the GuidedProfile for the currently running guided test,
 	// or nil when the test was not started via the wizard.
 	ActiveGuidedProfile() *GuidedProfile
