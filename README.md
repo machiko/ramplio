@@ -209,6 +209,156 @@ ramplio run --scenario scenario.yaml
 
 ---
 
+## 需要登入的網站（Login + CAPTCHA）
+
+對有登入保護的網站做壓力測試，主要面對兩種情境：
+
+### 情境 A：測試環境可停用 CAPTCHA（最簡單）
+
+在測試環境關閉或 bypass CAPTCHA，讓每個 VU 在第一個步驟自行登入，session cookie 會自動保存在 VU 的 cookie jar，後續步驟無需手動帶入：
+
+```yaml
+steps:
+  - name: POST /auth/login
+    method: POST
+    url: https://staging.example.com/auth/login
+    headers:
+      Content-Type: application/json
+    body: '{"email":"loadtest@example.com","password":"testpass"}'
+    assertions:
+      status: 200
+    pause: 200ms
+
+  - name: GET /dashboard
+    method: GET
+    url: https://staging.example.com/dashboard
+    assertions:
+      status: 200
+```
+
+若後端回傳的是 JWT 而非 session cookie，用 `capture` 把 token 存起來，後續步驟以 `auth.bearer` 注入：
+
+```yaml
+steps:
+  - name: POST /auth/login
+    method: POST
+    url: https://staging.example.com/auth/login
+    headers:
+      Content-Type: application/json
+    body: '{"email":"loadtest@example.com","password":"testpass"}'
+    assertions:
+      status: 200
+    capture:
+      jwt: "$.access_token"      # JSONPath 從 response body 取出 token
+    pause: 200ms
+
+  - name: GET /dashboard
+    method: GET
+    url: https://staging.example.com/dashboard
+    auth:
+      bearer: "{{capture.jwt}}"  # 自動注入 Authorization: Bearer <token>
+    assertions:
+      status: 200
+```
+
+### 情境 B：生產環境有真實 CAPTCHA（Session Pool 方法）
+
+生產環境不能停用 CAPTCHA 時，在測試執行**前**預先取得 N 組真實 session，以 CSV 分發給各 VU：
+
+**第一步：產生 sessions.csv**
+
+```bash
+BASE_URL=https://example.com \
+COOKIE_NAME=session \
+COUNT=200 \
+./scripts/generate_sessions.sh
+```
+
+腳本輸出 `sessions.csv`（格式：`session_cookie,user_id`）。
+
+**第二步：在 scenario 直接注入 cookie**
+
+```yaml
+name: 登入後功能壓測
+
+vars:
+  base_url: "https://example.com"
+
+vars_from:
+  file: sessions.csv    # session_cookie,user_id
+  mode: sequential      # 每個 VU 分配一組，CSV 行數需 >= 最大 VU 數
+
+stages:
+  - duration: 30s
+    target: 10
+  - duration: 3m
+    target: 100
+  - duration: 30s
+    target: 0
+
+steps:
+  - name: GET /dashboard
+    method: GET
+    url: "{{vars.base_url}}/dashboard"
+    headers:
+      Cookie: "{{data.session_cookie}}"
+    assertions:
+      status: 200
+
+  - name: POST /api/action
+    method: POST
+    url: "{{vars.base_url}}/api/action"
+    headers:
+      Content-Type: application/json
+      Cookie: "{{data.session_cookie}}"
+    body: '{"user_id":"{{data.user_id}}"}'
+    assertions:
+      status: 2xx
+    pause: 500ms
+
+thresholds:
+  error_rate_pct: 1.0
+  p95_ms: 500
+```
+
+```bash
+ramplio run --scenario testdata/post-login-load.yaml
+```
+
+### `capture` 欄位一覽
+
+`capture` 可以從 response 中提取值，供後續步驟以 `{{capture.key}}` 引用：
+
+| 表達式 | 說明 | 範例 |
+|--------|------|------|
+| `$.path.to.value` | JSONPath（從 response body 提取） | `$.data.token` |
+| `header:Name` | 從 response header 提取（取第一個值） | `header:X-Request-Id` |
+| `cookie:name` | 從 `Set-Cookie` 提取特定 cookie 的值 | `cookie:session` |
+| `regex:(pattern)` | 正規表達式（第一個 capture group） | `regex:token=([a-z0-9]+)` |
+
+```yaml
+steps:
+  - name: POST /auth/refresh
+    method: POST
+    url: "{{vars.base_url}}/auth/refresh"
+    headers:
+      Cookie: "{{data.session_cookie}}"
+    capture:
+      new_session: "cookie:session"   # 取出 session cookie 的新值
+    assertions:
+      status: 200
+
+  - name: GET /api/data
+    method: GET
+    url: "{{vars.base_url}}/api/data"
+    headers:
+      Cookie: "session={{capture.new_session}}"
+    assertions:
+      status: 2xx
+```
+
+---
+
 ## 即時網頁儀表板
 
 ```bash

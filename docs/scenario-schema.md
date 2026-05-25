@@ -98,6 +98,94 @@ steps:
 
 ---
 
+## Capture
+
+Extract values from a response and store them in the VU's variable context.
+Captured values are referenced in subsequent steps with `{{capture.key}}`.
+
+```yaml
+capture:
+  key: expression
+```
+
+| Expression prefix | What it extracts | Example |
+|-------------------|-----------------|---------|
+| `$.path` | JSONPath from response body | `$.data.token` |
+| `header:Name` | First value of a response header | `header:X-Request-Id` |
+| `cookie:name` | Value of a specific `Set-Cookie` cookie | `cookie:session` |
+| `regex:(pat)` | First capture group of a regex on the body | `regex:token=([a-z0-9]+)` |
+
+Captures accumulate within a VU for the lifetime of the test. Each VU has its
+own isolated capture state; values do not leak between VUs.
+
+**Example — login and reuse JWT:**
+
+```yaml
+steps:
+  - name: POST /auth/login
+    method: POST
+    url: https://api.example.com/auth/login
+    headers:
+      Content-Type: application/json
+    body: '{"email":"user@example.com","password":"pass"}'
+    assertions:
+      status: 200
+    capture:
+      jwt: "$.access_token"
+
+  - name: GET /profile
+    method: GET
+    url: https://api.example.com/profile
+    auth:
+      bearer: "{{capture.jwt}}"
+    assertions:
+      status: 200
+```
+
+**Example — extract and reuse a session cookie:**
+
+```yaml
+steps:
+  - name: POST /auth/refresh
+    method: POST
+    url: https://example.com/auth/refresh
+    headers:
+      Cookie: "session={{data.session_cookie}}"
+    capture:
+      new_session: "cookie:session"
+    assertions:
+      status: 200
+
+  - name: GET /dashboard
+    method: GET
+    url: https://example.com/dashboard
+    headers:
+      Cookie: "session={{capture.new_session}}"
+    assertions:
+      status: 200
+```
+
+---
+
+## Auth
+
+Shorthand for injecting authentication headers. Applied after `headers`, so it
+overrides any `Authorization` header set explicitly.
+
+```yaml
+auth:
+  bearer: "{{capture.jwt}}"   # injects: Authorization: Bearer <value>
+```
+
+```yaml
+auth:
+  basic:
+    username: admin
+    password: "{{env \"ADMIN_PASS\"}}"   # injects: Authorization: Basic <base64>
+```
+
+---
+
 ## Thresholds
 
 Thresholds define pass/fail criteria evaluated after the test finishes.
