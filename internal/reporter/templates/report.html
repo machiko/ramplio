@@ -80,6 +80,31 @@
     .badge.warn{ background: #422006; color: #fbbf24; }
     .badge.bad { background: #450a0a; color: #f87171; }
 
+    /* ── Verdict card ─────────────────────────────────────── */
+    .verdict {
+      display: flex; align-items: flex-start; gap: 1.25rem;
+      border-radius: 12px; padding: 1.25rem 1.5rem; margin-bottom: 1.5rem;
+      border-width: 1px; border-style: solid;
+    }
+    .verdict.pass { background: #052e16; border-color: #166534; }
+    .verdict.warn { background: #422006; border-color: #92400e; }
+    .verdict.fail { background: #450a0a; border-color: #991b1b; }
+    .verdict-icon {
+      font-size: 2rem; line-height: 1; flex-shrink: 0; margin-top: 0.1rem;
+    }
+    .verdict.pass .verdict-icon { color: #34d399; }
+    .verdict.warn .verdict-icon { color: #fbbf24; }
+    .verdict.fail .verdict-icon { color: #f87171; }
+    .verdict-label {
+      font-weight: 700; font-size: 1rem; margin-bottom: 0.6rem;
+    }
+    .verdict.pass .verdict-label { color: #34d399; }
+    .verdict.warn .verdict-label { color: #fbbf24; }
+    .verdict.fail .verdict-label { color: #f87171; }
+    .verdict-lines { display: flex; flex-direction: column; gap: 0.25rem; }
+    .verdict-lines span { font-size: 0.875rem; color: #cbd5e1; }
+    .verdict-lines span::before { font-weight: 600; color: #94a3b8; margin-right: 0.3rem; }
+
     /* ── Summary table ────────────────────────────────────── */
     .summary-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
     .summary-table td { padding: 0.5rem 0; border-bottom: 1px solid #1a2540; }
@@ -99,6 +124,22 @@
     &nbsp;·&nbsp;
     {{printf "%.1f" .RPS}} req/s
   </p>
+</div>
+
+<!-- Verdict card -->
+<div class="verdict {{.Verdict.Level}}">
+  <div class="verdict-icon">{{if eq .Verdict.Level "pass"}}✓{{else if eq .Verdict.Level "warn"}}⚠{{else}}✗{{end}}</div>
+  <div>
+    <div class="verdict-label">
+      {{if eq .Verdict.Level "pass"}}PASS{{else if eq .Verdict.Level "warn"}}WARN{{else}}FAIL{{end}}
+      — {{.Verdict.Headline}}
+    </div>
+    <div class="verdict-lines">
+      <span><strong>Speed:</strong> {{.Verdict.SpeedLine}}</span>
+      <span><strong>Reliability:</strong> {{.Verdict.ReliabilityLine}}</span>
+      {{if .Verdict.BottleneckLine}}<span><strong>Bottleneck:</strong> {{.Verdict.BottleneckLine}}</span>{{end}}
+    </div>
+  </div>
 </div>
 
 <!-- KPI row -->

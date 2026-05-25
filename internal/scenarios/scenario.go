@@ -8,13 +8,16 @@ import (
 )
 
 type Scenario struct {
-	Name       string            `yaml:"name"`
-	Stages     []Stage           `yaml:"stages"`
-	Steps      []Step            `yaml:"steps"`
-	Vars       map[string]string `yaml:"vars,omitempty"`
-	VarsFrom   *VarsFrom         `yaml:"vars_from,omitempty"`
-	Thresholds *Thresholds       `yaml:"thresholds,omitempty"`
-	HTTP       *ScenarioHTTP     `yaml:"http,omitempty"`
+	Name           string            `yaml:"name"`
+	Stages         []Stage           `yaml:"stages"`
+	Steps          []Step            `yaml:"steps"`
+	Setup          []Step            `yaml:"setup,omitempty"`
+	Teardown       []Step            `yaml:"teardown,omitempty"`
+	Vars           map[string]string `yaml:"vars,omitempty"`
+	VarsFrom       *VarsFrom         `yaml:"vars_from,omitempty"`
+	Thresholds     *Thresholds       `yaml:"thresholds,omitempty"`
+	HTTP           *ScenarioHTTP     `yaml:"http,omitempty"`
+	CircuitBreaker *CircuitBreakerConfig `yaml:"circuit_breaker,omitempty"`
 }
 
 // VarsFrom loads per-VU data rows from an external CSV or JSON file.
@@ -90,18 +93,33 @@ type Stage struct {
 }
 
 type Step struct {
-	Name       string            `yaml:"name"`
-	Method     string            `yaml:"method"`
-	URL        string            `yaml:"url"`
-	Headers    map[string]string `yaml:"headers,omitempty"`
-	Body       string            `yaml:"body,omitempty"`
+	Name     string            `yaml:"name"`
+	Method   string            `yaml:"method"`
+	URL      string            `yaml:"url"`
+	Headers  map[string]string `yaml:"headers,omitempty"`
+	Body     string            `yaml:"body,omitempty"`
 	// Pause specifies think time after this step (e.g. "500ms", "1s").
 	// Parsed from PauseRaw by the scenario parser.
-	PauseRaw   string            `yaml:"pause,omitempty"`
-	Pause      time.Duration     `yaml:"-"`
-	Auth       *Auth             `yaml:"auth,omitempty"`
-	Capture    *Capture          `yaml:"capture,omitempty"`
-	Assertions *Assertions       `yaml:"assertions,omitempty"`
+	PauseRaw   string        `yaml:"pause,omitempty"`
+	Pause      time.Duration `yaml:"-"`
+	Auth       *Auth         `yaml:"auth,omitempty"`
+	Capture    *Capture      `yaml:"capture,omitempty"`
+	Assertions *Assertions   `yaml:"assertions,omitempty"`
+	Retry      *RetryConfig  `yaml:"retry,omitempty"`
+
+	// Group assigns this step to a named group for aggregate reporting.
+	Group string `yaml:"group,omitempty"`
+
+	// Protocol selects the executor: "http" (default) or "websocket".
+	Protocol  string `yaml:"protocol,omitempty"`
+	WSMessage string `yaml:"ws_message,omitempty"` // text frame to send (websocket only)
+	WSExpect  string `yaml:"ws_expect,omitempty"`  // substring the server response must contain
+
+	// If is a template expression; the step is skipped when it evaluates to false.
+	// Supported forms: `{{capture.X}} == ""`, `{{capture.X}} != ""`, `{{capture.X}} == "value"`
+	If string `yaml:"if,omitempty"`
+	// Loop repeats the step N times per VU per iteration (0 or 1 = execute once).
+	Loop int `yaml:"loop,omitempty"`
 }
 
 // Auth provides authentication helpers that inject the appropriate header automatically.
@@ -136,7 +154,32 @@ type Assertions struct {
 	HeaderEquals map[string]string `yaml:"header_equals,omitempty"`
 }
 
-type Thresholds struct {
-	ErrorRatePct *float64 `yaml:"error_rate_pct,omitempty"`
+// StepThresholds defines per-step pass/fail criteria.
+type StepThresholds struct {
+	P95Ms        *float64 `yaml:"p95_ms,omitempty"`
 	P99Ms        *float64 `yaml:"p99_ms,omitempty"`
+	ErrorRatePct *float64 `yaml:"error_rate_pct,omitempty"`
+}
+
+type Thresholds struct {
+	ErrorRatePct  *float64                   `yaml:"error_rate_pct,omitempty"`
+	P50Ms         *float64                   `yaml:"p50_ms,omitempty"`
+	P90Ms         *float64                   `yaml:"p90_ms,omitempty"`
+	P95Ms         *float64                   `yaml:"p95_ms,omitempty"`
+	P99Ms         *float64                   `yaml:"p99_ms,omitempty"`
+	MaxMs         *float64                   `yaml:"max_ms,omitempty"`
+	ThroughputRps *float64                   `yaml:"throughput_rps,omitempty"`
+	Steps         map[string]*StepThresholds `yaml:"steps,omitempty"`
+}
+
+// RetryConfig controls per-step retry behaviour.
+type RetryConfig struct {
+	Count     int   `yaml:"count"`               // max retry attempts after first failure
+	On        []int `yaml:"on,omitempty"`         // HTTP status codes that trigger a retry (empty = any error)
+	BackoffMs int   `yaml:"backoff_ms,omitempty"` // fixed delay between retries
+}
+
+// CircuitBreakerConfig stops the test when too many consecutive failures occur.
+type CircuitBreakerConfig struct {
+	ConsecutiveFailures int `yaml:"consecutive_failures"` // trip after N consecutive errors
 }

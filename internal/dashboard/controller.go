@@ -47,11 +47,13 @@ type RunResult struct {
 
 // ScenarioMeta holds display metadata for a YAML scenario loaded via --scenario flag.
 type ScenarioMeta struct {
-	Name       string   `json:"name"`
-	StepNames  []string `json:"step_names"`
-	MaxVUs     int      `json:"max_vus"`
-	TotalSec   float64  `json:"total_sec"`
-	StageCount int      `json:"stage_count"`
+	Name          string   `json:"name"`
+	StepNames     []string `json:"step_names"`
+	MaxVUs        int      `json:"max_vus"`
+	TotalSec      float64  `json:"total_sec"`
+	StageCount    int      `json:"stage_count"`
+	SetupCount    int      `json:"setup_count,omitempty"`
+	TeardownCount int      `json:"teardown_count,omitempty"`
 }
 
 // Controller extends LiveProvider with start/stop lifecycle control for the web dashboard.

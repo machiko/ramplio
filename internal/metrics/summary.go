@@ -18,6 +18,8 @@ type Summary struct {
 
 	// Per-step breakdown; nil when no step names were recorded (single URL mode).
 	Steps []StepSummary `json:"-"`
+	// Per-group breakdown; nil when no group names were recorded.
+	Groups []GroupSummary `json:"-"`
 
 	sumLatency time.Duration
 }

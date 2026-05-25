@@ -33,6 +33,7 @@ func newRunCmd() *cobra.Command {
 		scenarioFile   string
 		outputFile     string
 		reportFile     string
+		sinkDSNs       []string
 		dashboardOn    bool
 		dashboardPort  int
 		dnsCache       bool
@@ -69,7 +70,15 @@ func newRunCmd() *cobra.Command {
 
 			// CLI mode: --url or --scenario required.
 			if scenarioFile == "" && url == "" {
-				return fmt.Errorf("either --url or --scenario is required")
+				fmt.Fprintln(os.Stderr, `No target specified. Quick start:
+
+  ramplio run --url https://example.com                     test with 1 user for 30 seconds
+  ramplio run --url https://example.com --vus 50 -d 1m      50 concurrent users for 1 minute
+  ramplio run --scenario my-test.yaml                       run a YAML scenario file
+  ramplio run --dashboard                                   open the visual control panel
+
+New to load testing? Run:  ramplio run --dashboard`)
+				return fmt.Errorf("--url or --scenario is required")
 			}
 			if scenarioFile != "" && url != "" {
 				return fmt.Errorf("--url and --scenario are mutually exclusive")
@@ -86,6 +95,9 @@ func newRunCmd() *cobra.Command {
 			} else if rps > 0 {
 				sum, err = runRPS(url, method, rps, duration, headers, body, httpCfg)
 			} else {
+				if !cmd.Flags().Changed("vus") {
+					fmt.Println("Tip: running with 1 virtual user (default). Use --vus 50 to simulate more traffic.")
+				}
 				sum, err = runURL(url, method, vus, duration, headers, body, httpCfg)
 			}
 			if err != nil {
@@ -94,6 +106,22 @@ func newRunCmd() *cobra.Command {
 
 			reporter.PrintSummary(os.Stdout, sum)
 			thresholdMsg := checkThresholds(sum, thresholds)
+
+			scenarioName := strings.TrimSuffix(scenarioFile, filepath.Ext(scenarioFile))
+			if scenarioName == "" {
+				scenarioName = url
+			}
+			for _, dsn := range sinkDSNs {
+				sink, sinkErr := reporter.ParseSink(dsn)
+				if sinkErr != nil {
+					fmt.Fprintf(os.Stderr, "warning: sink %q: %v\n", dsn, sinkErr)
+					continue
+				}
+				if writeErr := sink.Write(sum, scenarioName); writeErr != nil {
+					fmt.Fprintf(os.Stderr, "warning: sink %q write: %v\n", dsn, writeErr)
+				}
+				_ = sink.Close()
+			}
 
 			if outputFile != "" {
 				name := strings.TrimSuffix(scenarioFile, filepath.Ext(scenarioFile))
@@ -122,10 +150,14 @@ func newRunCmd() *cobra.Command {
 			}
 
 			if thresholdMsg != "" {
-				fmt.Fprintf(os.Stderr, "\nThreshold exceeded: %s\n", thresholdMsg)
+				fmt.Fprintf(os.Stderr, "\n✗ Threshold exceeded: %s\n", thresholdMsg)
+				fmt.Fprintln(os.Stderr, "\n  Common causes: server overloaded, API rate limit, auth expired, slow database")
+				fmt.Fprintln(os.Stderr, "  Try:  reduce --vus  ·  check server logs  ·  run with --dashboard for live view")
 				os.Exit(1)
 			}
 			if sum.ErrorRate() > 0 && thresholds == nil {
+				fmt.Fprintf(os.Stderr, "\nWarning: %.1f%% error rate detected (%d errors).\n", sum.ErrorRate(), sum.Errors)
+				fmt.Fprintln(os.Stderr, "  Add thresholds to a scenario YAML for pass/fail control: ramplio run --scenario my.yaml")
 				os.Exit(1)
 			}
 			return nil
@@ -147,6 +179,7 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&dnsCache, "dns-cache", false, "Cache DNS lookups to reduce latency measurement noise")
 	cmd.Flags().StringVar(&prometheusAddr, "prometheus", "", "Expose Prometheus metrics on this address (e.g. :9100)")
 	cmd.Flags().StringVar(&requestTimeout, "timeout", "", "Per-request timeout (e.g. 10s, 500ms); overrides scenario default")
+	cmd.Flags().StringArrayVar(&sinkDSNs, "sink", nil, "Push results to an external sink (repeatable): csv:<file>  influxdb://host/bucket?token=T")
 
 	return cmd
 }
@@ -261,26 +294,9 @@ func runScenario(path, promAddr string, httpCfg protocols.HTTPConfig) (metrics.S
 		}
 	}
 
-	steps := make([]engine.RampStep, len(sc.Steps))
-	for i, s := range sc.Steps {
-		name := s.Name
-		if name == "" {
-			name = strings.ToUpper(s.Method) + " " + s.URL
-		}
-		steps[i] = engine.RampStep{
-			Name: name,
-			Request: protocols.Request{
-				Method:  strings.ToUpper(s.Method),
-				URL:     s.URL,
-				Headers: s.Headers,
-				Body:    []byte(s.Body),
-			},
-			Assertions: s.Assertions,
-			Auth:       s.Auth,
-			Capture:    s.Capture,
-			Pause:      s.Pause,
-		}
-	}
+	steps := scenarioStepsToRamp(sc.Steps)
+	setupSteps := scenarioStepsToRamp(sc.Setup)
+	teardownSteps := scenarioStepsToRamp(sc.Teardown)
 
 	var dataRows []map[string]string
 	var dataMode string
@@ -301,12 +317,16 @@ func runScenario(path, promAddr string, httpCfg protocols.HTTPConfig) (metrics.S
 	maxVUs := maxTarget(sc.Stages)
 	col := metrics.NewCollector(maxVUs)
 	eng := engine.NewRamp(engine.RampConfig{
-		Stages:   sc.Stages,
-		Steps:    steps,
-		Vars:     sc.Vars,
-		DataRows: dataRows,
-		DataMode: dataMode,
-		Executor: protocols.NewHTTPExecutor(httpCfg),
+		Stages:         sc.Stages,
+		Steps:          steps,
+		SetupSteps:     setupSteps,
+		TeardownSteps:  teardownSteps,
+		Vars:           sc.Vars,
+		DataRows:       dataRows,
+		DataMode:       dataMode,
+		Executor:       protocols.NewHTTPExecutor(httpCfg),
+		WSExecutor:     protocols.NewWSExecutor(),
+		CircuitBreaker: sc.CircuitBreaker,
 	}, col)
 
 	fmt.Printf("Running scenario %q  (%d stages, %d step(s))\n\n", sc.Name, len(sc.Stages), len(sc.Steps))
@@ -436,10 +456,86 @@ func checkThresholds(sum metrics.Summary, t *scenarios.Thresholds) string {
 	if t.ErrorRatePct != nil && sum.ErrorRate() > *t.ErrorRatePct {
 		return fmt.Sprintf("error_rate %.2f%% > %.2f%%", sum.ErrorRate(), *t.ErrorRatePct)
 	}
+	if t.P50Ms != nil && float64(sum.P50.Milliseconds()) > *t.P50Ms {
+		return fmt.Sprintf("p50 %dms > %.0fms", sum.P50.Milliseconds(), *t.P50Ms)
+	}
+	if t.P90Ms != nil && float64(sum.P90.Milliseconds()) > *t.P90Ms {
+		return fmt.Sprintf("p90 %dms > %.0fms", sum.P90.Milliseconds(), *t.P90Ms)
+	}
+	if t.P95Ms != nil && float64(sum.P95.Milliseconds()) > *t.P95Ms {
+		return fmt.Sprintf("p95 %dms > %.0fms", sum.P95.Milliseconds(), *t.P95Ms)
+	}
 	if t.P99Ms != nil && float64(sum.P99.Milliseconds()) > *t.P99Ms {
 		return fmt.Sprintf("p99 %dms > %.0fms", sum.P99.Milliseconds(), *t.P99Ms)
 	}
+	if t.MaxMs != nil && float64(sum.MaxLatency.Milliseconds()) > *t.MaxMs {
+		return fmt.Sprintf("max %dms > %.0fms", sum.MaxLatency.Milliseconds(), *t.MaxMs)
+	}
+	if t.ThroughputRps != nil && sum.RPS() < *t.ThroughputRps {
+		return fmt.Sprintf("throughput %.2f rps < %.2f rps", sum.RPS(), *t.ThroughputRps)
+	}
+	for stepName, st := range t.Steps {
+		for _, ss := range sum.Steps {
+			if ss.Name != stepName {
+				continue
+			}
+			if st.P95Ms != nil && float64(ss.P95.Milliseconds()) > *st.P95Ms {
+				return fmt.Sprintf("step %q p95 %dms > %.0fms", stepName, ss.P95.Milliseconds(), *st.P95Ms)
+			}
+			if st.P99Ms != nil && float64(ss.P99.Milliseconds()) > *st.P99Ms {
+				return fmt.Sprintf("step %q p99 %dms > %.0fms", stepName, ss.P99.Milliseconds(), *st.P99Ms)
+			}
+			if st.ErrorRatePct != nil && ss.Total > 0 {
+				errRate := float64(ss.Errors) / float64(ss.Total) * 100
+				if errRate > *st.ErrorRatePct {
+					return fmt.Sprintf("step %q error_rate %.2f%% > %.2f%%", stepName, errRate, *st.ErrorRatePct)
+				}
+			}
+		}
+	}
 	return ""
+}
+
+// scenarioStepsToRamp converts a slice of scenario steps to engine.RampStep values.
+func scenarioStepsToRamp(steps []scenarios.Step) []engine.RampStep {
+	out := make([]engine.RampStep, len(steps))
+	for i, s := range steps {
+		name := s.Name
+		if name == "" {
+			name = strings.ToUpper(s.Method) + " " + s.URL
+		}
+		hdrs := s.Headers
+		if hdrs == nil {
+			hdrs = make(map[string]string)
+		}
+		// Inject WS expect as a synthetic header so WSExecutor can check it.
+		if strings.EqualFold(s.Protocol, "websocket") && s.WSExpect != "" {
+			hdrs["X-WS-Expect"] = s.WSExpect
+		}
+		body := []byte(s.Body)
+		if strings.EqualFold(s.Protocol, "websocket") && s.WSMessage != "" && s.Body == "" {
+			body = []byte(s.WSMessage)
+		}
+		out[i] = engine.RampStep{
+			Name: name,
+			Request: protocols.Request{
+				Method:  strings.ToUpper(s.Method),
+				URL:     s.URL,
+				Headers: hdrs,
+				Body:    body,
+			},
+			Assertions: s.Assertions,
+			Auth:       s.Auth,
+			Capture:    s.Capture,
+			Retry:      s.Retry,
+			Pause:      s.Pause,
+			Group:      s.Group,
+			Protocol:   s.Protocol,
+			If:         s.If,
+			Loop:       s.Loop,
+		}
+	}
+	return out
 }
 
 func parseHeaders(raw []string) map[string]string {

@@ -94,6 +94,36 @@ func resolveToken(token string, ctx *VarContext) (string, error) {
 	}
 }
 
+// EvalCondition evaluates a simple boolean expression used in step `if:` fields.
+// The expression is first rendered through the template engine, then evaluated.
+// Supported forms (after rendering):
+//
+//	<value> == ""      → true when value is empty
+//	<value> != ""      → true when value is not empty
+//	<value> == "x"     → true when value equals x
+//	<value> != "x"     → true when value does not equal x
+//
+// Returns true when the expression cannot be parsed, so unknown conditions do not
+// accidentally skip steps.
+func EvalCondition(expr string, ctx *VarContext) bool {
+	rendered, err := RenderString(expr, ctx)
+	if err != nil {
+		return true // render failure → don't skip
+	}
+	// Try `LHS == RHS` and `LHS != RHS`.
+	if idx := strings.Index(rendered, " != "); idx >= 0 {
+		lhs := strings.TrimSpace(rendered[:idx])
+		rhs := strings.Trim(strings.TrimSpace(rendered[idx+4:]), `"`)
+		return lhs != rhs
+	}
+	if idx := strings.Index(rendered, " == "); idx >= 0 {
+		lhs := strings.TrimSpace(rendered[:idx])
+		rhs := strings.Trim(strings.TrimSpace(rendered[idx+4:]), `"`)
+		return lhs == rhs
+	}
+	return true
+}
+
 // RenderHeaders renders all header values in the map, returning a new map.
 func RenderHeaders(headers map[string]string, ctx *VarContext) (map[string]string, error) {
 	if len(headers) == 0 {

@@ -2,6 +2,7 @@ package reporter
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"time"
 
@@ -20,6 +21,16 @@ type Report struct {
 	BytesIn     int64        `json:"bytes_in"`
 	Latency     LatencyMs    `json:"latency"`
 	Steps       []StepReport `json:"steps,omitempty"`
+	Verdict     Verdict      `json:"verdict"`
+}
+
+// Verdict is a plain-language interpretation of test results for non-technical readers.
+type Verdict struct {
+	Level           string `json:"level"`                      // "pass", "warn", "fail"
+	Headline        string `json:"headline"`
+	SpeedLine       string `json:"speed"`
+	ReliabilityLine string `json:"reliability"`
+	BottleneckLine  string `json:"bottleneck,omitempty"`
 }
 
 type LatencyMs struct {
@@ -41,6 +52,52 @@ type StepReport struct {
 	P50Ms     int64   `json:"p50_ms"`
 	P90Ms     int64   `json:"p90_ms"`
 	P99Ms     int64   `json:"p99_ms"`
+}
+
+func computeVerdict(r Report) Verdict {
+	level := "pass"
+	headline := "Your API handled the load well."
+	if r.ErrorRate >= 5.0 || r.Latency.P99Ms >= 1000 {
+		level = "fail"
+		headline = "Your API struggled under this load."
+	} else if r.ErrorRate >= 1.0 || r.Latency.P99Ms >= 500 {
+		level = "warn"
+		headline = "Your API performed acceptably, with some concerns."
+	}
+
+	speedLine := fmt.Sprintf(
+		"Half your users got a response in %dms. 99%% received one within %dms.",
+		r.Latency.P50Ms, r.Latency.P99Ms,
+	)
+
+	var reliabilityLine string
+	switch {
+	case r.ErrorRate == 0:
+		reliabilityLine = "All requests succeeded — no errors."
+	case r.ErrorRate < 0.1:
+		reliabilityLine = fmt.Sprintf("Roughly 1 in %d requests failed (%.2f%%).", int(100.0/r.ErrorRate), r.ErrorRate)
+	default:
+		reliabilityLine = fmt.Sprintf("%.1f%% of requests failed (%d errors).", r.ErrorRate, r.Errors)
+	}
+
+	var bottleneckLine string
+	if len(r.Steps) > 1 {
+		var slowest StepReport
+		for i, s := range r.Steps {
+			if i == 0 || s.P99Ms > slowest.P99Ms {
+				slowest = s
+			}
+		}
+		bottleneckLine = fmt.Sprintf(`Slowest step: "%s" (%dms p99).`, slowest.Name, slowest.P99Ms)
+	}
+
+	return Verdict{
+		Level:           level,
+		Headline:        headline,
+		SpeedLine:       speedLine,
+		ReliabilityLine: reliabilityLine,
+		BottleneckLine:  bottleneckLine,
+	}
 }
 
 // SummaryToReport converts a metrics.Summary to a serializable Report.
@@ -78,6 +135,7 @@ func SummaryToReport(sum metrics.Summary) Report {
 			P99Ms:     s.P99.Milliseconds(),
 		})
 	}
+	r.Verdict = computeVerdict(r)
 	return r
 }
 

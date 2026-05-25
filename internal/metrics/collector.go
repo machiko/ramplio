@@ -14,6 +14,17 @@ type StepSummary struct {
 	Errors int64
 	P50    time.Duration
 	P90    time.Duration
+	P95    time.Duration
+	P99    time.Duration
+}
+
+// GroupSummary holds aggregated metrics across all steps in a named group.
+type GroupSummary struct {
+	Name   string
+	Total  int64
+	Errors int64
+	P50    time.Duration
+	P95    time.Duration
 	P99    time.Duration
 }
 
@@ -37,6 +48,10 @@ type Collector struct {
 	stepHists map[string]*hdrhistogram.Histogram
 	stepSums  map[string]Summary
 	stepOrder []string // insertion-ordered step names for stable display
+	// Per-group tracking; only populated when samples carry a non-empty Group.
+	groupHists map[string]*hdrhistogram.Histogram
+	groupSums  map[string]Summary
+	groupOrder []string // insertion-ordered group names for stable display
 }
 
 func NewCollector(maxVUs int) *Collector {
@@ -44,13 +59,15 @@ func NewCollector(maxVUs int) *Collector {
 		maxVUs = 1
 	}
 	c := &Collector{
-		ch:        make(chan Sample, maxVUs*bufMultiplier),
-		quit:      make(chan struct{}),
-		stopped:   make(chan struct{}),
-		hist:      hdrhistogram.New(histMinNs, histMaxNs, histSigFigs),
-		startedAt: time.Now(),
-		stepHists: make(map[string]*hdrhistogram.Histogram),
-		stepSums:  make(map[string]Summary),
+		ch:         make(chan Sample, maxVUs*bufMultiplier),
+		quit:       make(chan struct{}),
+		stopped:    make(chan struct{}),
+		hist:       hdrhistogram.New(histMinNs, histMaxNs, histSigFigs),
+		startedAt:  time.Now(),
+		stepHists:  make(map[string]*hdrhistogram.Histogram),
+		stepSums:   make(map[string]Summary),
+		groupHists: make(map[string]*hdrhistogram.Histogram),
+		groupSums:  make(map[string]Summary),
 	}
 	go c.aggregate()
 	return c
@@ -88,11 +105,27 @@ func (c *Collector) Stop() Summary {
 			if hist.TotalCount() > 0 {
 				ss.P50 = nsToD(hist.ValueAtQuantile(50))
 				ss.P90 = nsToD(hist.ValueAtQuantile(90))
+				ss.P95 = nsToD(hist.ValueAtQuantile(95))
 				ss.P99 = nsToD(hist.ValueAtQuantile(99))
 			}
 			steps = append(steps, ss)
 		}
 		c.sum.Steps = steps
+	}
+	if len(c.groupOrder) > 0 {
+		groups := make([]GroupSummary, 0, len(c.groupOrder))
+		for _, name := range c.groupOrder {
+			hist := c.groupHists[name]
+			sum := c.groupSums[name]
+			gs := GroupSummary{Name: name, Total: sum.Total, Errors: sum.Errors}
+			if hist.TotalCount() > 0 {
+				gs.P50 = nsToD(hist.ValueAtQuantile(50))
+				gs.P95 = nsToD(hist.ValueAtQuantile(95))
+				gs.P99 = nsToD(hist.ValueAtQuantile(99))
+			}
+			groups = append(groups, gs)
+		}
+		c.sum.Groups = groups
 	}
 	return c.sum
 }
@@ -159,6 +192,18 @@ func (c *Collector) recordSample(s Sample) {
 			_ = c.stepHists[s.StepName].RecordValue(ns)
 		}
 	}
+	if s.Group != "" {
+		if _, ok := c.groupHists[s.Group]; !ok {
+			c.groupHists[s.Group] = hdrhistogram.New(histMinNs, histMaxNs, histSigFigs)
+			c.groupOrder = append(c.groupOrder, s.Group)
+		}
+		gsum := c.groupSums[s.Group]
+		gsum.record(s)
+		c.groupSums[s.Group] = gsum
+		if ns := int64(s.Latency); ns > 0 {
+			_ = c.groupHists[s.Group].RecordValue(ns)
+		}
+	}
 }
 
 // LiveStepMetrics returns a snapshot of per-step metrics in scenario step order.
@@ -181,9 +226,32 @@ func (c *Collector) LiveStepMetrics() []StepSummary {
 		if hist.TotalCount() > 0 {
 			ss.P50 = nsToD(hist.ValueAtQuantile(50))
 			ss.P90 = nsToD(hist.ValueAtQuantile(90))
+			ss.P95 = nsToD(hist.ValueAtQuantile(95))
 			ss.P99 = nsToD(hist.ValueAtQuantile(99))
 		}
 		result = append(result, ss)
+	}
+	return result
+}
+
+// LiveGroupMetrics returns a snapshot of per-group metrics.
+func (c *Collector) LiveGroupMetrics() []GroupSummary {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if len(c.groupOrder) == 0 {
+		return nil
+	}
+	result := make([]GroupSummary, 0, len(c.groupOrder))
+	for _, name := range c.groupOrder {
+		hist := c.groupHists[name]
+		sum := c.groupSums[name]
+		gs := GroupSummary{Name: name, Total: sum.Total, Errors: sum.Errors}
+		if hist.TotalCount() > 0 {
+			gs.P50 = nsToD(hist.ValueAtQuantile(50))
+			gs.P95 = nsToD(hist.ValueAtQuantile(95))
+			gs.P99 = nsToD(hist.ValueAtQuantile(99))
+		}
+		result = append(result, gs)
 	}
 	return result
 }

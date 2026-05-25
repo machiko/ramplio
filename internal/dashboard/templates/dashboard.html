@@ -4,30 +4,37 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Ramplio</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
   <script src="https://unpkg.com/vue@3.5/dist/vue.global.prod.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <style>
     :root {
-      --bg:      #0f1117;
-      --surface: #161b27;
-      --card:    #1e2330;
-      --border:  #2d3748;
-      --accent:  #7c3aed;
-      --accent2: #a78bfa;
-      --text:    #e2e8f0;
-      --muted:   #64748b;
-      --green:   #34d399;
-      --amber:   #fbbf24;
-      --red:     #f87171;
-      --blue:    #60a5fa;
+      --bg:        #0f1117;
+      --surface:   #161b27;
+      --card:      #1e2330;
+      --border:    #2d3748;
+      --accent:    #7c3aed;
+      --accent2:   #a78bfa;
+      --text:      #e2e8f0;
+      --muted:     #64748b;
+      --green:     #34d399;
+      --amber:     #fbbf24;
+      --red:       #f87171;
+      --blue:      #60a5fa;
+      --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
 
-      --radius:  8px;
-      --input-h: 40px;
+      --radius:    8px;
+      --input-h:   40px;
     }
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; }
     body {
       background: var(--bg);
+      background-image:
+        radial-gradient(ellipse 80% 50% at 50% -10%, rgba(124,58,237,0.18) 0%, transparent 100%),
+        radial-gradient(circle at 1px 1px, rgba(255,255,255,0.045) 1px, transparent 0);
+      background-size: 100% 100%, 24px 24px;
       color: var(--text);
       font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
       display: flex;
@@ -45,7 +52,9 @@
       background: var(--surface);
       border-bottom: 1px solid var(--border);
       flex-shrink: 0;
+      transition: border-color 0.4s;
     }
+    .header.is-live { border-bottom-color: rgba(52,211,153,0.5); }
     .logo {
       font-size: 15px;
       font-weight: 700;
@@ -318,6 +327,7 @@
       color: var(--muted);
     }
     .kpi-value {
+      font-family: var(--font-mono);
       font-size: 28px;
       font-weight: 700;
       font-variant-numeric: tabular-nums;
@@ -335,6 +345,7 @@
       margin-top: 5px;
     }
     .kpi-sub {
+      font-family: var(--font-mono);
       font-size: 11px;
       color: var(--muted);
       font-variant-numeric: tabular-nums;
@@ -518,32 +529,46 @@
 
     /* ── Verdict Card ────────────────────────────────── */
     .verdict-card {
-      margin: 16px 24px;
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 18px 22px;
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+      padding: 18px 24px;
+      border-bottom: 1px solid var(--border);
+      border-left: 4px solid transparent;
     }
+    .verdict-card.stable     { border-left-color: var(--green); background: rgba(52,211,153,.04); }
+    .verdict-card.borderline { border-left-color: var(--amber); background: rgba(251,191,36,.04); }
+    .verdict-card.overloaded { border-left-color: var(--red);   background: rgba(248,113,113,.04); }
+    .verdict-icon-lg {
+      width: 48px; height: 48px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.4rem; line-height: 1; flex-shrink: 0;
+    }
+    .verdict-card.stable     .verdict-icon-lg { color: var(--green);  background: rgba(52,211,153,.12); }
+    .verdict-card.borderline .verdict-icon-lg { color: var(--amber);  background: rgba(251,191,36,.12); }
+    .verdict-card.overloaded .verdict-icon-lg { color: var(--red);    background: rgba(248,113,113,.12); }
     .verdict-badge {
       display: inline-flex;
       align-items: center;
       gap: 7px;
-      font-size: 13px;
+      font-size: 12px;
       font-weight: 700;
-      padding: 3px 12px;
+      padding: 2px 10px;
       border-radius: 20px;
-      margin-bottom: 10px;
+      margin-bottom: 8px;
     }
     .verdict-badge.stable    { background: rgba(52,211,153,.15); color: var(--green); }
     .verdict-badge.borderline{ background: rgba(251,191,36,.15);  color: var(--amber); }
     .verdict-badge.overloaded{ background: rgba(248,113,113,.15); color: var(--red); }
+    .verdict-lines { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+    .verdict-line  { font-size: 13px; color: var(--text); line-height: 1.6; }
     .verdict-desc {
       font-size: 13px;
       color: var(--muted);
       line-height: 1.6;
     }
     .verdict-next {
-      margin-top: 10px;
       padding-top: 10px;
       border-top: 1px solid var(--border);
       font-size: 12px;
@@ -569,6 +594,8 @@
       font-weight: 700;
     }
     .result-pass { color: var(--green); }
+    .result-warn { color: var(--amber); }
+    .result-fail { color: var(--red); }
     .result-verdict {
       margin-left: auto;
       font-size: 12px;
@@ -630,6 +657,7 @@
       gap: 7px;
     }
     .summary-val {
+      font-family: var(--font-mono);
       font-size: 13px;
       font-weight: 600;
       font-variant-numeric: tabular-nums;
@@ -706,26 +734,28 @@
 
     /* ── Mode tabs (URL / Scenario 切換) ───────────── */
     .mode-tabs {
-      display: flex;
-      gap: 4px;
+      display: inline-flex;
+      gap: 2px;
       margin-bottom: 20px;
-      border-bottom: 1px solid var(--border);
-      padding-bottom: 0;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 3px;
     }
     .mode-tab {
-      padding: 7px 16px;
+      padding: 6px 16px;
       background: none;
       border: none;
-      border-bottom: 2px solid transparent;
+      border-radius: 7px;
       color: var(--muted);
-      font-size: 13px;
+      font-size: 12px;
       font-weight: 500;
       cursor: pointer;
-      transition: color 0.15s, border-color 0.15s;
-      margin-bottom: -1px;
+      transition: color 0.15s, background 0.15s;
+      white-space: nowrap;
     }
     .mode-tab:hover { color: var(--text); }
-    .mode-tab.active { color: var(--accent2); border-bottom-color: var(--accent2); }
+    .mode-tab.active { background: var(--accent); color: #fff; box-shadow: 0 2px 8px rgba(124,58,237,0.45); }
 
     /* ── File upload zone ────────────────────────────── */
     .upload-zone {
@@ -924,6 +954,7 @@
       box-shadow: 0 0 4px rgba(124,58,237,.5);
     }
     .slider-value {
+      font-family: var(--font-mono);
       font-size: 18px;
       font-weight: 700;
       color: var(--accent2);
@@ -1066,6 +1097,20 @@
       color: var(--muted);
       margin-bottom: 14px;
     }
+    .scenario-lifecycle {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .lifecycle-badge {
+      font-size: 10px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 4px;
+      letter-spacing: 0.03em;
+    }
+    .lifecycle-setup    { background: rgba(52,211,153,.15); color: #34d399; border: 1px solid rgba(52,211,153,.3); }
+    .lifecycle-teardown { background: rgba(148,163,184,.12); color: #94a3b8; border: 1px solid rgba(148,163,184,.25); }
     .scenario-steps {
       display: flex;
       flex-direction: column;
@@ -1098,7 +1143,7 @@
 <div id="app">
 
   <!-- ── Header (always visible) ───────────────────── -->
-  <header class="header">
+  <header class="header" :class="{ 'is-live': view === 'live' }">
     <div class="logo">
       <div class="logo-dot"></div>
       Ramplio
@@ -1376,6 +1421,10 @@
           <template v-else>
             <div class="scenario-panel">
               <div class="scenario-name">{{ scenarioInfo.name }}</div>
+              <div v-if="scenarioInfo.setup_count > 0 || scenarioInfo.teardown_count > 0" class="scenario-lifecycle">
+                <span v-if="scenarioInfo.setup_count > 0" class="lifecycle-badge lifecycle-setup">Setup ×{{ scenarioInfo.setup_count }}</span>
+                <span v-if="scenarioInfo.teardown_count > 0" class="lifecycle-badge lifecycle-teardown">Teardown ×{{ scenarioInfo.teardown_count }}</span>
+              </div>
               <div class="scenario-steps">
                 <div v-for="(name, i) in scenarioInfo.step_names" :key="i" class="scenario-step">
                   <span class="step-num">{{ i + 1 }}</span>
@@ -1561,6 +1610,7 @@
             <th class="st-num">Total</th>
             <th class="st-num">p50</th>
             <th class="st-num">p90</th>
+            <th class="st-num">p95</th>
             <th class="st-num">p99</th>
             <th class="st-num">Err%</th>
           </tr>
@@ -1571,8 +1621,36 @@
             <td class="st-num">{{ s.total.toLocaleString() }}</td>
             <td class="st-num">{{ s.p50_ms }}ms</td>
             <td class="st-num">{{ s.p90_ms }}ms</td>
+            <td class="st-num">{{ s.p95_ms }}ms</td>
             <td class="st-num" :class="latClass(s.p99_ms)">{{ s.p99_ms }}ms</td>
             <td class="st-num" :class="errClass(s.err_pct)">{{ fmt2(s.err_pct) }}%</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Per-group metrics table (scenario mode, only when groups are defined) -->
+    <div v-if="snap.group_metrics && snap.group_metrics.length > 0" class="step-table-wrap">
+      <div class="step-table-title">Group Metrics</div>
+      <table class="step-table">
+        <thead>
+          <tr>
+            <th class="st-name">Group</th>
+            <th class="st-num">Total</th>
+            <th class="st-num">p50</th>
+            <th class="st-num">p95</th>
+            <th class="st-num">p99</th>
+            <th class="st-num">Err%</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="g in snap.group_metrics" :key="g.name">
+            <td class="st-name">{{ g.name }}</td>
+            <td class="st-num">{{ g.total.toLocaleString() }}</td>
+            <td class="st-num">{{ g.p50_ms }}ms</td>
+            <td class="st-num">{{ g.p95_ms }}ms</td>
+            <td class="st-num" :class="latClass(g.p99_ms)">{{ g.p99_ms }}ms</td>
+            <td class="st-num" :class="errClass(g.err_pct)">{{ fmt2(g.err_pct) }}%</td>
           </tr>
         </tbody>
       </table>
@@ -1590,15 +1668,27 @@
   <!-- ── Result View ────────────────────────────────── -->
   <div v-else-if="view === 'result'" class="result-view">
     <div class="result-header">
-      <span class="result-title result-pass">✓</span>
+      <span class="result-title"
+            :class="finalVerdict?.level === 'overloaded' ? 'result-fail' : finalVerdict?.level === 'borderline' ? 'result-warn' : 'result-pass'">
+        {{ finalVerdict?.icon ?? '✓' }}
+      </span>
       <span class="result-title">Test Complete</span>
       <span class="result-verdict">共執行 {{ fmtElapsed(finalResult?.wall_sec) }}</span>
     </div>
 
-    <!-- 白話解讀（Guided 模式由 guided-verdict-card 取代） -->
-    <div v-if="nlSummary && !finalResult?.guided_verdict" class="nl-summary">
-      <div class="nl-summary-title">白話解讀</div>
-      <div v-for="s in nlSummary" class="nl-sentence" v-html="s"></div>
+    <!-- 白話解讀卡片（Guided 模式由 guided-verdict-card 取代） -->
+    <div v-if="finalVerdict && !finalResult?.guided_verdict"
+         class="verdict-card"
+         :class="finalVerdict.level">
+      <div class="verdict-icon-lg">{{ finalVerdict.icon }}</div>
+      <div style="flex:1">
+        <div class="verdict-badge" :class="finalVerdict.level">{{ finalVerdict.title }}</div>
+        <div class="verdict-lines">
+          <div class="verdict-line">{{ finalVerdict.desc }}</div>
+          <div v-if="finalVerdict.bottleneck" class="verdict-line" style="color:var(--muted)">{{ finalVerdict.bottleneck }}</div>
+        </div>
+        <div class="verdict-next"><strong>下一步：</strong>{{ finalVerdict.next }}</div>
+      </div>
     </div>
 
     <div class="kpi-row" style="border-top: none;">
@@ -1783,16 +1873,6 @@
       </div>
     </div>
 
-    <!-- Verdict Card -->
-    <div v-if="finalVerdict && !finalResult?.guided_verdict" class="verdict-card">
-      <div class="verdict-badge" :class="finalVerdict.level">
-        {{ finalVerdict.icon }}&nbsp;{{ finalVerdict.title }}
-      </div>
-      <div class="verdict-basis">判斷依據：{{ finalVerdict.basis }}</div>
-      <div class="verdict-desc">{{ finalVerdict.desc }}</div>
-      <div class="verdict-next"><strong>下一步：</strong>{{ finalVerdict.next }}</div>
-    </div>
-
     <div class="charts" style="flex: 1; min-height: 0;">
       <div class="chart-card">
         <div class="chart-header">
@@ -1807,6 +1887,60 @@
         <div class="chart-wrap"><canvas ref="latCanvas"></canvas></div>
       </div>
     </div>
+    <!-- Per-step breakdown in result view -->
+    <div v-if="lastStepMetrics && lastStepMetrics.length > 0" class="step-table-wrap" style="margin-top:16px">
+      <div class="step-table-title">Per-step Breakdown</div>
+      <table class="step-table">
+        <thead>
+          <tr>
+            <th class="st-name">Step</th>
+            <th class="st-num">Total</th>
+            <th class="st-num">p50</th>
+            <th class="st-num">p95</th>
+            <th class="st-num">p99</th>
+            <th class="st-num">Err%</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="s in lastStepMetrics" :key="s.name">
+            <td class="st-name">{{ s.name }}</td>
+            <td class="st-num">{{ s.total.toLocaleString() }}</td>
+            <td class="st-num">{{ s.p50_ms }}ms</td>
+            <td class="st-num">{{ s.p95_ms }}ms</td>
+            <td class="st-num" :class="latClass(s.p99_ms)">{{ s.p99_ms }}ms</td>
+            <td class="st-num" :class="errClass(s.err_pct)">{{ fmt2(s.err_pct) }}%</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Group breakdown in result view -->
+    <div v-if="lastGroupMetrics && lastGroupMetrics.length > 0" class="step-table-wrap" style="margin-top:16px">
+      <div class="step-table-title">Group Breakdown</div>
+      <table class="step-table">
+        <thead>
+          <tr>
+            <th class="st-name">Group</th>
+            <th class="st-num">Total</th>
+            <th class="st-num">p50</th>
+            <th class="st-num">p95</th>
+            <th class="st-num">p99</th>
+            <th class="st-num">Err%</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="g in lastGroupMetrics" :key="g.name">
+            <td class="st-name">{{ g.name }}</td>
+            <td class="st-num">{{ g.total.toLocaleString() }}</td>
+            <td class="st-num">{{ g.p50_ms }}ms</td>
+            <td class="st-num">{{ g.p95_ms }}ms</td>
+            <td class="st-num" :class="latClass(g.p99_ms)">{{ g.p99_ms }}ms</td>
+            <td class="st-num" :class="errClass(g.err_pct)">{{ fmt2(g.err_pct) }}%</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
     <div class="result-actions">
       <button class="btn-again" @click="resetSetup">▶&nbsp; Run Again</button>
     </div>
@@ -1854,6 +1988,7 @@ createApp({
       active_vus: 0, stage_current: 0, stage_total: 0, stage_pct: 0,
       elapsed_s: 0,
       step_metrics: [],
+      group_metrics: [],
     });
 
     const rpsCanvas = ref(null);
@@ -2010,6 +2145,8 @@ createApp({
         if (d.state === 'done' && view.value === 'live') {
           finalResult.value = d.result ?? null;
           if (d.result?.guided_verdict) testMode.value = 'guided';
+          lastStepMetrics.value = snap.step_metrics?.length ? [...snap.step_metrics] : [];
+          lastGroupMetrics.value = snap.group_metrics?.length ? [...snap.group_metrics] : [];
           activeGuidedProfile.value = null;
           rpsChart?.destroy(); rpsChart = null;
           latChart?.destroy(); latChart = null;
@@ -2324,6 +2461,9 @@ createApp({
       return [s1, s2, s3];
     });
 
+    const lastStepMetrics = ref([]);
+    const lastGroupMetrics = ref([]);
+
     const finalVerdict = computed(() => {
       const r = finalResult.value;
       if (!r) return null;
@@ -2337,35 +2477,35 @@ createApp({
       const moreLoad = isRate
         ? `${Math.round(testRPS.value * 1.5)} req/s`
         : `${Math.round(testVUs.value * 1.5)} VU`;
+
+      // Bottleneck: slowest step from the last live snapshot (scenario mode only)
+      let bottleneck = '';
+      const steps = lastStepMetrics.value;
+      if (steps && steps.length > 1) {
+        const slowest = steps.reduce((a, b) => b.p99_ms > a.p99_ms ? b : a);
+        bottleneck = `最慢步驟：「${slowest.name}」（p99 ${slowest.p99_ms}ms）`;
+      }
+
       if (errPct >= 1 || p99 >= 1000) {
-        const reasons = [];
-        if (errPct >= 1) reasons.push(`error_rate ${errPct.toFixed(2)}% ≥ 1%`);
-        if (p99 >= 1000) reasons.push(`p99 ${p99}ms ≥ 1000ms`);
         return {
-          level: 'overloaded',
-          icon: '⚠',
-          title: 'Overloaded — 系統超載',
-          basis: reasons.join('，'),
+          level: 'overloaded', icon: '⚠', title: 'Overloaded — 系統超載',
           desc: `錯誤率 ${errPct.toFixed(2)}%，p99 ${p99}ms，${loadCtx} 已超過系統承載能力。`,
+          bottleneck,
           next: `建議降低負載至 ${nextLoad} 或先擴容，再重新測試找出穩定點。`,
         };
       }
       if (errPct === 0 && p99 < 500) {
         return {
-          level: 'stable',
-          icon: '✓',
-          title: 'Stable — 系統穩定',
-          basis: `error_rate 0%，p99 ${p99}ms < 500ms`,
+          level: 'stable', icon: '✓', title: 'Stable — 系統穩定',
           desc: `無錯誤，p99 ${p99}ms，系統在 ${loadCtx} 下表現穩定，尚有餘裕。`,
+          bottleneck,
           next: `可嘗試提升至 ${moreLoad} 繼續探索系統上限。`,
         };
       }
       return {
-        level: 'borderline',
-        icon: '△',
-        title: 'Borderline — 邊緣狀態',
-        basis: `error_rate ${errPct.toFixed(2)}%，p99 ${p99}ms（介於良好與過慢之間）`,
+        level: 'borderline', icon: '△', title: 'Borderline — 邊緣狀態',
         desc: `錯誤率 ${errPct.toFixed(2)}%，p99 ${p99}ms，系統在 ${loadCtx} 下接近承載邊界。`,
+        bottleneck,
         next: '延遲偏高或有少量錯誤，建議先調查 p99 尾端根因或優化服務，再提高負載。',
       };
     });
@@ -2382,7 +2522,7 @@ createApp({
       scenarioInput, scenarioDragging, scenarioVUs, scenarioDuration,
       testMode, testRPS,
       wizardStep, guided, activeGuidedProfile, wizardDuration,
-      rpsCanvas, latCanvas, finalVerdict, nlSummary,
+      rpsCanvas, latCanvas, finalVerdict, nlSummary, lastStepMetrics, lastGroupMetrics,
       runTest, startScenario, stopTest, resetSetup,
       triggerFileInput, handleFileChange, handleDrop, clearScenario,
       triggerHarInput, handleHarFileChange, handleHarDrop,

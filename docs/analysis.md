@@ -14,8 +14,8 @@
 | 欄位 | 值 |
 |------|-----|
 | 分析時間 | 2026-05-25 |
-| 分析基準 commit | `9694120` |
-| 完整 commit hash | `969412012eeca4af88bfbe2f2b1eaeef88f70ac6` |
+| 分析基準 commit | `951b446` |
+| 完整 commit hash | `951b446203ebfbf4f7cbf24395367caf41fc7110` |
 | Go 版本 | (見 go.mod) |
 
 ---
@@ -23,10 +23,10 @@
 ## 模組摘要
 
 ### engine/ramp.go
-- **功能**：多階段負載引擎，支援 VU 模式（線性插值）與 RPS 模式（令牌桶）；資料檔案 sequential/random 分發
-- **主要型別**：`RampEngine`, `RampStep`, `RampConfig`
+- **功能**：多階段負載引擎，支援 VU 模式（線性插值）與 RPS 模式（令牌桶）；`dataSource` 分發資料行（sequential/random）；`applyCaptures` 新增 regex 群組擷取
+- **主要型別**：`RampEngine`, `RampStep`, `RampConfig`, `dataSource`
 - **主要方法**：`Run()`, `runRate()`, `runVU()`, `renderRequest()`, `applyCaptures()`
-- **已知限制**：VU 與 RPS 在同一場景互斥；Sample 緩衝區滿時靜默丟棄；資料檔案隨機使用偽隨機（非加密安全）
+- **已知限制**：VU 與 RPS 在同一場景互斥；Sample 緩衝區滿時靜默丟棄；資料檔案隨機使用偽隨機（非加密安全）；regex capture 每次請求重新 Compile（效能問題）
 
 ### engine/engine.go
 - **功能**：基礎固定 VU 引擎，無階段支援（早期版本遺留）
@@ -34,7 +34,7 @@
 - **已知限制**：無狀態，每個 VU 重複同一請求；RampEngine 完全取代其功能但尚未移除
 
 ### scenarios/scenario.go
-- **功能**：YAML 場景資料結構定義（Scenario, Stage, Step, Auth, Capture, Assertions, Thresholds）
+- **功能**：YAML 場景資料結構定義（Scenario, Stage, Step, Auth, Capture, Assertions, Thresholds）；新增 `VarsFrom`（file + mode）
 - **已知限制**：Thresholds 只支援 `error_rate_pct` 和 `p99_ms`；StatusCheck 以原始字串儲存，無預先驗證
 
 ### scenarios/parser.go
@@ -47,13 +47,13 @@
 - **已知限制**：無複合邏輯（AND/OR）；JSON path 轉換為 gjson 格式，複雜陣列路徑可能不準確
 
 ### scenarios/template.go
-- **功能**：模板標記替換（`{{uuid}}`, `{{timestamp}}`, `{{env.X}}`, `{{vars.X}}`, `{{capture.X}}`, `{{data.X}}`）
-- **主要型別**：`VarContext`
-- **已知限制**：無巢狀標記；env 無預設值（失敗返回空字串）
+- **功能**：模板標記替換（`{{uuid}}`, `{{timestamp}}`, `{{timestamp_ms}}`, `{{env "VAR"}}`, `{{vars.X}}`, `{{capture.X}}`, `{{data.X}}`）
+- **主要型別**：`VarContext`（含 Vars、Captures、Data 三個 map）
+- **已知限制**：無巢狀標記；env 無預設值（失敗返回空字串）；`{{env "X"}}` 語法與其他 token 不一致
 
 ### scenarios/datafile.go
-- **功能**：從 CSV / JSON 載入資料行供 vars_from 使用
-- **已知限制**：無型別驗證；CSV 不規則列填充空值
+- **功能**：從 CSV / JSON 載入資料行供 `vars_from` 使用（`LoadDataFile()`）；CSV 第一列為 header，JSON 為 `[]map[string]string`
+- **已知限制**：無型別驗證；CSV 不規則列填充空值；JSON 僅支援字串值
 
 ### protocols/executor.go
 - **功能**：執行器介面定義（`Executor`, `Request`, `Result`）
@@ -82,7 +82,7 @@
 - **已知限制**：無中位數或加權計算
 
 ### reporter/terminal.go
-- **功能**：靜態終端文字摘要輸出
+- **功能**：靜態終端文字摘要輸出；新增 per-step 表格（Total/p50/p99/Errors），標記最慢步驟（◀ slowest）
 
 ### reporter/html.go
 - **功能**：使用 go:embed 樣板生成自包含 HTML 報告
@@ -108,12 +108,13 @@
 
 ### dashboard/server.go
 - **功能**：HTTP + WebSocket 伺服器；嵌入式 HTML 儀表板；REST API
-- **端點**：`GET /`、`GET /ws`、`POST /api/run`、`POST /api/stop`、`GET /api/status`、`POST /api/scenario`、`POST /api/import-har`
+- **端點**：`GET /`、`GET /ws`、`POST /api/run`、`POST /api/stop`、`GET /api/status`、`POST /api/scenario`、`POST /api/import-har`、`GET /api/report`
+- **`/api/report`**：生成 HTML 報告並以 `attachment` 下載（用 buffer 避免部分寫入）
 - **已知限制**：WebSocket 允許所有來源（無 CORS 限制）；場景上傳 1MB，HAR 10MB；無認證
 
 ### dashboard/controller.go
-- **功能**：Controller 介面實現，管理測試生命週期與狀態轉換（Idle → Running → Done）
-- **主要方法**：`Start()`, `Stop()`, `LoadScenario()`, `Snapshot()`
+- **功能**：Controller 介面；新增 `WriteReport(w io.Writer) error` 方法；`RunRequest` 增加 `OverrideVUs`、`OverrideDuration`（場景模式下覆蓋階段設定）
+- **主要方法**：`Start()`, `Stop()`, `LoadScenario()`, `Snapshot()`, `WriteReport()`
 - **已知限制**：一次只允許一個測試；無執行排隊
 
 ### dashboard/guided.go
@@ -152,15 +153,15 @@
 - **功能**：Cobra 根命令，版本 1.0.0，註冊子命令
 
 ### cmd/ramplio/run.go
-- **功能**：主要 `run` 命令；支援 URL/RPS/場景/儀表板四種模式
-- **旗標**：url, method, vus, rps, duration, headers, body, scenario, output, dashboard, prometheus, timeout
+- **功能**：主要 `run` 命令；支援 URL/RPS/場景/儀表板四種模式；新增 `--report`/`-r` 直接輸出 HTML 報告；載入 VarsFrom 資料檔案並印出行數與模式
+- **旗標**：url, method, vus, rps, duration, headers, body, scenario, output, **report**, dashboard, prometheus, timeout
 - **已知限制**：VU/RPS 互斥；錯誤率 >0 自動以 exit code 1 結束（無 --ignore-errors）
 
 ### cmd/ramplio/import.go
 - **功能**：`import` 命令，HAR 轉場景 YAML；支援 --no-filter, --duration 覆蓋
 
 ### cmd/ramplio/dashcontrol.go
-- **功能**：儀表板用 Controller 實現（與 dashboard/controller.go 功能重疊）
+- **功能**：儀表板用 Controller 實現；新增 `lastSummary`/`lastSummarySet` 儲存最後一次結果供 `WriteReport` 使用；`buildOverrideStages` 根據 `OverrideVUs`/`OverrideDuration` 重建 3 階段（加速/保持/冷卻）
 - **已知限制**：與 `dashboard/controller.go` 存在職責重疊，可能需要整合
 
 ### cmd/ramplio/mock.go
@@ -189,33 +190,125 @@
 | MED | WebSocket 無 CORS 限制、API 無認證 | dashboard/server.go |
 | MED | Sample 緩衝區滿時靜默丟棄，無告警 | metrics/collector.go |
 | MED | `stop` 命令直接 SIGKILL，Windows 不相容 | cmd/ramplio/stop.go |
+| MED | regex capture 每次請求重新 Compile，高頻測試下有效能開銷 | engine/ramp.go |
 | LOW | Thresholds 只支援 2 個指標 | scenarios/scenario.go |
 | LOW | HTML 報告無互動圖表 | reporter/html.go |
 | LOW | mock server /profile 不驗證 token 值 | cmd/ramplio/mock.go |
+| LOW | `{{env "X"}}` 語法與 `{{vars.X}}` 等不一致，學習曲線高 | scenarios/template.go |
 
 ---
 
 ## 功能覆蓋對照（與主流工具比較）
 
-| 功能 | k6 | Vegeta | Ramplio | 備注 |
-|------|:--:|:------:|:-------:|------|
-| 多階段 VU | ✓ | - | ✓ | |
-| 固定 RPS | ✓ | ✓ | ✓ | |
-| YAML 場景 DSL | - | - | ✓ | 差異化優勢 |
-| HAR Import | ✓ | - | ✓ | |
-| 即時 TUI | ✓ | - | ✓ | |
-| Web Dashboard | - | - | ✓ | 差異化優勢 |
-| Guided Mode | - | - | ✓ | 差異化優勢 |
-| JUnit XML | ✓ | - | ✓ | |
-| Prometheus | ✓ | - | ✓ | |
-| WebSocket 測試 | ✓ | - | - | 尚未支援 |
-| gRPC 測試 | ✓ | - | - | 尚未支援 |
-| Script (JS) | ✓ | - | - | 刻意不做 |
-| 分散式測試 | ✓ | ✓ | - | 尚未支援 |
-| 資料檔案 | ✓ | - | ✓ | |
-| 模板變數 | ✓ | - | ✓ | |
-| Cookie Session | ✓ | - | ✓ | |
-| Per-step 指標 | - | - | ✓ | 差異化優勢 |
+> 新增 JMeter 欄位；✓ = 完整支援，△ = 部份支援，- = 不支援
+
+| 功能 | JMeter | k6 | Vegeta | Ramplio | 缺口優先度 |
+|------|:------:|:--:|:------:|:-------:|:---------:|
+| 多階段 VU | ✓ | ✓ | - | ✓ | — |
+| 固定 RPS | ✓ | ✓ | ✓ | ✓ | — |
+| **Ramping Arrival Rate** | ✓ | ✓ | - | - | HIGH |
+| YAML 場景 DSL | - | - | - | ✓ | 差異化優勢 |
+| HAR Import | △ | ✓ | - | ✓ | — |
+| 即時 TUI | - | △ | - | ✓ | 差異化優勢 |
+| Web Dashboard | - | - | - | ✓ | 差異化優勢 |
+| Guided Mode | - | - | - | ✓ | 差異化優勢 |
+| JUnit XML | ✓ | ✓ | - | ✓ | — |
+| Prometheus | △ | ✓ | - | ✓ | — |
+| **多 Output Sink** | ✓ | ✓ | ✓ | - | HIGH |
+| **WebSocket 測試** | ✓ | ✓ | - | - | HIGH |
+| **gRPC 測試** | ✓ | ✓ | - | - | MED |
+| **Lifecycle Hooks** | ✓ | ✓ | - | - | MED |
+| **Transactions/Groups** | ✓ | ✓ | - | - | MED |
+| **Logic Controllers** | ✓ | - | - | - | MED |
+| **分散式測試** | ✓ | ✓ | ✓ | - | HIGH |
+| **更多 Thresholds** | ✓ | ✓ | - | △ | MED |
+| Script (JS/Groovy) | ✓ | ✓ | - | - | 刻意不做 |
+| 資料檔案 | ✓ | ✓ | - | ✓ | — |
+| 模板變數 | ✓ | ✓ | - | ✓ | — |
+| Cookie Session | ✓ | ✓ | - | ✓ | — |
+| Per-step 指標 | △ | - | - | ✓ | 差異化優勢 |
+| **請求重試／熔斷** | ✓ | - | - | - | MED |
+| **Test Suite（串接場景）** | ✓ | - | - | - | LOW |
+| **Pause / Resume** | ✓ | ✓ | - | - | LOW |
+| **InfluxDB / Grafana 輸出** | ✓ | ✓ | - | - | MED |
+
+---
+
+## 開發補足建議
+
+依優先度與實作難度分為三個階段。
+
+### Phase A — 核心缺口（HIGH 優先度）
+
+#### A1：Ramping Arrival Rate（動態 RPS 爬坡）
+- **現況**：RPS 模式為固定速率，無法設定爬坡目標。
+- **目標**：在 YAML stages 中新增 `target_rps` 支援線性插值，類似 VU 模式的 `target`。
+- **影響**：補足 k6 `ramping-arrival-rate` executor 的對等能力。
+- **工作量**：小（engine/ramp.go 內 token bucket 已存在，加爬坡邏輯即可）。
+
+#### A2：多 Output Sink
+- **現況**：JSON/HTML/JUnit/Prometheus 均為本地輸出；無遠端 push。
+- **目標**：新增 `--output influxdb://...`、`--output loki://...`、`--output csv` 旗標；定義 `reporter.Sink` 介面。
+- **影響**：讓使用者可接進現有 Grafana/InfluxDB 監控棧。
+- **工作量**：中（介面設計 + 各 sink 實作）。
+
+#### A3：WebSocket 協定支援
+- **現況**：`protocols/executor.go` 介面已預留，但無 WebSocket 實作。
+- **目標**：新增 `protocols/ws.go`，支援 `ws://`/`wss://`；場景 step 可設 `protocol: websocket`、`message`、`expect`。
+- **影響**：補足 JMeter WebSocket Sampler / k6 `k6/ws` 對等能力。
+- **工作量**：中（使用 `gorilla/websocket`；需設計雙向訊息模型）。
+
+#### A4：分散式測試（Agent 模式）
+- **現況**：單機執行，VU 上限受本機資源限制。
+- **目標**：`ramplio agent --coordinator <addr>` 啟動 worker；coordinator 分發 stage 計畫並聚合指標。
+- **影響**：突破單機瓶頸，支援數萬 VU；對齊 JMeter Remote / k6 Cloud。
+- **工作量**：大（需 coordinator-worker 協定、指標聚合、設計）。
+
+---
+
+### Phase B — 體驗提升（MED 優先度）
+
+#### B1：Lifecycle Hooks（Setup / Teardown）
+- **現況**：場景無前後置鉤子。
+- **目標**：在 YAML 新增 `setup` / `teardown` 區塊（steps 陣列），測試開始前/結束後執行一次，回應可注入 captures。
+- **工作量**：小。
+
+#### B2：Transactions / Groups
+- **現況**：步驟皆獨立計算，無邏輯群組。
+- **目標**：步驟支援 `group: checkout-flow`；在 per-step 報告中新增 group 彙總行（group 總延遲、群組錯誤率）。
+- **工作量**：小（metrics 層加 group key）。
+
+#### B3：擴充 Thresholds
+- **現況**：只支援 `error_rate_pct` 和 `p99_ms`。
+- **目標**：新增 `p50_ms`, `p90_ms`, `p95_ms`, `throughput_rps`, `max_ms`；支援 per-step threshold（`steps.login.p95_ms: 500`）。
+- **工作量**：小（scenarios/assertions.go 擴充）。
+
+#### B4：請求重試 / 熔斷
+- **現況**：單次請求失敗即記錄，無重試。
+- **目標**：步驟支援 `retry: 3`、`retry_on: [500, 503]`；連續失敗達閾值時觸發熔斷並停止場景。
+- **工作量**：中（protocols/executor.go 包裝層）。
+
+#### B5：InfluxDB / Grafana Loki Output
+- **現況**：僅 Prometheus pull-based；無推送。
+- **目標**：定義 push sink 介面，先實作 InfluxDB v2（line protocol）與 CSV。
+- **工作量**：中。
+
+#### B6：Logic Controllers（條件 / 迴圈）
+- **現況**：步驟線性執行，無流程控制。
+- **目標**：支援 `if: "{{capture.token}} != \"\""` 條件跳過步驟；`loop: 3` 重複步驟。
+- **工作量**：中（engine 執行層需狀態機擴充）。
+
+---
+
+### Phase C — 長尾完善（LOW 優先度）
+
+| 功能 | 說明 |
+|------|------|
+| Test Suite | 多場景串接執行，整合 CI pipeline |
+| Pause / Resume | 透過 REST API 暫停測試，對話框輸入後繼續 |
+| gRPC 支援 | `protocols/grpc.go`；protobuf schema 從 `.proto` 載入 |
+| 自訂 metrics label | 請求可加 tag，輸出時按 tag 分群彙總 |
+| Response 快取模擬 | 熱快取場景（跳過實際 call，用固定延遲填充） |
 
 ---
 
@@ -225,7 +318,7 @@
 
 ```bash
 # 1. 取得上次分析後的異動
-git diff 9694120..HEAD --stat
+git diff 951b446..HEAD --stat
 
 # 2. 只讀異動的檔案
 # 3. 更新對應模組的條目

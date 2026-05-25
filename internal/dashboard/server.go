@@ -20,6 +20,17 @@ type StepMetric struct {
 	Total  int64   `json:"total"`
 	P50Ms  int64   `json:"p50_ms"`
 	P90Ms  int64   `json:"p90_ms"`
+	P95Ms  int64   `json:"p95_ms"`
+	P99Ms  int64   `json:"p99_ms"`
+	ErrPct float64 `json:"err_pct"`
+}
+
+// GroupMetric is the per-group aggregated metrics payload in a wsMessage.
+type GroupMetric struct {
+	Name   string  `json:"name"`
+	Total  int64   `json:"total"`
+	P50Ms  int64   `json:"p50_ms"`
+	P95Ms  int64   `json:"p95_ms"`
 	P99Ms  int64   `json:"p99_ms"`
 	ErrPct float64 `json:"err_pct"`
 }
@@ -45,6 +56,7 @@ type wsMessage struct {
 	ScenarioInfo  *ScenarioMeta  `json:"scenario_info,omitempty"`
 	GuidedProfile *GuidedProfile `json:"guided_profile,omitempty"` // non-nil during a guided test
 	StepMetrics   []StepMetric   `json:"step_metrics,omitempty"`
+	GroupMetrics  []GroupMetric  `json:"group_metrics,omitempty"`
 }
 
 // Server serves the embedded dashboard HTML and streams live metrics over WebSocket.
@@ -264,6 +276,9 @@ func (s *Server) buildWSMessage() wsMessage {
 	if len(snap.StepMetrics) > 0 {
 		msg.StepMetrics = toWSStepMetrics(snap.StepMetrics)
 	}
+	if len(snap.GroupMetrics) > 0 {
+		msg.GroupMetrics = toWSGroupMetrics(snap.GroupMetrics)
+	}
 	return msg
 }
 
@@ -279,7 +294,27 @@ func toWSStepMetrics(steps []metrics.StepSummary) []StepMetric {
 			Total:  s.Total,
 			P50Ms:  s.P50.Milliseconds(),
 			P90Ms:  s.P90.Milliseconds(),
+			P95Ms:  s.P95.Milliseconds(),
 			P99Ms:  s.P99.Milliseconds(),
+			ErrPct: errPct,
+		}
+	}
+	return out
+}
+
+func toWSGroupMetrics(groups []metrics.GroupSummary) []GroupMetric {
+	out := make([]GroupMetric, len(groups))
+	for i, g := range groups {
+		errPct := 0.0
+		if g.Total > 0 {
+			errPct = float64(g.Errors) / float64(g.Total) * 100
+		}
+		out[i] = GroupMetric{
+			Name:   g.Name,
+			Total:  g.Total,
+			P50Ms:  g.P50.Milliseconds(),
+			P95Ms:  g.P95.Milliseconds(),
+			P99Ms:  g.P99.Milliseconds(),
 			ErrPct: errPct,
 		}
 	}

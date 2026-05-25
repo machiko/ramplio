@@ -93,11 +93,13 @@ func (c *dashController) LoadScenario(yaml []byte) error {
 		totalSec += stg.Duration.Seconds()
 	}
 	meta := &dashboard.ScenarioMeta{
-		Name:       sc.Name,
-		StepNames:  stepNames,
-		MaxVUs:     maxVUs,
-		TotalSec:   totalSec,
-		StageCount: len(sc.Stages),
+		Name:          sc.Name,
+		StepNames:     stepNames,
+		MaxVUs:        maxVUs,
+		TotalSec:      totalSec,
+		StageCount:    len(sc.Stages),
+		SetupCount:    len(sc.Setup),
+		TeardownCount: len(sc.Teardown),
 	}
 	c.setScenario(meta, steps, sc.Stages, sc.Vars)
 	return nil
@@ -123,6 +125,11 @@ func buildStepsFromScenario(sc *scenarios.Scenario) ([]engine.RampStep, []string
 			Auth:       s.Auth,
 			Capture:    s.Capture,
 			Pause:      s.Pause,
+			Retry:      s.Retry,
+			Group:      s.Group,
+			Protocol:   s.Protocol,
+			If:         s.If,
+			Loop:       s.Loop,
 		}
 		names[i] = name
 	}
@@ -457,6 +464,7 @@ func (c *dashController) refreshSnap(col *metrics.Collector, ramp *engine.RampEn
 		StagePct:     pct,
 		Elapsed:      time.Since(startedAt),
 		StepMetrics:  col.LiveStepMetrics(),
+		GroupMetrics: col.LiveGroupMetrics(),
 	}
 	c.mu.Lock()
 	c.snapCache = snap

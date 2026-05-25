@@ -28,6 +28,8 @@ type LiveSnapshot struct {
 	Elapsed      time.Duration
 	// StepMetrics is non-nil only when running a multi-step scenario.
 	StepMetrics []metrics.StepSummary
+	// GroupMetrics is non-nil only when steps carry a non-empty Group field.
+	GroupMetrics []metrics.GroupSummary
 }
 
 // LiveProvider supplies live snapshots during a running load test.

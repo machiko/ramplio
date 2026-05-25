@@ -28,18 +28,28 @@ type RampStep struct {
 	Assertions *scenarios.Assertions
 	Auth       *scenarios.Auth
 	Capture    *scenarios.Capture
+	Retry      *scenarios.RetryConfig
 	// Pause is the think time after this step completes (0 = no delay).
-	Pause time.Duration
+	Pause    time.Duration
+	Group    string // optional group name for aggregate reporting
+	Protocol string // "http" (default) or "websocket"
+	// If is evaluated before executing; the step is skipped when false.
+	If   string
+	Loop int // 0/1 = once, N = repeat N times per VU iteration
 }
 
 // RampConfig drives a stage-based load test.
 type RampConfig struct {
-	Stages   []scenarios.Stage
-	Steps    []RampStep
-	Vars     map[string]string // scenario-level vars available for template rendering
-	DataRows []map[string]string // rows from vars_from data file; nil = no data file
-	DataMode string              // "sequential" (default) or "random"
-	Executor protocols.Executor
+	Stages         []scenarios.Stage
+	Steps          []RampStep
+	SetupSteps     []RampStep // run once before stages; captures shared with all VUs
+	TeardownSteps  []RampStep // run once after stages regardless of outcome
+	Vars           map[string]string   // scenario-level vars available for template rendering
+	DataRows       []map[string]string // rows from vars_from data file; nil = no data file
+	DataMode       string              // "sequential" (default) or "random"
+	Executor       protocols.Executor
+	WSExecutor     protocols.Executor // used when step.Protocol == "websocket"
+	CircuitBreaker *scenarios.CircuitBreakerConfig
 }
 
 // dataSource distributes data file rows to VUs.
@@ -76,6 +86,11 @@ type RampEngine struct {
 	stageTotal     atomic.Int32
 	stageStartedAt atomic.Value // stores time.Time
 	stageDurNs     atomic.Int64
+	// setupCaptures holds values captured during setup steps and is copied
+	// into each new VU's VarContext so all VUs share the setup results.
+	setupCaptures map[string]string
+	// consecutiveFails counts unbroken error streak across all VUs for circuit breaker.
+	consecutiveFails atomic.Int64
 }
 
 func NewRamp(cfg RampConfig, collector *metrics.Collector) *RampEngine {
@@ -134,9 +149,34 @@ func (e *RampEngine) maxTargetRPS() int {
 }
 
 func (e *RampEngine) Run(ctx context.Context) metrics.Summary {
-	if e.isRateMode() {
-		return e.runRate(ctx)
+	// Setup: run once, single-goroutine; captures shared with all VUs.
+	if len(e.cfg.SetupSteps) > 0 {
+		setupCtx := e.newVarContext()
+		for _, step := range e.cfg.SetupSteps {
+			e.executeSingleStep(ctx, step, setupCtx, e.pickExecutor(step))
+		}
+		e.setupCaptures = setupCtx.Captures
 	}
+
+	var sum metrics.Summary
+	if e.isRateMode() {
+		sum = e.runRate(ctx)
+	} else {
+		sum = e.runVUs(ctx)
+	}
+
+	// Teardown: run once after all stages regardless of outcome.
+	if len(e.cfg.TeardownSteps) > 0 {
+		tdCtx := e.newVarContext()
+		for _, step := range e.cfg.TeardownSteps {
+			e.executeSingleStep(ctx, step, tdCtx, e.pickExecutor(step))
+		}
+	}
+	return sum
+}
+
+// runVUs is the former Run() body for VU mode; extracted so Run() can wrap it.
+func (e *RampEngine) runVUs(ctx context.Context) metrics.Summary {
 	start := time.Now()
 
 	var (
@@ -291,53 +331,69 @@ func (e *RampEngine) runRate(ctx context.Context) metrics.Summary {
 }
 
 func (e *RampEngine) runRateWorker(ctx context.Context, lim *rate.Limiter) {
-	varCtx := &scenarios.VarContext{
-		Vars:     e.cfg.Vars,
-		Captures: make(map[string]string),
-	}
-	if e.data != nil {
-		varCtx.Data = e.data.next()
-	}
+	varCtx := e.newVarContext()
 	stepIdx := 0
 	for {
 		if err := lim.Wait(ctx); err != nil {
+			return
+		}
+		if e.isCircuitTripped() {
 			return
 		}
 
 		step := e.cfg.Steps[stepIdx%len(e.cfg.Steps)]
 		stepIdx++
 
-		e.activeVUs.Add(1)
-		req, err := renderRequest(step, varCtx)
-		if err != nil {
-			e.collector.Add(metrics.Sample{Error: err, At: time.Now()})
-			e.activeVUs.Add(-1)
+		if step.If != "" && !scenarios.EvalCondition(step.If, varCtx) {
 			continue
 		}
 
-		result := e.cfg.Executor.Execute(ctx, req)
-		if errors.Is(result.Error, context.Canceled) || errors.Is(result.Error, context.DeadlineExceeded) {
-			e.activeVUs.Add(-1)
-			return
+		repeat := step.Loop
+		if repeat < 1 {
+			repeat = 1
 		}
+		exec := e.pickExecutor(step)
 
-		if result.Error == nil {
-			applyCaptures(step.Capture, result, varCtx)
-			if step.Assertions != nil {
-				if err := scenarios.EvalAssertions(step.Assertions, result); err != nil {
-					result.Error = err
+		e.activeVUs.Add(1)
+		for r := 0; r < repeat; r++ {
+			req, err := renderRequest(step, varCtx)
+			if err != nil {
+				e.collector.Add(metrics.Sample{Error: err, At: time.Now(), StepName: step.Name, Group: step.Group})
+				e.incFails()
+				continue
+			}
+
+			result := exec.Execute(ctx, req)
+			if errors.Is(result.Error, context.Canceled) || errors.Is(result.Error, context.DeadlineExceeded) {
+				e.activeVUs.Add(-1)
+				return
+			}
+
+			if result.Error == nil {
+				applyCaptures(step.Capture, result, varCtx)
+				if step.Assertions != nil {
+					if assertErr := scenarios.EvalAssertions(step.Assertions, result); assertErr != nil {
+						result.Error = assertErr
+					}
 				}
 			}
-		}
 
-		e.collector.Add(metrics.Sample{
-			Latency:    result.Latency,
-			StatusCode: result.StatusCode,
-			BytesRead:  result.BytesRead,
-			Error:      result.Error,
-			At:         time.Now(),
-			StepName:   step.Name,
-		})
+			e.collector.Add(metrics.Sample{
+				Latency:    result.Latency,
+				StatusCode: result.StatusCode,
+				BytesRead:  result.BytesRead,
+				Error:      result.Error,
+				At:         time.Now(),
+				StepName:   step.Name,
+				Group:      step.Group,
+			})
+
+			if result.Error != nil {
+				e.incFails()
+			} else {
+				e.consecutiveFails.Store(0)
+			}
+		}
 		e.activeVUs.Add(-1)
 
 		if step.Pause > 0 {
@@ -351,68 +407,165 @@ func (e *RampEngine) runRateWorker(ctx context.Context, lim *rate.Limiter) {
 }
 
 func (e *RampEngine) runVU(ctx context.Context) {
-	// Each VU gets its own cookie jar so session cookies persist across steps
-	// within the same VU without leaking to other VUs.
-	exec := protocols.Executor(e.cfg.Executor)
+	// Each VU gets its own cookie jar so session cookies persist across steps.
+	sessionExec := protocols.Executor(e.cfg.Executor)
 	if h, ok := e.cfg.Executor.(*protocols.HTTPExecutor); ok {
-		exec = h.NewSession()
+		sessionExec = h.NewSession()
 	}
 
-	varCtx := &scenarios.VarContext{
-		Vars:     e.cfg.Vars,
-		Captures: make(map[string]string),
-	}
-	if e.data != nil {
-		varCtx.Data = e.data.next()
-	}
-	stepIdx := 0
+	varCtx := e.newVarContext()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		default:
-			step := e.cfg.Steps[stepIdx%len(e.cfg.Steps)]
-			stepIdx++
+		}
 
-			req, err := renderRequest(step, varCtx)
-			if err != nil {
-				e.collector.Add(metrics.Sample{Error: err, At: time.Now()})
-				continue
+		for i := range e.cfg.Steps {
+			select {
+			case <-ctx.Done():
+				return
+			default:
 			}
 
-			result := exec.Execute(ctx, req)
-			if errors.Is(result.Error, context.Canceled) || errors.Is(result.Error, context.DeadlineExceeded) {
+			if e.isCircuitTripped() {
 				return
 			}
 
-			if result.Error == nil {
-				applyCaptures(step.Capture, result, varCtx)
-				if step.Assertions != nil {
-					if err := scenarios.EvalAssertions(step.Assertions, result); err != nil {
-						result.Error = err
-					}
-				}
+			step := e.cfg.Steps[i]
+
+			// M8: conditional skip
+			if step.If != "" && !scenarios.EvalCondition(step.If, varCtx) {
+				continue
 			}
 
-			e.collector.Add(metrics.Sample{
-				Latency:    result.Latency,
-				StatusCode: result.StatusCode,
-				BytesRead:  result.BytesRead,
-				Error:      result.Error,
-				At:         time.Now(),
-				StepName:   step.Name,
-			})
+			// M8: loop
+			repeat := step.Loop
+			if repeat < 1 {
+				repeat = 1
+			}
 
-			if step.Pause > 0 {
+			exec := e.stepExecutor(step, sessionExec)
+
+			for r := 0; r < repeat; r++ {
 				select {
-				case <-time.After(step.Pause):
 				case <-ctx.Done():
 					return
+				default:
+				}
+
+				req, err := renderRequest(step, varCtx)
+				if err != nil {
+					e.collector.Add(metrics.Sample{Error: err, At: time.Now(), StepName: step.Name, Group: step.Group})
+					e.incFails()
+					continue
+				}
+
+				result := exec.Execute(ctx, req)
+				if errors.Is(result.Error, context.Canceled) || errors.Is(result.Error, context.DeadlineExceeded) {
+					return
+				}
+
+				if result.Error == nil {
+					applyCaptures(step.Capture, result, varCtx)
+					if step.Assertions != nil {
+						if assertErr := scenarios.EvalAssertions(step.Assertions, result); assertErr != nil {
+							result.Error = assertErr
+						}
+					}
+				}
+
+				e.collector.Add(metrics.Sample{
+					Latency:    result.Latency,
+					StatusCode: result.StatusCode,
+					BytesRead:  result.BytesRead,
+					Error:      result.Error,
+					At:         time.Now(),
+					StepName:   step.Name,
+					Group:      step.Group,
+				})
+
+				if result.Error != nil {
+					e.incFails()
+				} else {
+					e.consecutiveFails.Store(0)
+				}
+
+				if step.Pause > 0 {
+					select {
+					case <-time.After(step.Pause):
+					case <-ctx.Done():
+						return
+					}
 				}
 			}
 		}
 	}
 }
+
+// newVarContext creates a VarContext for a new VU, pre-populated with setup captures.
+func (e *RampEngine) newVarContext() *scenarios.VarContext {
+	captures := make(map[string]string, len(e.setupCaptures))
+	for k, v := range e.setupCaptures {
+		captures[k] = v
+	}
+	ctx := &scenarios.VarContext{
+		Vars:     e.cfg.Vars,
+		Captures: captures,
+	}
+	if e.data != nil {
+		ctx.Data = e.data.next()
+	}
+	return ctx
+}
+
+// stepExecutor returns the correct executor for a step (protocol + retry wrapper).
+// sessionExec is the HTTP session executor for the current VU; pass e.cfg.Executor for rate mode.
+func (e *RampEngine) stepExecutor(step RampStep, sessionExec protocols.Executor) protocols.Executor {
+	var base protocols.Executor
+	if step.Protocol == "websocket" {
+		if e.cfg.WSExecutor != nil {
+			base = e.cfg.WSExecutor
+		} else {
+			base = protocols.NewWSExecutor()
+		}
+	} else {
+		base = sessionExec
+	}
+	if step.Retry != nil && step.Retry.Count > 0 {
+		return protocols.NewRetryingExecutor(base, step.Retry.Count, step.Retry.On, step.Retry.BackoffMs)
+	}
+	return base
+}
+
+// pickExecutor selects the executor for a step without a session (setup/teardown/rate mode).
+func (e *RampEngine) pickExecutor(step RampStep) protocols.Executor {
+	return e.stepExecutor(step, e.cfg.Executor)
+}
+
+// executeSingleStep runs a step once; used by setup and teardown.
+func (e *RampEngine) executeSingleStep(ctx context.Context, step RampStep, varCtx *scenarios.VarContext, exec protocols.Executor) {
+	req, err := renderRequest(step, varCtx)
+	if err != nil {
+		return
+	}
+	result := exec.Execute(ctx, req)
+	if result.Error == nil {
+		applyCaptures(step.Capture, result, varCtx)
+	}
+}
+
+// isCircuitTripped returns true when the circuit breaker has fired.
+func (e *RampEngine) isCircuitTripped() bool {
+	cb := e.cfg.CircuitBreaker
+	if cb == nil || cb.ConsecutiveFailures <= 0 {
+		return false
+	}
+	return int(e.consecutiveFails.Load()) >= cb.ConsecutiveFailures
+}
+
+func (e *RampEngine) incFails() { e.consecutiveFails.Add(1) }
 
 // renderRequest resolves template tokens in the step's URL, headers, and body,
 // then applies any auth helper.
