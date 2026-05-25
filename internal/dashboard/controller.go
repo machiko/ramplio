@@ -56,6 +56,36 @@ type ScenarioMeta struct {
 	TeardownCount int      `json:"teardown_count,omitempty"`
 }
 
+// DiscoverRequest describes a capacity discovery run started from the web UI.
+type DiscoverRequest struct {
+	URL           string `json:"url"`
+	Tolerance     string `json:"tolerance"`     // e.g. "2s", "500ms"; defaults to "2s"
+	MaxRPS        int    `json:"max_rps"`        // default 500
+	ProbeDuration string `json:"probe_duration"` // e.g. "15s"; default "15s"
+}
+
+// DiscoverProbeSnap is a single probe result pushed over WebSocket.
+type DiscoverProbeSnap struct {
+	RPS      int     `json:"rps"`
+	P99Ms    int64   `json:"p99_ms"`
+	ErrorPct float64 `json:"error_pct"`
+	Status   string  `json:"status"` // "pass", "warn", "fail"
+}
+
+// DiscoverResultSnap is the final capacity report pushed over WebSocket.
+type DiscoverResultSnap struct {
+	SafeLimit     int  `json:"safe_limit"`
+	BreakingPoint int  `json:"breaking_point"`
+	Exhausted     bool `json:"exhausted"`
+}
+
+// DiscoverCurrentSnap describes the probe currently in progress.
+type DiscoverCurrentSnap struct {
+	RPS             int   `json:"rps"`
+	ElapsedMs       int64 `json:"elapsed_ms"`
+	ProbeDurationMs int64 `json:"probe_duration_ms"`
+}
+
 // Controller extends LiveProvider with start/stop lifecycle control for the web dashboard.
 type Controller interface {
 	reporter.LiveProvider
@@ -79,4 +109,11 @@ type Controller interface {
 	// WriteReport generates an HTML report for the last completed test and writes it to w.
 	// Returns an error if no test has completed yet.
 	WriteReport(w io.Writer) error
+	// StartDiscover launches a capacity discovery probe in the background.
+	// Returns an error if a test is already running or if req is invalid.
+	StartDiscover(req DiscoverRequest) error
+	// DiscoverProgress returns accumulated probe results, the final result (non-nil when done),
+	// the currently running probe (non-nil while a probe is in progress), the planned probe
+	// sequence, and whether the controller is currently in discover mode.
+	DiscoverProgress() (probes []DiscoverProbeSnap, result *DiscoverResultSnap, current *DiscoverCurrentSnap, probeSeq []int, active bool)
 }

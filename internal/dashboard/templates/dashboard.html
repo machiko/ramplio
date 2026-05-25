@@ -1137,13 +1137,218 @@
       flex-shrink: 0;
     }
     .step-name { font-family: ui-monospace, monospace; }
+
+    /* ── Discover View ───────────────────────────────── */
+    .discover-view {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      padding: 32px 24px;
+      max-width: 660px;
+      margin: 0 auto;
+      width: 100%;
+    }
+    .discover-header { margin-bottom: 24px; }
+    .discover-title {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 6px;
+    }
+    .discover-subtitle { font-size: 13px; color: var(--muted); }
+    .probe-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 20px;
+      font-family: var(--font-mono);
+      font-size: 13px;
+    }
+    .probe-table th {
+      text-align: left;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 0 14px 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    .probe-table td {
+      padding: 9px 14px;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+      color: var(--text);
+    }
+    .probe-row-pass td:last-child { color: var(--green); }
+    .probe-row-warn td:last-child { color: var(--amber); }
+    .probe-row-fail td:last-child { color: var(--red); }
+    .probe-scanning {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 14px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .pulse-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--accent);
+      animation: pulse 1.2s infinite;
+      flex-shrink: 0;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    /* ── Probe Stepper ──────────────────────────────── */
+    .probe-stepper {
+      margin-bottom: 20px;
+    }
+    .probe-stepper-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: var(--muted);
+      margin-bottom: 10px;
+    }
+    .probe-steps {
+      display: flex;
+      align-items: flex-start;
+      gap: 0;
+      flex-wrap: wrap;
+      row-gap: 8px;
+    }
+    .probe-step {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      color: var(--muted);
+      font-family: var(--font-mono);
+      min-width: 44px;
+      position: relative;
+    }
+    .probe-step:not(:last-child)::after {
+      content: '';
+      position: absolute;
+      top: 5px;
+      left: calc(50% + 5px);
+      width: calc(100% - 10px);
+      height: 2px;
+      background: var(--border);
+    }
+    .probe-step.done::after { background: var(--green); opacity: 0.5; }
+    .probe-step-dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: var(--border);
+      transition: background 0.3s, box-shadow 0.3s;
+      z-index: 1;
+    }
+    .probe-step.pending .probe-step-dot { background: var(--border); }
+    .probe-step.done .probe-step-dot { background: var(--green); }
+    .probe-step.done { color: var(--green); }
+    .probe-step.warn .probe-step-dot { background: var(--amber); }
+    .probe-step.warn { color: var(--amber); }
+    .probe-step.fail .probe-step-dot { background: var(--red); }
+    .probe-step.fail { color: var(--red); }
+    .probe-step.active .probe-step-dot {
+      background: var(--accent);
+      box-shadow: 0 0 8px var(--accent);
+      animation: pulse 1.2s infinite;
+    }
+    .probe-step.active { color: var(--accent2); }
+
+    /* ── Current probe progress card ────────────────── */
+    .probe-current-card {
+      background: rgba(124,58,237,.07);
+      border: 1px solid rgba(124,58,237,.25);
+      border-radius: var(--radius);
+      padding: 14px 18px;
+      margin-bottom: 20px;
+    }
+    .probe-current-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .probe-current-label {
+      font-size: 13px;
+      color: var(--text);
+      flex: 1;
+    }
+    .probe-current-timer {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+    .probe-progress-track {
+      height: 4px;
+      background: var(--border);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .probe-progress-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 2px;
+      transition: width 0.5s linear;
+    }
+
+    /* ── Capacity Report Cards ───────────────────────── */
+    .capacity-cards {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .capacity-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px 24px;
+    }
+    .capacity-card-label {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
+      margin-bottom: 10px;
+    }
+    .capacity-card-value {
+      font-size: 34px;
+      font-weight: 700;
+      font-family: var(--font-mono);
+      color: var(--accent2);
+      margin-bottom: 4px;
+      font-variant-numeric: tabular-nums;
+    }
+    .capacity-card-unit { font-size: 13px; color: var(--muted); }
+    .capacity-card.safe  .capacity-card-value { color: var(--green); }
+    .capacity-card.breaking .capacity-card-value { color: var(--red); }
+    .capacity-insight {
+      background: rgba(124,58,237,.06);
+      border: 1px solid rgba(124,58,237,.2);
+      border-left: 3px solid var(--accent);
+      border-radius: 0 var(--radius) var(--radius) 0;
+      padding: 14px 18px;
+      font-size: 13px;
+      color: var(--text);
+      line-height: 1.8;
+      margin-bottom: 24px;
+    }
+    .ci-hl { color: var(--accent2); font-weight: 700; }
   </style>
 </head>
 <body>
 <div id="app">
 
   <!-- ── Header (always visible) ───────────────────── -->
-  <header class="header" :class="{ 'is-live': view === 'live' }">
+  <header class="header" :class="{ 'is-live': view === 'live' || view === 'discover-live' }">
     <div class="logo">
       <div class="logo-dot"></div>
       Ramplio
@@ -1157,8 +1362,8 @@
         <span>{{ Math.round(snap.stage_pct * 100) }}%</span>
       </div>
       <div class="status-badge">
-        <div class="status-dot" :class="view === 'live' ? 'live' : view === 'result' ? 'done' : 'idle'"></div>
-        {{ view === 'live' ? 'Live' : view === 'result' ? 'Done' : 'Ready' }}
+        <div class="status-dot" :class="(view === 'live' || view === 'discover-live') ? 'live' : (view === 'result' || view === 'discover-result') ? 'done' : 'idle'"></div>
+        {{ view === 'live' ? 'Live' : view === 'discover-live' ? 'Scanning' : (view === 'result' || view === 'discover-result') ? 'Done' : 'Ready' }}
       </div>
     </div>
   </header>
@@ -1172,6 +1377,7 @@
         <button class="mode-tab" :class="{ active: setupMode === 'url' }" @click="setupMode = 'url'">URL 模式</button>
         <button class="mode-tab" :class="{ active: setupMode === 'scenario' }" @click="setupMode = 'scenario'; clearScenario()">情境模式</button>
         <button class="mode-tab" :class="{ active: setupMode === 'guided' }" @click="setupMode = 'guided'; wizardStep = 1">引導模式</button>
+        <button class="mode-tab" :class="{ active: setupMode === 'discover' }" @click="setupMode = 'discover'">⚡ 探測上限</button>
       </div>
 
       <!-- ── URL mode ── -->
@@ -1373,6 +1579,51 @@
             <div v-if="formError" class="error-msg">{{ formError }}</div>
           </template>
 
+        </div>
+      </template>
+
+      <!-- ── Discover mode ── -->
+      <template v-else-if="setupMode === 'discover'">
+        <div class="setup-subtitle">自動以遞增速率探測你的網站，找出最大吞吐量上限。不需要了解負載測試知識。</div>
+        <div class="setup-form-box">
+          <div class="field">
+            <div class="field-label-row"><label>Target URL</label></div>
+            <input v-model="discoverForm.url" type="url" placeholder="https://example.com/" autocomplete="off" />
+          </div>
+          <div class="field-row">
+            <div class="field">
+              <div class="field-label-row"><label>可接受回應時間</label></div>
+              <select v-model="discoverForm.tolerance">
+                <option value="500ms">500ms（嚴格）</option>
+                <option value="1s">1s</option>
+                <option value="2s">2s（預設）</option>
+                <option value="5s">5s（寬鬆）</option>
+              </select>
+              <div class="field-hint">p99 超過此值視為超標</div>
+            </div>
+            <div class="field">
+              <div class="field-label-row"><label>最大探測 RPS</label></div>
+              <input v-model.number="discoverForm.maxRPS" type="number" min="10" max="5000" placeholder="500" />
+              <div class="field-hint">停在此速率為止</div>
+            </div>
+          </div>
+          <button class="btn-run" :disabled="submitting || !discoverForm.url" @click="startDiscover">
+            {{ submitting ? 'Starting…' : '⚡  開始探測' }}
+          </button>
+          <div v-if="formError" class="error-msg">{{ formError }}</div>
+        </div>
+        <div class="metric-guide">
+          <div class="metric-guide-title">探測上限怎麼運作？</div>
+          <div class="metric-guide-grid">
+            <div class="metric-guide-item">
+              <div class="metric-guide-name">自動遞增探測</div>
+              <div class="metric-guide-desc">從 5 RPS 開始逐漸提升，每個速率持續測試約 15 秒，自動偵測臨界點。</div>
+            </div>
+            <div class="metric-guide-item">
+              <div class="metric-guide-name">容量報告</div>
+              <div class="metric-guide-desc">測試完成後，顯示「安全上限」與「臨界點」，並附上白話說明，PM 也能直接讀懂。</div>
+            </div>
+          </div>
         </div>
       </template>
 
@@ -1946,6 +2197,168 @@
     </div>
   </div>
 
+  <!-- ── Discover Live View ────────────────────────── -->
+  <template v-else-if="view === 'discover-live'">
+    <div class="discover-view">
+      <div class="discover-header">
+        <div class="discover-title">⚡ 探測吞吐量上限中…</div>
+        <div class="discover-subtitle">{{ discoverForm.url }}</div>
+      </div>
+
+      <!-- Probe sequence stepper -->
+      <div v-if="discoverProbeSeq && discoverProbeSeq.length > 0" class="probe-stepper">
+        <div class="probe-stepper-label">探測計畫（共 {{ discoverProbeSeq.length }} 級）</div>
+        <div class="probe-steps">
+          <div
+            v-for="rps in discoverProbeSeq"
+            :key="rps"
+            class="probe-step"
+            :class="probeStepClass(rps)"
+          >
+            <div class="probe-step-dot"></div>
+            <div class="probe-step-rps">{{ rps }}</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Current probe in progress -->
+      <div v-if="discoverCurrent" class="probe-current-card">
+        <div class="probe-current-header">
+          <span class="pulse-dot"></span>
+          <span class="probe-current-label">正在測試 <strong>{{ discoverCurrent.rps }} RPS</strong></span>
+          <span class="probe-current-timer">
+            {{ Math.ceil(discoverCurrent.elapsed_ms / 1000) }}s / {{ Math.ceil(discoverCurrent.probe_duration_ms / 1000) }}s
+          </span>
+        </div>
+        <div class="probe-progress-track">
+          <div
+            class="probe-progress-fill"
+            :style="{ width: Math.min(100, discoverCurrent.elapsed_ms / discoverCurrent.probe_duration_ms * 100) + '%' }"
+          ></div>
+        </div>
+      </div>
+      <div v-else-if="discoverProbes.length === 0" class="probe-scanning">
+        <span class="pulse-dot"></span> 初始化中，準備第一個探測點…
+      </div>
+
+      <!-- Completed probes table -->
+      <table v-if="discoverProbes.length > 0" class="probe-table">
+        <thead>
+          <tr>
+            <th>RPS</th>
+            <th>P99 延遲</th>
+            <th>錯誤率</th>
+            <th>狀態</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="p in discoverProbes" :key="p.rps" :class="'probe-row-' + p.status">
+            <td>{{ p.rps }}</td>
+            <td>{{ p.p99_ms >= 1000 ? (p.p99_ms / 1000).toFixed(1) + 's' : p.p99_ms + 'ms' }}</td>
+            <td>{{ p.error_pct.toFixed(1) }}%</td>
+            <td>{{ p.status === 'pass' ? '✓ 正常' : p.status === 'warn' ? '⚠ 警告' : '✗ 超標' }}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="control-bar">
+        <div class="control-left">
+          探測進行中
+          <span v-if="discoverProbeSeq && discoverProbeSeq.length > 0">
+            · {{ discoverProbes.length }} / {{ discoverProbeSeq.length }} 完成
+          </span>
+        </div>
+        <button class="btn-stop" @click="stopTest">■&nbsp; Stop</button>
+      </div>
+    </div>
+  </template>
+
+  <!-- ── Discover Result View ──────────────────────── -->
+  <div v-else-if="view === 'discover-result'" class="result-view">
+    <div class="result-header">
+      <span class="result-title result-pass">⚡</span>
+      <span class="result-title">容量報告</span>
+    </div>
+
+    <div style="padding: 0 24px 0;">
+      <div class="capacity-cards">
+        <div class="capacity-card safe">
+          <div class="capacity-card-label">安全上限</div>
+          <div class="capacity-card-value">
+            {{ discoverResult && discoverResult.safe_limit > 0 ? '~' + discoverResult.safe_limit : '&lt; 5' }}
+          </div>
+          <div class="capacity-card-unit">req / sec</div>
+        </div>
+        <div class="capacity-card breaking">
+          <div class="capacity-card-label">臨界點</div>
+          <div class="capacity-card-value">
+            {{ discoverResult && discoverResult.breaking_point > 0 ? '~' + discoverResult.breaking_point : discoverResult && discoverResult.exhausted ? '未到達' : '已中止' }}
+          </div>
+          <div class="capacity-card-unit">req / sec</div>
+        </div>
+      </div>
+
+      <div class="capacity-insight">
+        <template v-if="!discoverResult || !discoverResult.safe_limit">
+          <template v-if="discoverProbes.length > 0 && discoverProbes[0].status === 'fail'">
+            <!-- First probe failed with data — latency or error rate issue -->
+            <template v-if="discoverProbes[0].error_pct >= 3">
+              第一個探測點（{{ discoverProbes[0].rps }} RPS）的錯誤率為
+              <span class="ci-hl">{{ discoverProbes[0].error_pct.toFixed(1) }}%</span>，
+              超過容忍門檻。建議先確認服務正常或放寬「可接受回應時間」再重新探測。
+            </template>
+            <template v-else>
+              第一個探測點（{{ discoverProbes[0].rps }} RPS）的 p99 延遲為
+              <span class="ci-hl">{{ discoverProbes[0].p99_ms >= 1000 ? (discoverProbes[0].p99_ms/1000).toFixed(1)+'s' : discoverProbes[0].p99_ms+'ms' }}</span>，
+              已超出設定的容忍門檻。可嘗試調高「可接受回應時間」，或換一個較近的測試目標。
+            </template>
+          </template>
+          <template v-else>
+            探測未能收集到任何回應。請確認目標 URL 可以從此網路環境正常存取後再試。
+          </template>
+        </template>
+        <template v-else-if="discoverResult.exhausted">
+          你的網站承受了所有 <span class="ci-hl">{{ discoverProbes.length }} 個探測等級</span>的考驗，
+          最大安全吞吐量超過 <span class="ci-hl">{{ discoverResult.safe_limit }} req/sec</span>。
+          使用更高的 <code style="color:var(--accent2)">Max RPS</code> 繼續探測。
+        </template>
+        <template v-else>
+          你的網站可以舒適地承受約 <span class="ci-hl">{{ discoverResult.safe_limit }} req/sec</span>。
+          超過這個速率後，回應時間或錯誤率開始上升。
+        </template>
+      </div>
+    </div>
+
+    <!-- Probe breakdown table -->
+    <div class="step-table-wrap">
+      <div class="step-table-title">探測詳情</div>
+      <table class="step-table">
+        <thead>
+          <tr>
+            <th class="st-name">RPS</th>
+            <th class="st-num">P99 延遲</th>
+            <th class="st-num">錯誤率</th>
+            <th class="st-num">狀態</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="p in discoverProbes" :key="p.rps">
+            <td class="st-name" style="font-family:var(--font-mono)">{{ p.rps }}</td>
+            <td class="st-num" :class="latClass(p.p99_ms)">{{ p.p99_ms >= 1000 ? (p.p99_ms/1000).toFixed(1)+'s' : p.p99_ms+'ms' }}</td>
+            <td class="st-num" :class="errClass(p.error_pct)">{{ p.error_pct.toFixed(1) }}%</td>
+            <td class="st-num" :style="{ color: p.status === 'pass' ? 'var(--green)' : p.status === 'warn' ? 'var(--amber)' : 'var(--red)' }">
+              {{ p.status === 'pass' ? '✓' : p.status === 'warn' ? '⚠' : '✗' }}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="result-actions">
+      <button class="btn-again" @click="resetSetup">▶&nbsp; 重新探測</button>
+    </div>
+  </div>
+
 </div>
 
 <script>
@@ -1981,6 +2394,13 @@ createApp({
     const activeGuidedProfile = ref(null); // received from WS while guided test runs
 
     const form = reactive({ url: '', method: 'GET', vus: 50, rps: 100, duration: '30s' });
+
+    // Discover state
+    const discoverForm = reactive({ url: '', tolerance: '2s', maxRPS: 500 });
+    const discoverProbes = ref([]);
+    const discoverResult = ref(null);
+    const discoverCurrent = ref(null);
+    const discoverProbeSeq = ref([]);
 
     const snap = reactive({
       rps: 0, total: 0, errors: 0, error_pct: 0,
@@ -2135,6 +2555,28 @@ createApp({
         if (d.guided_profile) {
           activeGuidedProfile.value = d.guided_profile;
           testMode.value = 'guided';
+        }
+
+        // Discover mode: separate from normal live/result flow
+        if (d.discover_mode) {
+          if (d.state === 'running' && view.value !== 'discover-live') {
+            discoverProbes.value = [];
+            discoverResult.value = null;
+            discoverCurrent.value = null;
+            discoverProbeSeq.value = [];
+            view.value = 'discover-live';
+          }
+          if (d.discover_probes) discoverProbes.value = d.discover_probes;
+          if (d.discover_result) discoverResult.value = d.discover_result;
+          discoverCurrent.value = d.discover_current || null;
+          if (d.discover_probe_seq && d.discover_probe_seq.length > 0) {
+            discoverProbeSeq.value = d.discover_probe_seq;
+          }
+          if (d.state === 'done' && view.value === 'discover-live') {
+            discoverCurrent.value = null;
+            view.value = 'discover-result';
+          }
+          return;
         }
 
         if (d.state === 'running' && view.value !== 'live') {
@@ -2374,8 +2816,41 @@ createApp({
       formError.value = '';
     }
 
+    async function startDiscover() {
+      submitting.value = true;
+      formError.value = '';
+      try {
+        const res = await fetch('/api/discover', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            url: discoverForm.url,
+            tolerance: discoverForm.tolerance,
+            max_rps: discoverForm.maxRPS,
+            probe_duration: '15s',
+          }),
+        });
+        if (!res.ok) { formError.value = await res.text(); return; }
+      } catch (err) {
+        formError.value = err.message || 'Connection error';
+      } finally {
+        submitting.value = false;
+      }
+    }
+
     async function stopTest() { await fetch('/api/stop', { method: 'POST' }); }
     function resetSetup() { view.value = 'setup'; formError.value = ''; }
+
+    function probeStepClass(rps) {
+      const probe = discoverProbes.value.find(p => p.rps === rps);
+      if (probe) {
+        if (probe.status === 'pass') return 'done';
+        if (probe.status === 'warn') return 'warn';
+        return 'fail';
+      }
+      if (discoverCurrent.value && discoverCurrent.value.rps === rps) return 'active';
+      return 'pending';
+    }
 
 
     onMounted(async () => { await nextTick(); initCharts(); connect(); });
@@ -2523,7 +2998,9 @@ createApp({
       testMode, testRPS,
       wizardStep, guided, activeGuidedProfile, wizardDuration,
       rpsCanvas, latCanvas, finalVerdict, nlSummary, lastStepMetrics, lastGroupMetrics,
-      runTest, startScenario, stopTest, resetSetup,
+      discoverForm, discoverProbes, discoverResult, discoverCurrent, discoverProbeSeq,
+      probeStepClass,
+      runTest, startScenario, stopTest, resetSetup, startDiscover,
       triggerFileInput, handleFileChange, handleDrop, clearScenario,
       triggerHarInput, handleHarFileChange, handleHarDrop,
       triggerScenarioInput, handleScenarioFileChange, handleScenarioDrop,

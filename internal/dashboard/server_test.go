@@ -42,6 +42,10 @@ func (m *mockController) WriteReport(w io.Writer) error {
 	_, err := io.WriteString(w, "<html>mock report</html>")
 	return err
 }
+func (m *mockController) StartDiscover(_ dashboard.DiscoverRequest) error { return nil }
+func (m *mockController) DiscoverProgress() ([]dashboard.DiscoverProbeSnap, *dashboard.DiscoverResultSnap, *dashboard.DiscoverCurrentSnap, []int, bool) {
+	return nil, nil, nil, nil, false
+}
 func (m *mockController) Start(req dashboard.RunRequest) error {
 	if m.startErr != nil {
 		return m.startErr

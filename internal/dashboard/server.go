@@ -54,9 +54,14 @@ type wsMessage struct {
 	State         State          `json:"state"`
 	Result        *RunResult     `json:"result,omitempty"`
 	ScenarioInfo  *ScenarioMeta  `json:"scenario_info,omitempty"`
-	GuidedProfile *GuidedProfile `json:"guided_profile,omitempty"` // non-nil during a guided test
-	StepMetrics   []StepMetric   `json:"step_metrics,omitempty"`
-	GroupMetrics  []GroupMetric  `json:"group_metrics,omitempty"`
+	GuidedProfile  *GuidedProfile     `json:"guided_profile,omitempty"` // non-nil during a guided test
+	StepMetrics    []StepMetric       `json:"step_metrics,omitempty"`
+	GroupMetrics   []GroupMetric      `json:"group_metrics,omitempty"`
+	DiscoverMode    bool                 `json:"discover_mode,omitempty"`
+	DiscoverProbes  []DiscoverProbeSnap  `json:"discover_probes,omitempty"`
+	DiscoverResult  *DiscoverResultSnap  `json:"discover_result,omitempty"`
+	DiscoverCurrent *DiscoverCurrentSnap `json:"discover_current,omitempty"`
+	DiscoverProbeSeq []int              `json:"discover_probe_seq,omitempty"`
 }
 
 // Server serves the embedded dashboard HTML and streams live metrics over WebSocket.
@@ -95,6 +100,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/scenario", s.handleScenario)
 	mux.HandleFunc("/api/import-har", s.handleImportHAR)
 	mux.HandleFunc("/api/report", s.handleReport)
+	mux.HandleFunc("/api/discover", s.handleDiscover)
 
 	srv := &http.Server{Handler: mux}
 	s.ctx = ctx
@@ -279,7 +285,32 @@ func (s *Server) buildWSMessage() wsMessage {
 	if len(snap.GroupMetrics) > 0 {
 		msg.GroupMetrics = toWSGroupMetrics(snap.GroupMetrics)
 	}
+	probes, discResult, discCurrent, discSeq, discActive := s.ctrl.DiscoverProgress()
+	if discActive {
+		msg.DiscoverMode = true
+		msg.DiscoverProbes = probes
+		msg.DiscoverResult = discResult
+		msg.DiscoverCurrent = discCurrent
+		msg.DiscoverProbeSeq = discSeq
+	}
 	return msg
+}
+
+func (s *Server) handleDiscover(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req DiscoverRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if err := s.ctrl.StartDiscover(req); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	w.WriteHeader(http.StatusAccepted)
 }
 
 func toWSStepMetrics(steps []metrics.StepSummary) []StepMetric {

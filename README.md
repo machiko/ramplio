@@ -6,6 +6,7 @@
 
 ## 功能特色
 
+- **Capacity Discovery** — 一行指令自動探測網站最大吞吐量：從 5 RPS 遞增探測、偵測臨界點、輸出白話容量報告，適合 PM 與非技術人員直接使用
 - **HAR Import** — 從 Chrome/Firefox DevTools 錄製直接產生 scenario.yaml，自動偵測登入步驟並注入 bearer auth
 - **Per-step Metrics** — TUI 與 Dashboard 即時顯示每個步驟的 p50/p99/錯誤率，精確定位瓶頸步驟
 - **單行指令或 YAML 驅動** — 直接指定 URL，或描述複雜的多階段測試情境
@@ -118,6 +119,59 @@ ramplio run --scenario smoke.yaml
 
 ---
 
+## Capacity Discovery
+
+不需要了解 VU 或 RPS 是什麼——直接告訴 Ramplio 網址，它自動幫你找出網站的最大承載量：
+
+```bash
+ramplio discover --url https://example.com
+```
+
+```
+  Target:    https://example.com
+  Tolerance: p99 < 2s, error rate < 1%
+  Probes:    up to 9 levels (est. 2–4 min)
+
+  Probing throughput capacity...
+
+      5 rps  ✓  p99=180ms    errors=0.0%
+     10 rps  ✓  p99=210ms    errors=0.0%
+     20 rps  ✓  p99=340ms    errors=0.0%
+     40 rps  ✓  p99=820ms    errors=0.0%
+     75 rps  ⚠  p99=1.9s     errors=0.3%
+    125 rps  ✗  p99=4.2s     errors=2.8%
+
+  ┌──────────────────────────────────────────────┐
+  │  Capacity Report                             │
+  ├──────────────────────────────────────────────┤
+  │  Safe limit:     ~40 req/sec                 │
+  │  Breaking point: ~125 req/sec                │
+  ├──────────────────────────────────────────────┤
+  │  What this means:                            │
+  │                                              │
+  │  Your site handles about 40 requests per     │
+  │  second comfortably. Above that, response    │
+  │  times climb beyond 2s.                      │
+  └──────────────────────────────────────────────┘
+```
+
+也可以從網頁儀表板的「⚡ 探測上限」分頁直接操作，包含即時探測進度表格與容量報告卡片，PM 不需要技術背景也能讀懂結果。
+
+**常用選項：**
+
+```bash
+# 使用更嚴格的回應時間標準
+ramplio discover --url https://api.example.com --tolerance 500ms
+
+# 探測到更高的 RPS
+ramplio discover --url https://example.com --max-rps 1000
+
+# 縮短每個探測點的時間（較快但精準度略低）
+ramplio discover --url https://example.com --probe-duration 10s
+```
+
+---
+
 ## HAR Import
 
 從瀏覽器錄製直接產生 scenario.yaml，無需手寫：
@@ -178,6 +232,15 @@ make stop-dashboard         # 停止（port 9999）
 make stop-dashboard PORT=8080
 ```
 
+儀表板提供四種操作模式：
+
+| 分頁 | 說明 |
+|------|------|
+| URL 模式 | 直接填入 URL 啟動測試，支援 VU 或固定 RPS |
+| 情境模式 | 上傳 HAR 或 YAML 情境檔執行多步驟測試 |
+| 引導模式 | PM 精靈：幾個業務問題自動轉換成測試配置 |
+| ⚡ 探測上限 | 自動探測網站最大吞吐量，輸出容量報告 |
+
 RPS、延遲百分位數、錯誤率與活躍 VU 數的即時時序圖表——透過內嵌的 Vue 3 SPA 直接由執行檔提供服務，無需任何額外部署。
 
 ---
@@ -212,6 +275,16 @@ Flags:
       --dashboard             開啟即時網頁儀表板
       --dashboard-port int    儀表板 HTTP 埠（預設 9999）
       --prometheus string     公開 Prometheus 指標端點（例如 :9100）
+```
+
+```
+ramplio discover [flags]
+
+Flags:
+  -u, --url string             目標 URL（必填）
+      --tolerance string       可接受的 p99 回應時間（預設 "2s"，例如 500ms、1s）
+      --max-rps int            最高探測速率（預設 500）
+      --probe-duration string  每個探測點的持續時間（預設 "15s"）
 ```
 
 ```

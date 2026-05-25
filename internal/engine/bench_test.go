@@ -136,6 +136,10 @@ func (c *benchController) ScenarioInfo() *dashboard.ScenarioMeta             { r
 func (c *benchController) LoadScenario(_ []byte) error                       { return nil }
 func (c *benchController) ActiveGuidedProfile() *dashboard.GuidedProfile     { return nil }
 func (c *benchController) WriteReport(_ io.Writer) error                     { return fmt.Errorf("no report") }
+func (c *benchController) StartDiscover(_ dashboard.DiscoverRequest) error   { return nil }
+func (c *benchController) DiscoverProgress() ([]dashboard.DiscoverProbeSnap, *dashboard.DiscoverResultSnap, *dashboard.DiscoverCurrentSnap, []int, bool) {
+	return nil, nil, nil, nil, false
+}
 
 // BenchmarkRampEngine_WithDashboard runs the same ramp profile as BenchmarkRampEngine
 // but with a live dashboard server and one active WebSocket consumer attached.
