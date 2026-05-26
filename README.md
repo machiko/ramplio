@@ -501,6 +501,111 @@ steps:
 
 ---
 
+## 條件邏輯：if 欄位與 AND/OR 運算
+
+`if` 欄位用來控制步驟是否執行，支援複雜的布林邏輯（AND、OR、括號優先級）。典型場景是根據前一步驟的回應結果，決定是否執行後續步驟。
+
+### 基本語法
+
+```yaml
+steps:
+  - name: Step A
+    method: GET
+    url: https://api.example.com/status
+    capture:
+      status: $.data.status
+      version: $.data.version
+
+  # 簡單比較：只有當 status 等於 "ok" 時執行
+  - name: Step B (only if status ok)
+    method: GET
+    url: https://api.example.com/data
+    if: 'capture.status == "ok"'
+    assertions:
+      status: 200
+
+  # 不相等比較：只有當 version 不是 "1.0" 時執行
+  - name: Step C (version check)
+    method: GET
+    url: https://api.example.com/config
+    if: 'capture.version != "1.0"'
+```
+
+### 支援的比較運算子
+
+| 運算子 | 說明 | 範例 |
+|--------|------|------|
+| `==` | 等於 | `capture.code == "200"` |
+| `!=` | 不等於 | `capture.error != ""` |
+| `<` | 小於（數值） | `capture.latency < 1000` |
+| `<=` | 小於等於 | `capture.count <= 100` |
+| `>` | 大於 | `capture.price > 0` |
+| `>=` | 大於等於 | `capture.retry_count >= 3` |
+
+### AND 邏輯
+
+必須所有條件都為真才執行步驟：
+
+```yaml
+  # 只有當 token 存在 AND token_type 是 Bearer 時執行
+  - name: Call authenticated endpoint
+    method: GET
+    url: https://api.example.com/protected
+    if: 'capture.token != "" AND capture.token_type == "Bearer"'
+    headers:
+      Authorization: "Bearer {{capture.token}}"
+```
+
+### OR 邏輯
+
+至少有一個條件為真就執行步驟：
+
+```yaml
+  # 只有當沒有取得 token 或 token 已過期時執行備用路徑
+  - name: Fallback auth path
+    method: POST
+    url: https://api.example.com/refresh
+    if: 'capture.token == "" OR capture.token_expired == "true"'
+    body: '{"action":"refresh"}'
+```
+
+### 混合 AND/OR 與括號優先級
+
+當同時使用 AND 和 OR 時，使用括號明確優先級（AND 優先級高於 OR）：
+
+```yaml
+  # 有庫存 AND (價格便宜 OR 正在打折)
+  - name: Add to cart
+    method: POST
+    url: https://api.example.com/cart/add
+    if: 'capture.stock != "0" AND (capture.price < "100" OR capture.on_sale == "true")'
+    body: '{"product_id":"123"}'
+    assertions:
+      status: 200
+
+  # 不同等價形式：(A AND B) OR (C AND D)
+  - name: Conditional checkout
+    method: POST
+    url: https://api.example.com/checkout
+    if: '(capture.cart_id != "" AND capture.total > "0") OR (capture.express_checkout == "true")'
+```
+
+### 注意事項
+
+- **空字符串檢查：** `capture.token != ""` 檢查欄位是否存在且非空
+- **數值比較：** 數字會自動轉換，`"100" < "200"` 和 `100 < 200` 都能正常比較
+- **步驟執行順序：** 即使某個步驟被 if 跳過，後續步驟仍會正常執行
+- **Capture 作用域：** 同一個步驟內的 capture 在該步驟的 if 條件中不可用（capture 在步驟執行後才生效）
+
+### 完整範例
+
+見 `testdata/` 中的示例場景：
+- `conditional-flow.yaml` — 登入流程，根據 token 狀態進行不同操作
+- `complex-conditions.yaml` — 購物車場景，展示複雜的 AND/OR 邏輯
+- `simple-if-example.yaml` — 簡單的 if 用法
+
+---
+
 ## 即時網頁儀表板
 
 ```bash

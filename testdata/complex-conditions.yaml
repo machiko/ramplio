@@ -1,0 +1,98 @@
+name: 複雜條件邏輯示例
+
+# 展示 AND、OR 的優先級與括號使用
+# 場景：API 網關測試，根據回應狀態和額外欄位決定後續動作
+
+stages:
+  - duration: 30s
+    target: 5
+  - duration: 30s
+    target: 0
+
+steps:
+  # 步驟 1：查詢商品價格和庫存
+  - name: GET /products/123
+    method: GET
+    url: https://httpbin.org/get
+    capture:
+      price: $.data.price
+      stock: $.data.stock
+      is_on_sale: $.data.on_sale
+      discount_percent: $.data.discount
+    assertions:
+      status: 200
+
+  # 步驟 2：加入購物車
+  # if 條件：有庫存 AND (價格合理 OR 正在打折)
+  # 等價於：stock > 0 AND (price < 1000 OR discount_percent > 10)
+  - name: POST /cart/add
+    method: POST
+    url: https://httpbin.org/post
+    if: 'capture.stock != "0" AND (capture.price != "" OR capture.discount_percent != "")'
+    body: '{"product_id":123,"quantity":1}'
+    headers:
+      Content-Type: application/json
+    capture:
+      cart_id: $.cart_id
+      item_count: $.item_count
+    assertions:
+      status: 200
+
+  # 步驟 3：套用折扣碼
+  # if 條件：只有在打折商品且加入購物車成功時
+  - name: POST /cart/apply-coupon
+    method: POST
+    url: https://httpbin.org/post
+    if: 'capture.is_on_sale == "true" AND capture.cart_id != ""'
+    body: '{"cart_id":"{{capture.cart_id}}","coupon":"SUMMER2024"}'
+    headers:
+      Content-Type: application/json
+    capture:
+      discount_amount: $.discount_amount
+      final_price: $.total_price
+    assertions:
+      status: 200
+
+  # 步驟 4：確認訂單
+  # if 條件：購物車有物品 AND (折扣已套用 OR 沒有折扣但價格可接受)
+  - name: POST /orders/checkout
+    method: POST
+    url: https://httpbin.org/post
+    if: 'capture.item_count != "0" AND (capture.discount_amount != "" OR capture.price != "")'
+    body: '{"cart_id":"{{capture.cart_id}}","payment_method":"credit_card"}'
+    headers:
+      Content-Type: application/json
+    capture:
+      order_id: $.order_id
+      order_status: $.status
+    assertions:
+      status: 200
+
+  # 步驟 5：傳送確認郵件
+  # if 條件：訂單已建立 AND (訂單狀態是 pending 或 confirmed)
+  # 展示多個 OR 條件
+  - name: POST /notifications/email
+    method: POST
+    url: https://httpbin.org/post
+    if: 'capture.order_id != "" AND (capture.order_status == "pending" OR capture.order_status == "confirmed")'
+    body: '{"order_id":"{{capture.order_id}}","email":"user@example.com"}'
+    headers:
+      Content-Type: application/json
+    assertions:
+      status: 200
+
+  # 步驟 6：異常處理
+  # if 條件：如果購物車為空 OR 商品無庫存
+  - name: POST /errors/log
+    method: POST
+    url: https://httpbin.org/post
+    if: 'capture.item_count == "0" OR capture.stock == "0"'
+    body: '{"event":"cart_empty_or_out_of_stock","timestamp":"2024-01-01T00:00:00Z"}'
+    headers:
+      Content-Type: application/json
+    assertions:
+      status: 200
+
+thresholds:
+  error_rate_pct: 10.0
+  p99_ms: 1500

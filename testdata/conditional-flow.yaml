@@ -1,0 +1,92 @@
+name: 條件分支流程示例
+
+# 展示如何用 if 欄位搭配 AND/OR 實現複雜的條件分支邏輯
+# 場景：測試登入、取得 token、根據 token 狀態進行不同操作
+
+stages:
+  - duration: 30s
+    target: 10   # 10 個虛擬使用者
+  - duration: 90s
+    target: 10   # 持載
+  - duration: 30s
+    target: 0    # 漸降
+
+steps:
+  # 步驟 1：登入
+  - name: POST /auth/login
+    method: POST
+    url: https://httpbin.org/post
+    body: '{"username":"user1","password":"pass123"}'
+    headers:
+      Content-Type: application/json
+    capture:
+      auth_token: $.token
+      token_type: $.type
+      expires_at: $.expires
+    assertions:
+      status: 200
+
+  # 步驟 2：取得使用者資訊
+  # if 條件：只有當 token 存在且 token_type 是 "Bearer" 時才執行
+  - name: GET /user/profile
+    method: GET
+    url: https://httpbin.org/get
+    headers:
+      Authorization: "Bearer {{capture.auth_token}}"
+    if: 'capture.auth_token != "" AND capture.token_type == "Bearer"'
+    capture:
+      user_id: $.data.id
+      user_name: $.data.name
+    assertions:
+      status: 200
+
+  # 步驟 3：檢查使用者權限
+  # if 條件：只有當 user_id 存在且不為空時執行
+  - name: GET /user/permissions
+    method: GET
+    url: https://httpbin.org/get
+    if: 'capture.user_id != ""'
+    headers:
+      Authorization: "Bearer {{capture.auth_token}}"
+    capture:
+      is_admin: $.data.is_admin
+      can_delete: $.data.permissions.delete
+    assertions:
+      status: 200
+
+  # 步驟 4：管理員操作 - 刪除資源
+  # if 條件：只有當 is_admin 為 true 且 can_delete 為 true 時執行
+  # 使用 OR：當 is_admin 為 true 時，OR 前半段為真，則整體為真
+  - name: DELETE /resource/123
+    method: DELETE
+    url: https://httpbin.org/delete
+    if: 'capture.is_admin == "true" AND capture.can_delete == "true"'
+    headers:
+      Authorization: "Bearer {{capture.auth_token}}"
+    assertions:
+      status: 200
+
+  # 步驟 5：日誌記錄 - 無論前面步驟是否執行都執行
+  # if 條件：沒有 if 條件，所以總是執行
+  - name: POST /api/log
+    method: POST
+    url: https://httpbin.org/post
+    body: '{"event":"test_completed","timestamp":"{{vars.now}}"}'
+    headers:
+      Content-Type: application/json
+    assertions:
+      status: 200
+
+  # 步驟 6：清理資源
+  # if 條件：只有當沒有得到 token 或 token_type 不對時才執行（備用路徑）
+  - name: POST /auth/logout-fallback
+    method: POST
+    url: https://httpbin.org/post
+    if: 'capture.auth_token == "" OR capture.token_type != "Bearer"'
+    body: '{"action":"cleanup"}'
+    assertions:
+      status: 200
+
+thresholds:
+  error_rate_pct: 5.0      # 允許 5% 的失敗率
+  p99_ms: 2000             # P99 延遲上限 2 秒

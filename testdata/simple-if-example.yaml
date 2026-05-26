@@ -1,0 +1,48 @@
+name: 簡單條件邏輯示例
+
+# 展示基本的 if 語法
+# 場景：簡單的 API 測試，根據首個回應決定是否執行後續步驟
+
+stages:
+  - duration: 30s
+    target: 3
+
+steps:
+  # 步驟 1：檢查服務狀態
+  - name: GET /health
+    method: GET
+    url: https://httpbin.org/status/200
+    capture:
+      service_status: $.status
+    assertions:
+      status: 200
+
+  # 步驟 2：只有在服務正常時才執行
+  - name: GET /api/data
+    method: GET
+    url: https://httpbin.org/get
+    if: 'capture.service_status == "running"'
+    assertions:
+      status: 200
+
+  # 步驟 3：簡單的相等比較（沒有 if 條件，總是執行）
+  - name: POST /events
+    method: POST
+    url: https://httpbin.org/post
+    body: '{"event":"test_request"}'
+    headers:
+      Content-Type: application/json
+    assertions:
+      status: 200
+
+  # 步驟 4：不相等比較
+  - name: GET /api/config
+    method: GET
+    url: https://httpbin.org/get
+    if: 'capture.service_status != "maintenance"'
+    assertions:
+      status: 200
+
+thresholds:
+  error_rate_pct: 5.0
+  p99_ms: 1000
