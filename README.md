@@ -2,6 +2,15 @@
 
 以開發者為優先的 HTTP 壓力測試工具。用 YAML 定義漸升、持載、尖峰等測試情境，在終端機或瀏覽器即時觀看結果，並以通過/失敗閾值整合 CI 流程——全部功能都在單一自包含的執行檔中。
 
+## 快速導航
+
+- 📖 **[核心概念](#核心概念)** — 理解 VU、RPS 和關鍵指標
+- 🎯 **[基本用法](#基本用法)** — 30 秒啟動第一次測試
+- ⚙️ **[進階功能](#進階功能)** — 分散式測試、自動探測、條件邏輯
+- 🔐 **[認證與數據](#認證與數據)** — 登入測試、數據注入
+- 📊 **[監控與集成](#監控與集成)** — Prometheus、CI/CD、Dashboard
+- 📚 **[參考](#參考)** — CLI、架構、開發指南
+
 ---
 
 ## 功能特色
@@ -36,11 +45,15 @@ make install         # 編譯並安裝至 ~/.local/bin/ramplio
 
 ---
 
-## 理解 VU 與 RPS：選對測試方式
+## 核心概念
+
+本節幫助你理解 Ramplio 的兩種負載模式、關鍵指標與負載設定。
+
+### 理解 VU 與 RPS：選對測試方式
 
 Ramplio 支援兩種負載模式。選對才能測出有意義的結果。
 
-### **VU（虛擬使用者）模式**
+#### **VU（虛擬使用者）模式**
 
 模擬**真實用戶的獨立行為**：每個 VU 在自己的 goroutine 中反覆執行 scenario loop，包括思考時間、重試、條件跳轉等。
 
@@ -54,7 +67,7 @@ Ramplio 支援兩種負載模式。選對才能測出有意義的結果。
 - 需要模擬真實用戶行為
 - 想看「100 人同時在線會怎樣」
 
-### **RPS（Requests/Sec）模式**
+#### **RPS（Requests/Sec）模式**
 
 發送**固定吞吐率**的請求流，用 token bucket 均勻分配，不受思考時間影響。
 
@@ -67,7 +80,7 @@ Ramplio 支援兩種負載模式。選對才能測出有意義的結果。
 - 下游系統在乎吞吐量，不在乎邏輯用戶數
 - 已知真實吞吐量，直接測試該速率
 
-### **不會失真嗎？**
+#### **不會失真嗎？**
 
 **不會。VU 更真實。** 例子：
 
@@ -76,9 +89,7 @@ Ramplio 支援兩種負載模式。選對才能測出有意義的結果。
 | 100 人同時瀏覽，每 30 秒點一次 | 100 VU | ~16 RPS | 直接 100 RPS 會讓所有人狂點，不現實 |
 | API 網關已知高峰 5000 RPS | - | 5000 RPS | VU 模式測不出「實際吞吐」的穩定性 |
 
----
-
-## 關鍵指標解讀
+### 關鍵指標解讀
 
 | 指標 | 含義 | 實戰解讀 |
 |------|------|---------|
@@ -87,9 +98,7 @@ Ramplio 支援兩種負載模式。選對才能測出有意義的結果。
 | **Throughput (RPS)** | 實際每秒請求數 | 實際 RPS 遠低於目標 = 到達瓶頸；RPS 開始下降 = 系統飽和 |
 | **Active VU** | 當前運行中的虛擬用戶 | 看趨勢：穩定增長 = 正常 ramping；突然斷崖 = circuit breaker 觸發 |
 
----
-
-## 實戰：如何設定合理負載？
+### 實戰：如何設定合理負載？
 
 ### **第一步：判斷你要測什麼**
 
@@ -138,7 +147,7 @@ ramplio run --scenario my.yaml --dashboard
 
 ---
 
-## 快速開始
+## 基本用法
 
 ### 單行指令
 
@@ -221,11 +230,13 @@ ramplio run --scenario smoke.yaml
 
 ---
 
-## 分散式測試（突破單進程限制）
+## 進階功能
+
+### 分散式測試（突破單進程限制）
 
 **使用情境：** 超過 10,000 VU 或需要避免單一機器的 TCP 連線數限制時，可以在多個進程間分散負載。
 
-### 一、啟動 Worker（每個終端一條指令）
+**一、啟動 Worker（每個終端一條指令）**
 
 ```bash
 # 終端 1：Worker A 監聽 :7700
@@ -238,7 +249,7 @@ ramplio worker --addr :7701
 ramplio worker --addr :7702
 ```
 
-### 二、執行分散式測試
+**二、執行分散式測試**
 
 ```bash
 # 用 --worker 旗標指定 worker 位址（可重複）
@@ -259,42 +270,12 @@ Coordinator 自動做到：
 
 **重要：** 分散模式下，`setup` 和 `teardown` 只在 Coordinator 執行一次；實際負載由 Worker 並行承擔。
 
----
-
-## Capacity Discovery
+### Capacity Discovery
 
 不需要了解 VU 或 RPS 是什麼——直接告訴 Ramplio 網址，它自動幫你找出網站的最大承載量：
 
 ```bash
 ramplio discover --url https://example.com
-```
-
-```
-  Target:    https://example.com
-  Tolerance: p99 < 2s, error rate < 1%
-  Probes:    up to 9 levels (est. 2–4 min)
-
-  Probing throughput capacity...
-
-      5 rps  ✓  p99=180ms    errors=0.0%
-     10 rps  ✓  p99=210ms    errors=0.0%
-     20 rps  ✓  p99=340ms    errors=0.0%
-     40 rps  ✓  p99=820ms    errors=0.0%
-     75 rps  ⚠  p99=1.9s     errors=0.3%
-    125 rps  ✗  p99=4.2s     errors=2.8%
-
-  ┌──────────────────────────────────────────────┐
-  │  Capacity Report                             │
-  ├──────────────────────────────────────────────┤
-  │  Safe limit:     ~40 req/sec                 │
-  │  Breaking point: ~125 req/sec                │
-  ├──────────────────────────────────────────────┤
-  │  What this means:                            │
-  │                                              │
-  │  Your site handles about 40 requests per     │
-  │  second comfortably. Above that, response    │
-  │  times climb beyond 2s.                      │
-  └──────────────────────────────────────────────┘
 ```
 
 也可以從網頁儀表板的「⚡ 探測上限」分頁直接操作，包含即時探測進度表格與容量報告卡片，PM 不需要技術背景也能讀懂結果。
@@ -312,9 +293,7 @@ ramplio discover --url https://example.com --max-rps 1000
 ramplio discover --url https://example.com --probe-duration 10s
 ```
 
----
-
-## HAR Import
+### HAR Import
 
 從瀏覽器錄製直接產生 scenario.yaml，無需手寫：
 
@@ -349,163 +328,11 @@ ramplio validate --scenario scenario.yaml
 ramplio run --scenario scenario.yaml
 ```
 
----
-
-## 需要登入的網站（Login + CAPTCHA）
-
-對有登入保護的網站做壓力測試，主要面對兩種情境：
-
-### 情境 A：測試環境可停用 CAPTCHA（最簡單）
-
-在測試環境關閉或 bypass CAPTCHA，讓每個 VU 在第一個步驟自行登入，session cookie 會自動保存在 VU 的 cookie jar，後續步驟無需手動帶入：
-
-```yaml
-steps:
-  - name: POST /auth/login
-    method: POST
-    url: https://staging.example.com/auth/login
-    headers:
-      Content-Type: application/json
-    body: '{"email":"loadtest@example.com","password":"testpass"}'
-    assertions:
-      status: 200
-    pause: 200ms
-
-  - name: GET /dashboard
-    method: GET
-    url: https://staging.example.com/dashboard
-    assertions:
-      status: 200
-```
-
-若後端回傳的是 JWT 而非 session cookie，用 `capture` 把 token 存起來，後續步驟以 `auth.bearer` 注入：
-
-```yaml
-steps:
-  - name: POST /auth/login
-    method: POST
-    url: https://staging.example.com/auth/login
-    headers:
-      Content-Type: application/json
-    body: '{"email":"loadtest@example.com","password":"testpass"}'
-    assertions:
-      status: 200
-    capture:
-      jwt: "$.access_token"      # JSONPath 從 response body 取出 token
-    pause: 200ms
-
-  - name: GET /dashboard
-    method: GET
-    url: https://staging.example.com/dashboard
-    auth:
-      bearer: "{{capture.jwt}}"  # 自動注入 Authorization: Bearer <token>
-    assertions:
-      status: 200
-```
-
-### 情境 B：生產環境有真實 CAPTCHA（Session Pool 方法）
-
-生產環境不能停用 CAPTCHA 時，在測試執行**前**預先取得 N 組真實 session，以 CSV 分發給各 VU：
-
-**第一步：產生 sessions.csv**
-
-```bash
-BASE_URL=https://example.com \
-COOKIE_NAME=session \
-COUNT=200 \
-./scripts/generate_sessions.sh
-```
-
-腳本輸出 `sessions.csv`（格式：`session_cookie,user_id`）。
-
-**第二步：在 scenario 直接注入 cookie**
-
-```yaml
-name: 登入後功能壓測
-
-vars:
-  base_url: "https://example.com"
-
-vars_from:
-  file: sessions.csv    # session_cookie,user_id
-  mode: sequential      # 每個 VU 分配一組，CSV 行數需 >= 最大 VU 數
-
-stages:
-  - duration: 30s
-    target: 10
-  - duration: 3m
-    target: 100
-  - duration: 30s
-    target: 0
-
-steps:
-  - name: GET /dashboard
-    method: GET
-    url: "{{vars.base_url}}/dashboard"
-    headers:
-      Cookie: "{{data.session_cookie}}"
-    assertions:
-      status: 200
-
-  - name: POST /api/action
-    method: POST
-    url: "{{vars.base_url}}/api/action"
-    headers:
-      Content-Type: application/json
-      Cookie: "{{data.session_cookie}}"
-    body: '{"user_id":"{{data.user_id}}"}'
-    assertions:
-      status: 2xx
-    pause: 500ms
-
-thresholds:
-  error_rate_pct: 1.0
-  p95_ms: 500
-```
-
-```bash
-ramplio run --scenario testdata/post-login-load.yaml
-```
-
-### `capture` 欄位一覽
-
-`capture` 可以從 response 中提取值，供後續步驟以 `{{capture.key}}` 引用：
-
-| 表達式 | 說明 | 範例 |
-|--------|------|------|
-| `$.path.to.value` | JSONPath（從 response body 提取） | `$.data.token` |
-| `header:Name` | 從 response header 提取（取第一個值） | `header:X-Request-Id` |
-| `cookie:name` | 從 `Set-Cookie` 提取特定 cookie 的值 | `cookie:session` |
-| `regex:(pattern)` | 正規表達式（第一個 capture group） | `regex:token=([a-z0-9]+)` |
-
-```yaml
-steps:
-  - name: POST /auth/refresh
-    method: POST
-    url: "{{vars.base_url}}/auth/refresh"
-    headers:
-      Cookie: "{{data.session_cookie}}"
-    capture:
-      new_session: "cookie:session"   # 取出 session cookie 的新值
-    assertions:
-      status: 200
-
-  - name: GET /api/data
-    method: GET
-    url: "{{vars.base_url}}/api/data"
-    headers:
-      Cookie: "session={{capture.new_session}}"
-    assertions:
-      status: 2xx
-```
-
----
-
-## 條件邏輯：if 欄位與 AND/OR 運算
+### 條件邏輯：if 欄位與 AND/OR 運算
 
 `if` 欄位用來控制步驟是否執行，支援複雜的布林邏輯（AND、OR、括號優先級）。典型場景是根據前一步驟的回應結果，決定是否執行後續步驟。
 
-### 基本語法
+**基本語法：**
 
 ```yaml
 steps:
@@ -523,15 +350,9 @@ steps:
     if: 'capture.status == "ok"'
     assertions:
       status: 200
-
-  # 不相等比較：只有當 version 不是 "1.0" 時執行
-  - name: Step C (version check)
-    method: GET
-    url: https://api.example.com/config
-    if: 'capture.version != "1.0"'
 ```
 
-### 支援的比較運算子
+**支援的比較運算子：**
 
 | 運算子 | 說明 | 範例 |
 |--------|------|------|
@@ -542,167 +363,151 @@ steps:
 | `>` | 大於 | `capture.price > 0` |
 | `>=` | 大於等於 | `capture.retry_count >= 3` |
 
-### AND 邏輯
-
-必須所有條件都為真才執行步驟：
+**AND/OR 與括號優先級：**
 
 ```yaml
-  # 只有當 token 存在 AND token_type 是 Bearer 時執行
+  # AND：所有條件都為真
   - name: Call authenticated endpoint
     method: GET
     url: https://api.example.com/protected
     if: 'capture.token != "" AND capture.token_type == "Bearer"'
-    headers:
-      Authorization: "Bearer {{capture.token}}"
-```
 
-### OR 邏輯
-
-至少有一個條件為真就執行步驟：
-
-```yaml
-  # 只有當沒有取得 token 或 token 已過期時執行備用路徑
+  # OR：至少一個條件為真
   - name: Fallback auth path
     method: POST
     url: https://api.example.com/refresh
     if: 'capture.token == "" OR capture.token_expired == "true"'
-    body: '{"action":"refresh"}'
-```
 
-### 混合 AND/OR 與括號優先級
-
-當同時使用 AND 和 OR 時，使用括號明確優先級（AND 優先級高於 OR）：
-
-```yaml
-  # 有庫存 AND (價格便宜 OR 正在打折)
+  # 混合 AND/OR（使用括號）
   - name: Add to cart
     method: POST
     url: https://api.example.com/cart/add
     if: 'capture.stock != "0" AND (capture.price < "100" OR capture.on_sale == "true")'
-    body: '{"product_id":"123"}'
-    assertions:
-      status: 200
-
-  # 不同等價形式：(A AND B) OR (C AND D)
-  - name: Conditional checkout
-    method: POST
-    url: https://api.example.com/checkout
-    if: '(capture.cart_id != "" AND capture.total > "0") OR (capture.express_checkout == "true")'
 ```
 
-### 注意事項
-
-- **空字符串檢查：** `capture.token != ""` 檢查欄位是否存在且非空
-- **數值比較：** 數字會自動轉換，`"100" < "200"` 和 `100 < 200` 都能正常比較
-- **步驟執行順序：** 即使某個步驟被 if 跳過，後續步驟仍會正常執行
-- **Capture 作用域：** 同一個步驟內的 capture 在該步驟的 if 條件中不可用（capture 在步驟執行後才生效）
-
-### 完整範例
-
-見 `testdata/` 中的示例場景：
-- `conditional-flow.yaml` — 登入流程，根據 token 狀態進行不同操作
-- `complex-conditions.yaml` — 購物車場景，展示複雜的 AND/OR 邏輯
-- `simple-if-example.yaml` — 簡單的 if 用法
+**完整範例：** 見 `testdata/simple-if-example.yaml`、`conditional-flow.yaml`、`complex-conditions.yaml`
 
 ---
 
-## 即時網頁儀表板
+## 認證與數據
+
+### 需要登入的網站
+
+對有登入保護的網站做壓力測試。
+
+**情境 A：測試環境可停用 CAPTCHA（最簡單）**
+
+```yaml
+steps:
+  - name: POST /auth/login
+    method: POST
+    url: https://staging.example.com/auth/login
+    headers:
+      Content-Type: application/json
+    body: '{"email":"loadtest@example.com","password":"testpass"}'
+    assertions:
+      status: 200
+    capture:
+      jwt: "$.access_token"
+
+  - name: GET /dashboard
+    method: GET
+    url: https://staging.example.com/dashboard
+    auth:
+      bearer: "{{capture.jwt}}"
+    assertions:
+      status: 200
+```
+
+**情境 B：生產環境有真實 CAPTCHA（Session Pool 方法）**
+
+預先產生 `sessions.csv`，在測試中注入：
+
+```yaml
+name: 登入後功能壓測
+
+vars_from:
+  file: sessions.csv
+  mode: sequential
+
+steps:
+  - name: GET /dashboard
+    method: GET
+    url: "https://example.com/dashboard"
+    headers:
+      Cookie: "{{data.session_cookie}}"
+    assertions:
+      status: 200
+```
+
+```bash
+ramplio run --scenario testdata/post-login-load.yaml
+```
+
+### `capture` 欄位與模板
+
+從 response 中提取值，供後續步驟以 `{{capture.key}}` 引用：
+
+| 表達式 | 說明 | 範例 |
+|--------|------|------|
+| `$.path.to.value` | JSONPath（從 response body 提取） | `$.data.token` |
+| `header:Name` | 從 response header 提取 | `header:X-Request-Id` |
+| `cookie:name` | 從 `Set-Cookie` 提取特定 cookie | `cookie:session` |
+| `regex:(pattern)` | 正規表達式（第一個 capture group） | `regex:token=([a-z0-9]+)` |
+
+```yaml
+steps:
+  - name: POST /auth/login
+    method: POST
+    url: "https://api.example.com/auth/login"
+    body: '{"username":"user1","password":"pass123"}'
+    capture:
+      auth_token: $.token
+      token_type: $.type
+    assertions:
+      status: 200
+
+  - name: GET /user/profile
+    method: GET
+    url: "https://api.example.com/user"
+    headers:
+      Authorization: "Bearer {{capture.auth_token}}"
+    assertions:
+      status: 200
+```
+
+---
+
+## 監控與集成
+
+### 即時網頁儀表板
 
 ```bash
 # 啟動儀表板（預設 port 9999）
-ramplio run --dashboard
+ramplio run --scenario smoke.yaml --dashboard
 
 # 指定 port
-ramplio run --dashboard --dashboard-port 8080
-
-# 停止儀表板（殺掉佔用該 port 的所有 process）
-ramplio stop
-ramplio stop --port 8080
-```
-
-或透過 Makefile：
-
-```bash
-make dashboard              # 啟動（port 9999）
-make dashboard PORT=8080    # 啟動（自訂 port）
-make stop-dashboard         # 停止（port 9999）
-make stop-dashboard PORT=8080
+ramplio run --scenario smoke.yaml --dashboard --dashboard-port 8080
 ```
 
 儀表板提供四種操作模式：
 
 | 分頁 | 說明 |
 |------|------|
-| URL 模式 | 直接填入 URL 啟動測試，支援 VU 或固定 RPS |
-| 情境模式 | 上傳 HAR 或 YAML 情境檔執行多步驟測試 |
-| 引導模式 | PM 精靈：幾個業務問題自動轉換成測試配置 |
-| ⚡ 探測上限 | 自動探測網站最大吞吐量，輸出容量報告 |
+| URL 模式 | 直接填入 URL 啟動測試 |
+| 情境模式 | 上傳 HAR 或 YAML 情境檔 |
+| 引導模式 | PM 精靈：業務問題轉換成測試配置 |
+| ⚡ 探測上限 | 自動探測網站最大吞吐量 |
 
-RPS、延遲百分位數、錯誤率與活躍 VU 數的即時時序圖表——透過內嵌的 Vue 3 SPA 直接由執行檔提供服務，無需任何額外部署。
-
----
-
-## Prometheus
+### Prometheus 整合
 
 ```bash
 ramplio run --scenario smoke.yaml --prometheus :9100
-# Prometheus → http://:9100/metrics
 ```
 
-公開的指標：`ramplio_requests_total`、`ramplio_errors_total`、`ramplio_error_rate_pct`、`ramplio_rps`、`ramplio_latency_p50/p90/p99_ms`、`ramplio_mean_latency_ms`、`ramplio_active_vus`、`ramplio_elapsed_seconds`。
+公開的指標：`ramplio_requests_total`、`ramplio_errors_total`、`ramplio_error_rate_pct`、`ramplio_rps`、`ramplio_latency_p50/p90/p99_ms`、`ramplio_active_vus` 等。
 
----
-
-## CLI 參數說明
-
-```
-ramplio run [flags]
-
-Flags:
-  -u, --url string            目標 URL（與 --scenario 互斥）
-  -s, --scenario string       YAML 情境檔案路徑
-      --vus int               虛擬使用者數量，僅 URL 模式（預設 1）
-  -d, --duration string       測試時長，僅 URL 模式（預設 "30s"）
-      --method string         HTTP 方法（預設 "GET"）
-  -H, --header stringArray    HTTP 標頭，可重複使用：-H "Key: Value"
-      --body string           請求 body
-  -o, --output string         將結果儲存為 JSON 或 JUnit XML 檔案
-      --timeout string        單次請求逾時，覆蓋情境設定（例如 10s）
-      --dns-cache             快取 DNS 查詢（TTL 60 秒）
-      --dashboard             開啟即時網頁儀表板
-      --dashboard-port int    儀表板 HTTP 埠（預設 9999）
-      --prometheus string     公開 Prometheus 指標端點（例如 :9100）
-```
-
-```
-ramplio discover [flags]
-
-Flags:
-  -u, --url string             目標 URL（必填）
-      --tolerance string       可接受的 p99 回應時間（預設 "2s"，例如 500ms、1s）
-      --max-rps int            最高探測速率（預設 500）
-      --probe-duration string  每個探測點的持續時間（預設 "15s"）
-```
-
-```
-ramplio import <recording.har> [flags]
-
-Flags:
-  -o, --output string     將 scenario YAML 寫入檔案（預設輸出到 stdout）
-      --no-filter         不過濾靜態資源（JS/CSS/圖片）
-  -d, --duration string   覆蓋預設測試時長（例如 2m、90s）
-```
-
-```
-ramplio stop [flags]
-
-Flags:
-      --port int   要停止的儀表板 port（預設 9999）
-```
-
----
-
-## CI 整合
+### CI 整合
 
 閾值讓 Ramplio 成為 CI 流程的效能門禁：
 
@@ -712,30 +517,70 @@ Flags:
   run: ramplio run --scenario testdata/smoke.yaml
 ```
 
-Exit code `0` → 所有閾值通過。Exit code `1` → 閾值超標或有錯誤，流程中止。
+Exit code `0` → 閾值通過；Exit code `1` → 閾值超標。
 
 ---
 
-## 儲存與重新載入結果
+## 參考
+
+### CLI 參數說明
+
+```
+ramplio run [flags]
+
+Flags:
+  -u, --url string            目標 URL（與 --scenario 互斥）
+  -s, --scenario string       YAML 情境檔案路徑
+      --vus int               虛擬使用者數量（預設 1）
+  -d, --duration string       測試時長（預設 "30s"）
+      --method string         HTTP 方法（預設 "GET"）
+  -H, --header stringArray    HTTP 標頭，可重複使用
+      --body string           請求 body
+  -o, --output string         結果檔案（JSON 或 JUnit XML）
+      --timeout string        單次請求逾時
+      --dns-cache             快取 DNS 查詢
+      --dashboard             開啟即時網頁儀表板
+      --dashboard-port int    儀表板 port（預設 9999）
+      --prometheus string     Prometheus 指標端點
+      --worker stringArray    分散式測試：Worker 位址
+```
+
+```
+ramplio discover [flags]
+
+Flags:
+  -u, --url string             目標 URL（必填）
+      --tolerance string       可接受的 p99 時間（預設 "2s"）
+      --max-rps int            最高探測速率（預設 500）
+      --probe-duration string  每個探測點的時長（預設 "15s"）
+```
+
+```
+ramplio import <recording.har> [flags]
+
+Flags:
+  -o, --output string     輸出檔案（預設 stdout）
+      --no-filter         不過濾靜態資源
+  -d, --duration string   測試時長（例如 "5m"）
+```
+
+### 儲存與重新載入結果
 
 ```bash
 ramplio run --scenario smoke.yaml --output results.json
 ramplio report --input results.json
 ```
 
----
-
-## 開發
+### 開發與構建
 
 ```bash
 make build           # 編譯 → ./bin/ramplio
-make install         # 編譯並安裝至 ~/.local/bin/ramplio
+make install         # 安裝至 ~/.local/bin/ramplio
 make test            # 執行所有測試
-make race            # 以 -race 偵測器執行測試
-make cover           # 產生覆蓋率報告
+make race            # 以 -race 執行測試
+make cover           # 覆蓋率報告
 make lint            # golangci-lint
-make dashboard       # 啟動即時網頁儀表板（port 9999）
-make stop-dashboard  # 停止儀表板
+make dashboard       # 啟動儀表板（port 9999）
 ```
 
 執行單一測試：
@@ -744,35 +589,29 @@ make stop-dashboard  # 停止儀表板
 go test ./internal/engine/... -run TestRampUp -v
 ```
 
----
-
-## 架構
+### 架構總覽
 
 ```
 ramplio/
-├── cmd/ramplio/       # cobra CLI 指令（run、import、validate、report…）
+├── cmd/ramplio/       # cobra CLI 指令
 ├── internal/
-│   ├── engine/          # VU 池與多階段 ramp 調度
-│   ├── protocols/       # HTTP executor、DNS 快取、per-VU cookie jar
-│   ├── metrics/         # HDR 直方圖收集器、per-step 分桶
-│   ├── scenarios/       # YAML 解析器與驗證器
-│   ├── reporter/        # 終端摘要、JSON、JUnit XML、TUI、Prometheus
-│   ├── importer/        # HAR 解析、靜態資源過濾、登入偵測、Scenario 轉換
-│   └── dashboard/       # WebSocket 伺服器 + 內嵌 Vue SPA
-└── testdata/            # 測試用 YAML 情境與 HAR fixture
+│   ├── engine/          # VU 池與多階段調度
+│   ├── protocols/       # HTTP executor、DNS 快取
+│   ├── metrics/         # HDR 直方圖、per-step 分桶
+│   ├── scenarios/       # YAML 解析、驗證
+│   ├── reporter/        # 終端、JSON、JUnit、TUI、Prometheus
+│   ├── importer/        # HAR 解析
+│   ├── distributed/     # Coordinator、Worker
+│   └── dashboard/       # WebSocket + Vue 3 SPA
+└── testdata/            # 測試用 YAML 與 HAR
 ```
 
-每個虛擬使用者（VU）在獨立的 goroutine 中運行。Engine 透過 semaphore 控制每個階段的 VU 數量；指標樣本透過有緩衝的 channel 流向單一的聚合 goroutine。Context cancellation 在所有層之間乾淨地傳播。
-
----
-
-## 文件
+### 文件與資源
 
 | 文件 | 說明 |
 |------|------|
-| [docs/getting-started.md](docs/getting-started.md) | 完整安裝指南、CLI 參數說明與範例 |
-| [docs/scenario-schema.md](docs/scenario-schema.md) | 完整 YAML 情境 schema 與所有欄位說明 |
-| [docs/roadmap.md](docs/roadmap.md) | Milestone 計畫與開發生命週期 |
+| [docs/scenario-schema.md](docs/scenario-schema.md) | 完整 YAML schema |
+| [docs/roadmap.md](docs/roadmap.md) | Milestone 計畫 |
 | [CHANGELOG.md](CHANGELOG.md) | 版本異動記錄 |
 
 ---
