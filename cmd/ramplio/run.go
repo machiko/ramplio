@@ -120,7 +120,13 @@ New to load testing? Run:  ramplio run --dashboard`)
 					fmt.Fprintf(os.Stderr, "warning: sink %q: %v\n", dsn, sinkErr)
 					continue
 				}
-				if writeErr := sink.Write(sum, scenarioName); writeErr != nil {
+				var writeErr error
+				if detailedSink, ok := sink.(reporter.DetailedSink); ok {
+					writeErr = detailedSink.WriteDetailed(sum, scenarioName)
+				} else {
+					writeErr = sink.Write(sum, scenarioName)
+				}
+				if writeErr != nil {
 					fmt.Fprintf(os.Stderr, "warning: sink %q write: %v\n", dsn, writeErr)
 				}
 				_ = sink.Close()

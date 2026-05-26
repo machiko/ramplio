@@ -51,10 +51,29 @@ func NewInfluxSink(dsn string) (*InfluxSink, error) {
 }
 
 func (s *InfluxSink) Write(sum metrics.Summary, scenarioName string) error {
-	ts := time.Now().UnixMilli()
-	tags := fmt.Sprintf("scenario=%s", escapeTag(scenarioName))
+	lines := s.buildLines(sum, scenarioName, "global", "")
+	return s.sendLines(lines)
+}
 
-	lines := []string{
+// WriteDetailed outputs global summary plus per-step and per-group breakdowns.
+func (s *InfluxSink) WriteDetailed(sum metrics.Summary, scenarioName string) error {
+	lines := s.buildLines(sum, scenarioName, "global", "")
+	for _, step := range sum.Steps {
+		lines = append(lines, s.buildStepLines(step, scenarioName)...)
+	}
+	for _, group := range sum.Groups {
+		lines = append(lines, s.buildGroupLines(group, scenarioName)...)
+	}
+	return s.sendLines(lines)
+}
+
+func (s *InfluxSink) buildLines(sum metrics.Summary, scenarioName, lineType, name string) []string {
+	ts := time.Now().UnixMilli()
+	tags := fmt.Sprintf("scenario=%s,type=%s", escapeTag(scenarioName), lineType)
+	if name != "" {
+		tags += fmt.Sprintf(",name=%s", escapeTag(name))
+	}
+	return []string{
 		fmt.Sprintf("ramplio_results,%s total=%di,errors=%di,error_rate=%.4f,rps=%.2f,p50_ms=%di,p90_ms=%di,p95_ms=%di,p99_ms=%di,max_ms=%di %d",
 			tags,
 			sum.Total, sum.Errors, sum.ErrorRate(), sum.RPS(),
@@ -63,7 +82,44 @@ func (s *InfluxSink) Write(sum metrics.Summary, scenarioName string) error {
 			ts,
 		),
 	}
+}
 
+func (s *InfluxSink) buildStepLines(step metrics.StepSummary, scenarioName string) []string {
+	ts := time.Now().UnixMilli()
+	errorRate := 0.0
+	if step.Total > 0 {
+		errorRate = float64(step.Errors) / float64(step.Total) * 100
+	}
+	tags := fmt.Sprintf("scenario=%s,type=step,name=%s", escapeTag(scenarioName), escapeTag(step.Name))
+	return []string{
+		fmt.Sprintf("ramplio_results,%s total=%di,errors=%di,error_rate=%.4f,p50_ms=%di,p90_ms=%di,p95_ms=%di,p99_ms=%di %d",
+			tags,
+			step.Total, step.Errors, errorRate,
+			step.P50.Milliseconds(), step.P90.Milliseconds(), step.P95.Milliseconds(),
+			step.P99.Milliseconds(),
+			ts,
+		),
+	}
+}
+
+func (s *InfluxSink) buildGroupLines(group metrics.GroupSummary, scenarioName string) []string {
+	ts := time.Now().UnixMilli()
+	errorRate := 0.0
+	if group.Total > 0 {
+		errorRate = float64(group.Errors) / float64(group.Total) * 100
+	}
+	tags := fmt.Sprintf("scenario=%s,type=group,name=%s", escapeTag(scenarioName), escapeTag(group.Name))
+	return []string{
+		fmt.Sprintf("ramplio_results,%s total=%di,errors=%di,error_rate=%.4f,p50_ms=%di,p95_ms=%di,p99_ms=%di %d",
+			tags,
+			group.Total, group.Errors, errorRate,
+			group.P50.Milliseconds(), group.P95.Milliseconds(), group.P99.Milliseconds(),
+			ts,
+		),
+	}
+}
+
+func (s *InfluxSink) sendLines(lines []string) error {
 	body := strings.Join(lines, "\n")
 	req, err := http.NewRequest(http.MethodPost, s.writeURL, bytes.NewBufferString(body))
 	if err != nil {

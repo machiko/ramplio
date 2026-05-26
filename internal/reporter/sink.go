@@ -9,3 +9,10 @@ type Sink interface {
 	Write(sum metrics.Summary, scenarioName string) error
 	Close() error
 }
+
+// DetailedSink is an optional interface for sinks that support per-step/group breakdown.
+// Implementations write detailed metrics to the sink when available.
+type DetailedSink interface {
+	Sink
+	WriteDetailed(sum metrics.Summary, scenarioName string) error
+}
