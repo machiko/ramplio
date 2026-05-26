@@ -11,6 +11,12 @@ import (
 	"github.com/google/uuid"
 )
 
+// conditionWarnf writes a warning to stderr so misconfigured `if:` conditions
+// surface immediately rather than being silently treated as "always execute".
+var conditionWarnf = func(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, "[WARN] "+format+"\n", args...)
+}
+
 // VarContext holds the variables available during template rendering.
 type VarContext struct {
 	Vars     map[string]string // scenario-level vars block
@@ -104,11 +110,12 @@ func resolveToken(token string, ctx *VarContext) (string, error) {
 //	<value> != "x"     → true when value does not equal x
 //
 // Returns true when the expression cannot be parsed, so unknown conditions do not
-// accidentally skip steps.
+// accidentally skip steps. A warning is printed to stderr in both failure cases.
 func EvalCondition(expr string, ctx *VarContext) bool {
 	rendered, err := RenderString(expr, ctx)
 	if err != nil {
-		return true // render failure → don't skip
+		conditionWarnf("step condition render failed (%v) — step will execute", err)
+		return true
 	}
 	// Try `LHS == RHS` and `LHS != RHS`.
 	if idx := strings.Index(rendered, " != "); idx >= 0 {
@@ -121,6 +128,7 @@ func EvalCondition(expr string, ctx *VarContext) bool {
 		rhs := strings.Trim(strings.TrimSpace(rendered[idx+4:]), `"`)
 		return lhs == rhs
 	}
+	conditionWarnf("step condition %q could not be parsed (no == or !=) — step will execute", rendered)
 	return true
 }
 

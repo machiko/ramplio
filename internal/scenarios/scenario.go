@@ -179,7 +179,10 @@ type RetryConfig struct {
 	BackoffMs int   `yaml:"backoff_ms,omitempty"` // fixed delay between retries
 }
 
-// CircuitBreakerConfig stops the test when too many consecutive failures occur.
+// CircuitBreakerConfig stops the test when too many failures occur within a time window.
 type CircuitBreakerConfig struct {
-	ConsecutiveFailures int `yaml:"consecutive_failures"` // trip after N consecutive errors
+	ConsecutiveFailures int `yaml:"consecutive_failures"` // trip when N failures occur within the window
+	// WindowSeconds is the sliding window duration in seconds (default 1).
+	// Failures outside this window are not counted, preventing false trips under burst concurrency.
+	WindowSeconds int `yaml:"window_seconds,omitempty"`
 }

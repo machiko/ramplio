@@ -24,22 +24,24 @@ import (
 
 func newRunCmd() *cobra.Command {
 	var (
-		url            string
-		method         string
-		vus            int
-		rps            int
-		duration       string
-		headers        []string
-		body           string
-		scenarioFile   string
-		outputFile     string
-		reportFile     string
-		sinkDSNs       []string
-		dashboardOn    bool
-		dashboardPort  int
-		dnsCache       bool
-		prometheusAddr string
-		requestTimeout string
+		url             string
+		method          string
+		vus             int
+		rps             int
+		duration        string
+		headers         []string
+		body            string
+		scenarioFile    string
+		outputFile      string
+		reportFile      string
+		sinkDSNs        []string
+		dashboardOn     bool
+		dashboardPort   int
+		dashboardToken  string
+		dnsCache        bool
+		prometheusAddr  string
+		requestTimeout  string
+		ignoreErrors    bool
 	)
 
 	cmd := &cobra.Command{
@@ -66,7 +68,7 @@ func newRunCmd() *cobra.Command {
 
 			// Dashboard mode: browser handles test setup and control.
 			if dashboardOn {
-				return runDashboard(url, method, vus, rps, duration, scenarioFile, dashboardPort, httpCfg)
+				return runDashboard(url, method, vus, rps, duration, scenarioFile, dashboardPort, dashboardToken, httpCfg)
 			}
 
 			// CLI mode: --url or --scenario required.
@@ -154,12 +156,16 @@ New to load testing? Run:  ramplio run --dashboard`)
 				fmt.Fprintf(os.Stderr, "\n✗ Threshold exceeded: %s\n", thresholdMsg)
 				fmt.Fprintln(os.Stderr, "\n  Common causes: server overloaded, API rate limit, auth expired, slow database")
 				fmt.Fprintln(os.Stderr, "  Try:  reduce --vus  ·  check server logs  ·  run with --dashboard for live view")
-				os.Exit(1)
+				if !ignoreErrors {
+					os.Exit(1)
+				}
 			}
 			if sum.ErrorRate() > 0 && thresholds == nil {
 				fmt.Fprintf(os.Stderr, "\nWarning: %.1f%% error rate detected (%d errors).\n", sum.ErrorRate(), sum.Errors)
 				fmt.Fprintln(os.Stderr, "  Add thresholds to a scenario YAML for pass/fail control: ramplio run --scenario my.yaml")
-				os.Exit(1)
+				if !ignoreErrors {
+					os.Exit(1)
+				}
 			}
 			return nil
 		},
@@ -177,10 +183,12 @@ New to load testing? Run:  ramplio run --dashboard`)
 	cmd.Flags().StringVarP(&reportFile, "report", "r", "", "Save HTML report to file (e.g. report.html)")
 	cmd.Flags().BoolVar(&dashboardOn, "dashboard", false, "Open live web dashboard (PM control panel)")
 	cmd.Flags().IntVar(&dashboardPort, "dashboard-port", 9999, "Dashboard port")
+	cmd.Flags().StringVar(&dashboardToken, "dashboard-token", "", "Bearer token to protect dashboard control endpoints (optional)")
 	cmd.Flags().BoolVar(&dnsCache, "dns-cache", false, "Cache DNS lookups to reduce latency measurement noise")
 	cmd.Flags().StringVar(&prometheusAddr, "prometheus", "", "Expose Prometheus metrics on this address (e.g. :9100)")
 	cmd.Flags().StringVar(&requestTimeout, "timeout", "", "Per-request timeout (e.g. 10s, 500ms); overrides scenario default")
 	cmd.Flags().StringArrayVar(&sinkDSNs, "sink", nil, "Push results to an external sink (repeatable): csv:<file>  influxdb://host/bucket?token=T")
+	cmd.Flags().BoolVar(&ignoreErrors, "ignore-errors", false, "Exit 0 even when errors or threshold violations occur (useful during debugging)")
 
 	return cmd
 }
@@ -188,9 +196,9 @@ New to load testing? Run:  ramplio run --dashboard`)
 // runDashboard starts the web control panel and blocks until Ctrl+C.
 // If scenarioFile is set, the scenario is loaded and displayed in the browser (user clicks Run).
 // If url is set (and no scenario), the test auto-starts immediately.
-func runDashboard(url, method string, vus, rps int, duration, scenarioFile string, port int, httpCfg protocols.HTTPConfig) error {
+func runDashboard(url, method string, vus, rps int, duration, scenarioFile string, port int, token string, httpCfg protocols.HTTPConfig) error {
 	ctrl := newDashController(httpCfg)
-	srv := dashboard.New(ctrl, port)
+	srv := dashboard.New(ctrl, port, token)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -208,8 +216,11 @@ func runDashboard(url, method string, vus, rps int, duration, scenarioFile strin
 	}
 
 	dashURL := "http://" + srv.Addr()
-	fmt.Printf("Dashboard → %s\n\n", dashURL)
-	fmt.Println("Press Ctrl+C to exit.")
+	fmt.Printf("Dashboard → %s\n", dashURL)
+	if token != "" {
+		fmt.Printf("Token     → %s\n", token)
+	}
+	fmt.Println("\nPress Ctrl+C to exit.")
 	openBrowser(dashURL)
 
 	switch {

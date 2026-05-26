@@ -169,7 +169,7 @@ func BenchmarkRampEngine_WithDashboard(b *testing.B) {
 		}, col)
 
 		ctrl := &benchController{col: col, ramp: ramp, startedAt: time.Now()}
-		dashSrv := dashboard.New(ctrl, 0)
+		dashSrv := dashboard.New(ctrl, 0, "")
 
 		ctx, cancel := context.WithCancel(context.Background())
 		if err := dashSrv.Start(ctx); err != nil {

@@ -13,9 +13,9 @@
 
 | 欄位 | 值 |
 |------|-----|
-| 分析時間 | 2026-05-25（更新：discover UX + 冷連線 bug 修復） |
-| 分析基準 commit | `b16d800`（+ WIP：discover CLI & Web UI 整合，尚未 commit） |
-| 完整 commit hash | `b16d800002ce00ead5c1a2008574fa9e29349c47` |
+| 分析時間 | 2026-05-26（更新：cookie capture + init 精靈 + CLI 中文化 + discover 正式 commit） |
+| 分析基準 commit | `c93fdc8` |
+| 完整 commit hash | `c93fdc841c72f4c83eafa4f8a33ad4725bd55522` |
 | Go 版本 | (見 go.mod) |
 
 ---
@@ -43,6 +43,7 @@
   - Assertion 失敗不觸發 retry（assertions 在 executor 返回後才評估）
   - regex capture 每次請求重新 Compile（效能問題）
   - setup 步驟的 Sample 不計入指標（靜默執行）
+- **新增**：`applyCaptures()` 支援 `cookie:` 前綴 — 從 `Result.RawSetCookies` 解析指定 cookie 名稱的值並存入 `ctx.Captures`
 
 ### engine/engine.go
 - **功能**：基礎固定 VU 引擎，無階段支援（早期版本遺留）
@@ -85,6 +86,7 @@
 
 ### protocols/executor.go
 - **功能**：執行器介面定義（`Executor`, `Request`, `Result`）
+- **新增**：`Result.RawSetCookies []string` — 儲存回應 `Set-Cookie` 原始字串，供 engine 的 `cookie:` capture 使用
 
 ### protocols/retry.go（新增）
 - **功能**：`RetryingExecutor` 包裝任何 `Executor`，根據設定自動重試
@@ -102,6 +104,7 @@
 - **功能**：HTTP 執行器（連線池、cookie jar、超時、DNS 快取）
 - **主要型別**：`HTTPExecutor`, `HTTPConfig`
 - **主要方法**：`NewSession()`, `Execute()`
+- **新增**：`Execute()` 回傳前將 `resp.Header["Set-Cookie"]` 填入 `Result.RawSetCookies`
 - **已知限制**：回應 Body 限制 1MB；多值 Header 只取第一個；無自訂 TLS
 
 ### protocols/dns_cache.go
@@ -123,6 +126,7 @@
 
 ### reporter/terminal.go
 - **功能**：靜態終端文字摘要輸出；per-step 表格（Total/p50/p99/Errors，標記最慢步驟 ◀ slowest）；新增 **Group Breakdown** 表格（Total/p50/p95/Errors）；`printInterpretation()` 輸出自然語言判決（PASS/WARN/FAIL + 瓶頸步驟）
+- **更新**：所有 section 標頭及欄位標籤改為繁體中文（測試結果/延遲分佈/回應狀態/各步驟明細）
 
 ### reporter/html.go
 - **功能**：使用 go:embed 樣板生成自包含 HTML 報告
@@ -247,6 +251,15 @@
 ### cmd/ramplio/import.go
 - **功能**：`import` 命令，HAR 轉場景 YAML；支援 --no-filter, --duration 覆蓋
 
+### cmd/ramplio/init.go（新增）
+- **功能**：`ramplio init` 引導式 scenario 精靈
+  - 問答流程：名稱 → base URL → 登入方式（cookie CSV / JWT token）→ 步驟（路徑/方法/body/status/pause）→ 負載（VU數/時長/流量模式 steady/spike/soak）→ 閾值 → 輸出檔名
+  - Cookie 模式：自動印出 `generate_sessions.sh` 使用說明；生成 `vars_from` + `data.session_cookie` header
+  - JWT 模式：自動生成 `setup` 區塊（POST 登入 + capture token）、步驟使用 `auth.bearer`
+  - `generateYAML()` 組裝合法 YAML；`stagesYAML()` 根據 shape 產生對應 stages
+- **輔助函數**：`wPrompt`, `wRequired`, `wYN`, `wChoice`（鍵盤輸入 + 預設值支援）
+- **已知限制**：無 `capture:` 欄位自訂引導；無 WebSocket 步驟生成；JWT token 路徑寫死 `$.access_token` 預設；精靈僅支援單一 base URL
+
 ### cmd/ramplio/dashcontrol.go
 - **功能**：儀表板用 Controller 實現；新增 `lastSummary`/`lastSummarySet` 儲存最後一次結果供 `WriteReport` 使用；`buildOverrideStages` 根據 `OverrideVUs`/`OverrideDuration` 重建 3 階段（加速/保持/冷卻）
 - **新增 discover 狀態欄位**：`discoverActive bool`、`discoverProbes []DiscoverProbeSnap`、`discoverResult *DiscoverResultSnap`、`discoverCurrentRPS int`、`discoverProbeStart time.Time`、`discoverProbeDur time.Duration`、`discoverProbeSeq []int`
@@ -255,6 +268,9 @@
   - `runDiscover(ctx, url, tol, maxRPS, pd)`：預先計算並儲存 `probeSeq`；透過 `onProbeStart` 回調設置 `discoverCurrentRPS` + `discoverProbeStart`；每完成一個探測點在 `onProbe` 中更新 `discoverProbes` 並清除 `discoverCurrentRPS`；完成後設 `state=Done`、`discoverResult`
   - `DiscoverProgress()`：RLock 讀取所有 discover 欄位；若 `discoverCurrentRPS > 0` 則建構 `DiscoverCurrentSnap`（含已過去毫秒數），讓 WS push 得以顯示即時進度
 - **普通測試 Start/startGuided**：啟動時清除 `discoverActive=false` 讓 WebSocket 不再推送 discover 欄位
+- **新增欄位**：`pendingSetupSteps`, `pendingTeardownSteps`, `pendingDataRows`, `pendingDataMode`
+- **`setScenario` 簽名更新**：新增 `setupSteps, teardownSteps []engine.RampStep`、`dataRows []map[string]string`、`dataMode string`，讓 Dashboard 模式完整傳遞 setup/teardown lifecycle 與資料檔案
+- **`LoadScenario`**：接收 `scenarioDir string` 參數，解決 `vars_from` 相對路徑問題
 - **已知限制**：與 `dashboard/controller.go` 存在職責重疊，可能需要整合
 
 ### dashboard/templates/dashboard.html
@@ -360,7 +376,7 @@
 
 ## 開發補足建議
 
-### ✅ 已完成（b16d800 + WIP）
+### ✅ 已完成（c93fdc8）
 
 | 項目 | 狀態 |
 |------|------|
@@ -373,10 +389,14 @@
 | B4 請求重試 / Circuit Breaker | `RetryingExecutor` + `CircuitBreakerConfig` |
 | B5 InfluxDB 輸出 | `InfluxSink`（line protocol v2） |
 | B6 Logic Controllers（部份） | `Step.If` + `Step.Loop` |
-| **C1 Capacity Discovery（CLI）** | `internal/discover/prober.go` + `cmd/ramplio/discover.go`；幾何級數探測序列、白話容量報告 |
-| **C2 Capacity Discovery（Web UI）** | Dashboard 第四分頁「⚡ 探測上限」；WebSocket 即時推送探測進度；容量卡片報告視圖 |
-| **C3 Discover 即時 UX 強化** | 探測序列步進器（全程可見所有 RPS 等級）；當前探測進度卡（pulse 點 + 計時器 + 進度條）；具體化錯誤訊息（顯示實際 p99 / 錯誤率而非籠統文案） |
-| **C4 冷連線 bug 修復** | `Prober` 共享單一 `HTTPExecutor`（TCP/TLS 跨探測重用）；每探測點以 `SetupSteps` 暖身；解決跨 Region 測試時首個探測點因冷連線誤判 FAIL 的問題 |
+| C1 Capacity Discovery（CLI） | `internal/discover/prober.go` + `cmd/ramplio/discover.go`；幾何級數探測序列、白話容量報告 |
+| C2 Capacity Discovery（Web UI） | Dashboard 第四分頁「⚡ 探測上限」；WebSocket 即時推送探測進度；容量卡片報告視圖 |
+| C3 Discover 即時 UX 強化 | 探測序列步進器；當前探測進度卡（pulse + 計時器 + 進度條）；具體化錯誤訊息 |
+| C4 冷連線 bug 修復 | Prober 共享單一 HTTPExecutor；SetupSteps 暖身 |
+| **D1 Cookie Capture** | `cookie:` 前綴 capture 語法；`RawSetCookies` 傳遞鏈 |
+| **D2 引導式 init 精靈** | `ramplio init`；cookie/JWT 兩種認證；steady/spike/soak 三種流量模式 |
+| **D3 Dashboard setup/teardown 整合** | `setScenario` 完整傳遞 setup/teardown steps 與 dataRows/dataMode |
+| **D4 CLI 報表中文化** | terminal.go 所有標頭改為繁體中文 |
 
 ---
 
@@ -468,13 +488,126 @@
 
 ---
 
+---
+
+## 下個版本規劃（v-next：穩定性 & 可用性）
+
+> 規劃基準：c93fdc8。以「穩定性」（防崩潰、防誤判、防資源洩漏）與「可用性」（錯誤訊息、首次使用體驗）為雙主軸。
+
+### Sprint S1 — 穩定性修補（預計工作量：3–5 天）
+
+以下問題是當前**最容易讓用戶失去信心**的地方，優先修復。
+
+#### S1-1 CircuitBreaker 誤觸發防護
+- **問題**：高並發時多個 VU 在同一毫秒失敗，累計計數超閾值誤中斷整場測試
+- **修法**：改用滑動時間窗口（`time.Duration` window + ring buffer 計數），只計算窗口內的連續失敗
+- **位置**：`engine/ramp.go:isCircuitTripped()` + `RampConfig`
+- **影響**：防止有效測試被誤中止；CircuitBreaker 回到「異常偵測工具」而非「噪音放大器」
+
+#### S1-2 regex capture 快取 compiled regexp
+- **問題**：每次執行步驟都 `regexp.Compile(pattern)`；場景有 10 VU × 1000 步驟 = 10,000 次重複編譯
+- **修法**：在 `applyCaptures()` 外層（`executeSingleStep` 或 step 初始化時）建立 `map[string]*regexp.Regexp` 快取
+- **位置**：`engine/ramp.go`（`RampStep` 結構或 `buildStepsFromScenario`）
+- **影響**：高頻場景 CPU 開銷顯著下降
+
+#### S1-3 DNS 快取大小上限
+- **問題**：`dns_cache.go` 的 `cache map` 無大小限制，長時間測試可能洩漏
+- **修法**：加入 `maxEntries int`（預設 1024），寫入時若超限以 FIFO 淘汰最舊項目
+- **位置**：`protocols/dns_cache.go`
+- **影響**：消除記憶體洩漏風險
+
+#### S1-4 Sample 緩衝區滿時告警
+- **問題**：`collector.go` channel 滿時靜默丟棄 Sample，用戶看不出指標不完整
+- **修法**：改用 `select { case ch <- s: default: atomic.AddInt64(&dropped, 1) }`，在 `Stop()` 時若 `dropped > 0` 輸出警告行
+- **位置**：`metrics/collector.go:Add()`
+- **影響**：用戶能察覺「指標可能不完整」，觸發排查（增加 VU buffer 或減少 VU）
+
+#### S1-5 `stop` 命令改用優雅關閉
+- **問題**：直接 `kill -9`，無法讓 teardown steps 執行，也無 Windows 支援
+- **修法**：先送 SIGTERM 並等待最多 5s，超時才送 SIGKILL；跨平台使用 `os.Process.Signal`
+- **位置**：`cmd/ramplio/stop.go`
+- **影響**：teardown steps 有機會執行；報告能正常輸出
+
+#### S1-6 engine/engine.go 清理
+- **問題**：舊版固定 VU 引擎完全被 RampEngine 取代，仍在 codebase 造成維護混淆
+- **修法**：確認無引用後刪除（`grep -r "engine.Engine\b" .`），更新相關 test
+- **位置**：`internal/engine/engine.go`
+- **影響**：減少維護面積；新手不再困惑「哪個 Engine 才是真正在用的」
+
+---
+
+### Sprint S2 — 可用性提升（預計工作量：2–4 天）
+
+以下修改讓「第一次使用」體驗更流暢、錯誤更容易自行排查。
+
+#### S2-1 EvalCondition 解析失敗改為輸出警告
+- **問題**：`scenarios/template.go:EvalCondition()` parse 失敗靜默返回 `true`，條件寫錯的步驟永遠執行
+- **修法**：改為回傳 `(bool, error)`；engine 在 warn-only 模式下輸出 `[WARN] step condition parse failed: ...` 並繼續
+- **影響**：用戶能立即發現 `if:` 條件寫錯
+
+#### S2-2 InfluxSink HTTPS 支援
+- **問題**：DSN `influxdb://host` 強制 HTTP，生產環境 InfluxDB 通常開 HTTPS
+- **修法**：新增 `influxdbs://host` scheme（或 `?tls=true` query param）走 HTTPS transport
+- **位置**：`reporter/sink_influx.go:36`
+- **工作量**：極小（5 行）
+
+#### S2-3 WebSocket 握手 headers
+- **問題**：`WSExecutor` 無法在升級握手時帶自訂 headers（無法做 WebSocket 認證）
+- **修法**：將 `req.Headers` 映射到 `websocket.Dialer.Header`（排除標準 WebSocket headers）
+- **位置**：`protocols/ws.go`
+- **工作量**：極小（3 行）
+
+#### S2-4 `validate` 命令增強輸出
+- **問題**：`validate` 只印「N stages, M steps」，用戶無法快速確認 vars/captures/data 是否正確解析
+- **修法**：補印 `vars` 清單、`vars_from` 摘要（file/mode/行數）、每個 step 的 capture key 清單、threshold 設定
+- **位置**：`cmd/ramplio/validate.go`
+- **工作量**：小
+
+#### S2-5 `ramplio run` 支援 `--ignore-errors` 旗標
+- **問題**：任何錯誤率 > 0 都以 exit code 1 結束，在 CI 中 debug 階段不便（想看完整報告）
+- **修法**：新增 `--ignore-errors` bool flag，設為 true 時即使有錯誤也以 exit 0 結束
+- **位置**：`cmd/ramplio/run.go`
+- **工作量**：極小
+
+#### S2-6 Dashboard 基本存取保護
+- **問題**：Dashboard API（`/api/run`, `/api/stop`, `/api/scenario`）完全開放，任何能連線的人都可以操控測試
+- **修法**：新增 `--dashboard-token TOKEN` flag；設定後 POST 端點要求 `Authorization: Bearer TOKEN` header；WebSocket 在升級時驗證 `?token=` query
+- **位置**：`dashboard/server.go`、`cmd/ramplio/run.go`
+- **工作量**：小
+
+---
+
+### 優先順序建議
+
+```
+┌─ 本週先做 ──────────────────────────────────┐
+│  S1-2 regex cache          （效能，極小）    │
+│  S1-3 DNS cache limit      （安全，極小）    │
+│  S1-4 Sample drop warning  （可觀測性，小）  │
+│  S2-2 InfluxSink HTTPS     （安全，極小）    │
+│  S2-3 WS handshake headers （功能缺口，極小）│
+│  S1-6 engine.go 清理       （技術債，極小）  │
+└─────────────────────────────────────────────┘
+
+┌─ 下週接著做 ────────────────────────────────┐
+│  S1-1 CircuitBreaker 滑動窗口  （穩定性，中）│
+│  S1-5 stop 優雅關閉            （穩定性，小）│
+│  S2-1 EvalCondition 警告       （可用性，小）│
+│  S2-4 validate 增強            （可用性，小）│
+│  S2-5 --ignore-errors flag     （可用性，極小│
+│  S2-6 Dashboard token 保護     （安全，小）  │
+└─────────────────────────────────────────────┘
+```
+
+---
+
 ## 如何進行增量更新
 
 下次需要分析時，執行：
 
 ```bash
-# 1. 取得上次分析後的異動（discover WIP 尚未 commit，分析基準仍為 b16d800）
-git diff b16d800..HEAD --stat
+# 1. 取得上次分析後的異動
+git diff c93fdc8..HEAD --stat
 git status --short   # 含未追蹤的新檔案
 
 # 2. 只讀異動的檔案

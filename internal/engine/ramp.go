@@ -79,6 +79,57 @@ func (ds *dataSource) next() map[string]string {
 	return ds.rows[int(idx)%len(ds.rows)]
 }
 
+// failWindow implements a sliding-time-window failure counter for the circuit breaker.
+// Unlike a bare atomic counter, it avoids false trips when many VUs fail simultaneously
+// in a burst but then recover quickly.
+type failWindow struct {
+	mu        sync.Mutex
+	times     []time.Time // ring buffer of recent failure timestamps
+	head      int
+	threshold int
+	window    time.Duration
+	tripped   bool
+}
+
+func newFailWindow(threshold int, windowDur time.Duration) *failWindow {
+	return &failWindow{
+		times:     make([]time.Time, threshold),
+		threshold: threshold,
+		window:    windowDur,
+	}
+}
+
+// record adds a failure timestamp and returns whether the circuit should trip.
+func (w *failWindow) record(t time.Time) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.tripped {
+		return true
+	}
+	w.times[w.head] = t
+	w.head = (w.head + 1) % w.threshold
+	cutoff := t.Add(-w.window)
+	count := 0
+	for _, ts := range w.times {
+		if !ts.IsZero() && ts.After(cutoff) {
+			count++
+		}
+	}
+	if count >= w.threshold {
+		w.tripped = true
+	}
+	return w.tripped
+}
+
+// reset clears the window (called on successful request).
+func (w *failWindow) reset() {
+	w.mu.Lock()
+	for i := range w.times {
+		w.times[i] = time.Time{}
+	}
+	w.mu.Unlock()
+}
+
 // RampEngine runs multi-stage load with linear VU interpolation between stages.
 type RampEngine struct {
 	cfg            RampConfig
@@ -92,8 +143,7 @@ type RampEngine struct {
 	// setupCaptures holds values captured during setup steps and is copied
 	// into each new VU's VarContext so all VUs share the setup results.
 	setupCaptures map[string]string
-	// consecutiveFails counts unbroken error streak across all VUs for circuit breaker.
-	consecutiveFails atomic.Int64
+	cbWindow      *failWindow // nil when circuit breaker is disabled
 }
 
 func NewRamp(cfg RampConfig, collector *metrics.Collector) *RampEngine {
@@ -101,6 +151,13 @@ func NewRamp(cfg RampConfig, collector *metrics.Collector) *RampEngine {
 	e.stageTotal.Store(int32(len(cfg.Stages)))
 	if len(cfg.DataRows) > 0 {
 		e.data = newDataSource(cfg.DataRows, cfg.DataMode)
+	}
+	if cb := cfg.CircuitBreaker; cb != nil && cb.ConsecutiveFailures > 0 {
+		windowDur := time.Duration(cb.WindowSeconds) * time.Second
+		if windowDur <= 0 {
+			windowDur = time.Second
+		}
+		e.cbWindow = newFailWindow(cb.ConsecutiveFailures, windowDur)
 	}
 	return e
 }
@@ -394,7 +451,9 @@ func (e *RampEngine) runRateWorker(ctx context.Context, lim *rate.Limiter) {
 			if result.Error != nil {
 				e.incFails()
 			} else {
-				e.consecutiveFails.Store(0)
+				if e.cbWindow != nil {
+						e.cbWindow.reset()
+					}
 			}
 		}
 		e.activeVUs.Add(-1)
@@ -492,7 +551,9 @@ func (e *RampEngine) runVU(ctx context.Context) {
 				if result.Error != nil {
 					e.incFails()
 				} else {
-					e.consecutiveFails.Store(0)
+					if e.cbWindow != nil {
+						e.cbWindow.reset()
+					}
 				}
 
 				if step.Pause > 0 {
@@ -561,14 +622,14 @@ func (e *RampEngine) executeSingleStep(ctx context.Context, step RampStep, varCt
 
 // isCircuitTripped returns true when the circuit breaker has fired.
 func (e *RampEngine) isCircuitTripped() bool {
-	cb := e.cfg.CircuitBreaker
-	if cb == nil || cb.ConsecutiveFailures <= 0 {
-		return false
-	}
-	return int(e.consecutiveFails.Load()) >= cb.ConsecutiveFailures
+	return e.cbWindow != nil && e.cbWindow.tripped
 }
 
-func (e *RampEngine) incFails() { e.consecutiveFails.Add(1) }
+func (e *RampEngine) incFails() {
+	if e.cbWindow != nil {
+		e.cbWindow.record(time.Now())
+	}
+}
 
 // renderRequest resolves template tokens in the step's URL, headers, and body,
 // then applies any auth helper.

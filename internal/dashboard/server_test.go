@@ -57,7 +57,12 @@ func (m *mockController) Start(req dashboard.RunRequest) error {
 
 func newTestServer(t *testing.T, ctrl dashboard.Controller) (*dashboard.Server, context.CancelFunc) {
 	t.Helper()
-	srv := dashboard.New(ctrl, 0)
+	return newTestServerWithToken(t, ctrl, "")
+}
+
+func newTestServerWithToken(t *testing.T, ctrl dashboard.Controller, token string) (*dashboard.Server, context.CancelFunc) {
+	t.Helper()
+	srv := dashboard.New(ctrl, 0, token)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	require.NoError(t, srv.Start(ctx))
@@ -264,4 +269,68 @@ func TestServer_ReportAPI_404WhenNoTestRun(t *testing.T) {
 	defer resp.Body.Close()
 
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+}
+
+func TestServer_Token_BlocksWithoutCredential(t *testing.T) {
+	ctrl := &mockController{state: dashboard.StateIdle}
+	srv, _ := newTestServerWithToken(t, ctrl, "secret123")
+
+	// POST /api/run without token → 401
+	resp, err := http.Post(
+		fmt.Sprintf("http://%s/api/run", srv.Addr()),
+		"application/json",
+		strings.NewReader(`{"url":"http://example.com","vus":1,"duration":"5s"}`),
+	)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+}
+
+func TestServer_Token_AllowsWithBearerHeader(t *testing.T) {
+	ctrl := &mockController{state: dashboard.StateIdle}
+	srv, _ := newTestServerWithToken(t, ctrl, "secret123")
+
+	req, _ := http.NewRequest(http.MethodPost,
+		fmt.Sprintf("http://%s/api/run", srv.Addr()),
+		strings.NewReader(`{"url":"http://example.com","vus":1,"duration":"5s"}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer secret123")
+
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusAccepted, resp.StatusCode)
+}
+
+func TestServer_Token_AllowsStatusWithoutCredential(t *testing.T) {
+	ctrl := &mockController{state: dashboard.StateIdle}
+	srv, _ := newTestServerWithToken(t, ctrl, "secret123")
+
+	// GET /api/status is read-only — no token required
+	resp, err := http.Get(fmt.Sprintf("http://%s/api/status", srv.Addr()))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestServer_Token_WSWithQueryParam(t *testing.T) {
+	ctrl := &mockController{state: dashboard.StateIdle}
+	srv, _ := newTestServerWithToken(t, ctrl, "secret123")
+
+	// WebSocket without token → rejected
+	wsURL := url.URL{Scheme: "ws", Host: srv.Addr(), Path: "/ws"}
+	_, _, err := websocket.DefaultDialer.Dial(wsURL.String(), nil)
+	assert.Error(t, err, "WS without token should be rejected")
+
+	// WebSocket with correct token → accepted
+	wsURL.RawQuery = "token=secret123"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL.String(), nil)
+	require.NoError(t, err, "WS with correct token should connect")
+	defer conn.Close()
+
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, msg, err := conn.ReadMessage()
+	require.NoError(t, err)
+	assert.NotEmpty(t, msg)
 }

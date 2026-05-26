@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -69,19 +70,44 @@ type wsMessage struct {
 type Server struct {
 	ctrl     Controller
 	port     int
+	token    string
 	upgrader websocket.Upgrader
 	addr     string
 	ctx      context.Context
 }
 
 // New creates a dashboard Server backed by the given Controller.
-func New(ctrl Controller, port int) *Server {
+// token, if non-empty, enables Bearer-token protection on state-changing endpoints.
+func New(ctrl Controller, port int, token string) *Server {
 	return &Server{
-		ctrl: ctrl,
-		port: port,
+		ctrl:  ctrl,
+		port:  port,
+		token: token,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(*http.Request) bool { return true },
 		},
+	}
+}
+
+// requireToken is middleware that enforces Bearer token auth when s.token is set.
+// It checks Authorization: Bearer <token> for HTTP requests and ?token=<token> for WebSocket.
+func (s *Server) requireToken(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.token == "" {
+			next(w, r)
+			return
+		}
+		var provided string
+		if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
+			provided = strings.TrimPrefix(auth, "Bearer ")
+		} else {
+			provided = r.URL.Query().Get("token")
+		}
+		if provided != s.token {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next(w, r)
 	}
 }
 
@@ -93,14 +119,14 @@ func (s *Server) Addr() string { return s.addr }
 func (s *Server) Start(ctx context.Context) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.serveDashboard)
-	mux.HandleFunc("/ws", s.handleWS)
-	mux.HandleFunc("/api/run", s.handleRun)
-	mux.HandleFunc("/api/stop", s.handleStop)
+	mux.HandleFunc("/ws", s.requireToken(s.handleWS))
+	mux.HandleFunc("/api/run", s.requireToken(s.handleRun))
+	mux.HandleFunc("/api/stop", s.requireToken(s.handleStop))
 	mux.HandleFunc("/api/status", s.handleStatus)
-	mux.HandleFunc("/api/scenario", s.handleScenario)
-	mux.HandleFunc("/api/import-har", s.handleImportHAR)
+	mux.HandleFunc("/api/scenario", s.requireToken(s.handleScenario))
+	mux.HandleFunc("/api/import-har", s.requireToken(s.handleImportHAR))
 	mux.HandleFunc("/api/report", s.handleReport)
-	mux.HandleFunc("/api/discover", s.handleDiscover)
+	mux.HandleFunc("/api/discover", s.requireToken(s.handleDiscover))
 
 	srv := &http.Server{Handler: mux}
 	s.ctx = ctx
