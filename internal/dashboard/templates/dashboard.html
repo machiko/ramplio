@@ -1342,6 +1342,103 @@
       margin-bottom: 24px;
     }
     .ci-hl { color: var(--accent2); font-weight: 700; }
+
+    /* ── Home View ─────────────────────────────────── */
+    .home-view {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 60px 24px;
+      min-height: 100vh;
+      text-align: center;
+    }
+    .home-heading {
+      font-size: 32px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 48px;
+    }
+    .home-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 24px;
+      width: 100%;
+      max-width: 1000px;
+      margin-bottom: 48px;
+    }
+    .home-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 32px 24px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--card);
+      cursor: pointer;
+      transition: all 0.3s ease;
+      position: relative;
+    }
+    .home-card:hover { border-color: var(--accent); box-shadow: 0 4px 12px rgba(124,58,237,0.2); }
+    .home-card--primary {
+      border-color: var(--accent);
+      background: rgba(124,58,237,0.06);
+      box-shadow: 0 2px 8px rgba(124,58,237,0.15);
+    }
+    .home-card--primary:hover { box-shadow: 0 4px 16px rgba(124,58,237,0.25); }
+    .home-card-icon {
+      font-size: 48px;
+      margin-bottom: 12px;
+    }
+    .home-card-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 8px;
+    }
+    .home-card-desc {
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+    .home-card-badge {
+      position: absolute;
+      top: -8px;
+      right: -8px;
+      background: var(--accent);
+      color: #fff;
+      padding: 4px 10px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+    }
+    .home-discover-link {
+      font-size: 14px;
+      color: var(--accent2);
+      background: none;
+      border: none;
+      cursor: pointer;
+      text-decoration: none;
+      transition: color 0.3s;
+    }
+    .home-discover-link:hover { color: var(--accent); text-decoration: underline; }
+
+    .back-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 20px;
+      padding: 6px 12px;
+      font-size: 13px;
+      color: var(--muted);
+      background: none;
+      border: none;
+      cursor: pointer;
+      transition: color 0.3s;
+    }
+    .back-btn:hover { color: var(--text); }
   </style>
 </head>
 <body>
@@ -1368,17 +1465,38 @@
     </div>
   </header>
 
+  <!-- ── Home View ───────────────────────────────── -->
+  <div v-if="view === 'home'" class="home-view">
+    <div class="home-heading">你想做什麼？</div>
+    <div class="home-cards">
+      <div class="home-card home-card--primary" @click="pickMode('guided')">
+        <div class="home-card-icon">🧙</div>
+        <div class="home-card-title">帶我設定</div>
+        <div class="home-card-desc">回答幾個問題，我幫你設定測試。不需要了解技術細節。</div>
+        <div class="home-card-badge">推薦</div>
+      </div>
+      <div class="home-card" @click="pickMode('url')">
+        <div class="home-card-icon">🚀</div>
+        <div class="home-card-title">快速測試</div>
+        <div class="home-card-desc">直接輸入 URL，自訂並發數與測試時間。</div>
+      </div>
+      <div class="home-card" @click="pickMode('scenario')">
+        <div class="home-card-icon">📂</div>
+        <div class="home-card-title">上傳場景</div>
+        <div class="home-card-desc">上傳 HAR 或 YAML 情境，支援多步驟與登入流程。</div>
+      </div>
+    </div>
+    <button class="home-discover-link" @click="pickMode('discover')">
+      ⚡ 我想找出服務的承載上限 →
+    </button>
+  </div>
+
   <!-- ── Setup View ─────────────────────────────────── -->
   <div v-if="view === 'setup'" class="setup-view">
     <div class="setup-card">
 
-      <!-- Mode tabs -->
-      <div class="mode-tabs">
-        <button class="mode-tab" :class="{ active: setupMode === 'url' }" @click="setupMode = 'url'">URL 模式</button>
-        <button class="mode-tab" :class="{ active: setupMode === 'scenario' }" @click="setupMode = 'scenario'; clearScenario()">情境模式</button>
-        <button class="mode-tab" :class="{ active: setupMode === 'guided' }" @click="setupMode = 'guided'; wizardStep = 1">引導模式</button>
-        <button class="mode-tab" :class="{ active: setupMode === 'discover' }" @click="setupMode = 'discover'">⚡ 探測上限</button>
-      </div>
+      <!-- Back button -->
+      <button class="back-btn" @click="goHome()">← 重新選擇</button>
 
       <!-- ── URL mode ── -->
       <template v-if="setupMode === 'url'">
@@ -2367,8 +2485,8 @@ const MAX_PTS = 120;
 
 createApp({
   setup() {
-    const view = ref('setup');
-    const setupMode = ref('url');
+    const view = ref('home');
+    const setupMode = ref('guided');
     const urlMode = ref('vu'); // 'vu' or 'rate' — URL mode only
     const submitting = ref(false);
     const uploadLoading = ref(false);
@@ -2839,7 +2957,14 @@ createApp({
     }
 
     async function stopTest() { await fetch('/api/stop', { method: 'POST' }); }
-    function resetSetup() { view.value = 'setup'; formError.value = ''; }
+    function resetSetup() { view.value = 'home'; formError.value = ''; }
+    function pickMode(mode) {
+      setupMode.value = mode;
+      if (mode === 'guided') wizardStep.value = 1;
+      if (mode === 'scenario') clearScenario();
+      view.value = 'setup';
+    }
+    function goHome() { view.value = 'home'; }
 
     function probeStepClass(rps) {
       const probe = discoverProbes.value.find(p => p.rps === rps);
@@ -3000,7 +3125,7 @@ createApp({
       rpsCanvas, latCanvas, finalVerdict, nlSummary, lastStepMetrics, lastGroupMetrics,
       discoverForm, discoverProbes, discoverResult, discoverCurrent, discoverProbeSeq,
       probeStepClass,
-      runTest, startScenario, stopTest, resetSetup, startDiscover,
+      runTest, startScenario, stopTest, resetSetup, startDiscover, pickMode, goHome,
       triggerFileInput, handleFileChange, handleDrop, clearScenario,
       triggerHarInput, handleHarFileChange, handleHarDrop,
       triggerScenarioInput, handleScenarioFileChange, handleScenarioDrop,
