@@ -100,36 +100,43 @@ func resolveToken(token string, ctx *VarContext) (string, error) {
 	}
 }
 
-// EvalCondition evaluates a simple boolean expression used in step `if:` fields.
-// The expression is first rendered through the template engine, then evaluated.
-// Supported forms (after rendering):
+// EvalCondition evaluates a boolean expression used in step `if:` fields.
+// The expression supports:
 //
-//	<value> == ""      → true when value is empty
-//	<value> != ""      → true when value is not empty
-//	<value> == "x"     → true when value equals x
-//	<value> != "x"     → true when value does not equal x
+//	Simple comparisons:
+//	  <value> == "x"     → equality
+//	  <value> != "x"     → inequality
+//	  <value> < x        → numeric less-than
+//	  <value> <= x       → numeric less-or-equal
+//	  <value> > x        → numeric greater-than
+//	  <value> >= x       → numeric greater-or-equal
 //
-// Returns true when the expression cannot be parsed, so unknown conditions do not
-// accidentally skip steps. A warning is printed to stderr in both failure cases.
+//	Logical operators (case-insensitive):
+//	  AND                → logical AND (higher precedence than OR)
+//	  OR                 → logical OR (lower precedence)
+//	  NOT                → logical NOT (highest precedence)
+//
+//	Parentheses:
+//	  (expr)             → explicit grouping
+//
+// Template variables like {{vars.key}}, {{capture.x}}, {{data.col}} are resolved
+// during evaluation. Returns true when the expression cannot be parsed, so unknown
+// conditions do not accidentally skip steps. A warning is printed to stderr in failure cases.
 func EvalCondition(expr string, ctx *VarContext) bool {
-	rendered, err := RenderString(expr, ctx)
+	parser := NewParser(expr)
+	astExpr, err := parser.Parse()
 	if err != nil {
-		conditionWarnf("step condition render failed (%v) — step will execute", err)
+		conditionWarnf("step condition %q could not be parsed (%v) — step will execute", expr, err)
 		return true
 	}
-	// Try `LHS == RHS` and `LHS != RHS`.
-	if idx := strings.Index(rendered, " != "); idx >= 0 {
-		lhs := strings.TrimSpace(rendered[:idx])
-		rhs := strings.Trim(strings.TrimSpace(rendered[idx+4:]), `"`)
-		return lhs != rhs
+
+	result, err := astExpr.Evaluate(ctx)
+	if err != nil {
+		conditionWarnf("step condition %q evaluation failed (%v) — step will execute", expr, err)
+		return true
 	}
-	if idx := strings.Index(rendered, " == "); idx >= 0 {
-		lhs := strings.TrimSpace(rendered[:idx])
-		rhs := strings.Trim(strings.TrimSpace(rendered[idx+4:]), `"`)
-		return lhs == rhs
-	}
-	conditionWarnf("step condition %q could not be parsed (no == or !=) — step will execute", rendered)
-	return true
+
+	return result
 }
 
 // RenderHeaders renders all header values in the map, returning a new map.

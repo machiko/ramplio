@@ -15,6 +15,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/ramplio/ramplio/internal/dashboard"
+	"github.com/ramplio/ramplio/internal/distributed"
 	"github.com/ramplio/ramplio/internal/engine"
 	"github.com/ramplio/ramplio/internal/metrics"
 	"github.com/ramplio/ramplio/internal/protocols"
@@ -42,6 +43,7 @@ func newRunCmd() *cobra.Command {
 		prometheusAddr  string
 		requestTimeout  string
 		ignoreErrors    bool
+		workers         []string
 	)
 
 	cmd := &cobra.Command{
@@ -64,6 +66,17 @@ func newRunCmd() *cobra.Command {
 
 			if vus != 1 && rps != 0 {
 				return fmt.Errorf("--vus and --rps are mutually exclusive")
+			}
+
+			// Distributed mode: --worker flags specify remote worker addresses.
+			if len(workers) > 0 {
+				if scenarioFile == "" {
+					return fmt.Errorf("--scenario is required for distributed testing")
+				}
+				if url != "" {
+					return fmt.Errorf("--url and --worker are mutually exclusive")
+				}
+				return runDistributed(scenarioFile, workers, prometheusAddr, httpCfg)
 			}
 
 			// Dashboard mode: browser handles test setup and control.
@@ -195,6 +208,7 @@ New to load testing? Run:  ramplio run --dashboard`)
 	cmd.Flags().StringVar(&requestTimeout, "timeout", "", "Per-request timeout (e.g. 10s, 500ms); overrides scenario default")
 	cmd.Flags().StringArrayVar(&sinkDSNs, "sink", nil, "Push results to an external sink (repeatable): csv:<file>  influxdb://host/bucket?token=T")
 	cmd.Flags().BoolVar(&ignoreErrors, "ignore-errors", false, "Exit 0 even when errors or threshold violations occur (useful during debugging)")
+	cmd.Flags().StringArrayVar(&workers, "worker", nil, "Worker address for distributed testing (repeatable, e.g. --worker localhost:7700 --worker localhost:7701)")
 
 	return cmd
 }
@@ -376,6 +390,73 @@ func runScenario(path, promAddr string, httpCfg protocols.HTTPConfig) (metrics.S
 	<-done
 
 	return sum, sc.Thresholds, nil
+}
+
+// runDistributed orchestrates a distributed load test across multiple worker processes.
+func runDistributed(scenarioFile string, workerAddrs []string, promAddr string, httpCfg protocols.HTTPConfig) error {
+	sc, err := scenarios.ParseFile(scenarioFile)
+	if err != nil {
+		return fmt.Errorf("loading scenario: %w", err)
+	}
+
+	yamlBytes, err := os.ReadFile(scenarioFile)
+	if err != nil {
+		return fmt.Errorf("reading scenario: %w", err)
+	}
+
+	coordinator := distributed.NewCoordinator(workerAddrs, yamlBytes, sc, httpCfg)
+
+	fmt.Printf("Running scenario %q on %d worker(s)  (%d stages, %d step(s))\n\n", sc.Name, len(workerAddrs), len(sc.Stages), len(sc.Steps))
+	for i, addr := range workerAddrs {
+		fmt.Printf("  Worker %d: %s\n", i+1, addr)
+	}
+	fmt.Println()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	var sum metrics.Summary
+
+	go func() {
+		defer close(done)
+		sum, err = coordinator.Run(ctx)
+	}()
+
+	// Create a live provider that wraps the coordinator's snapshot method
+	provider := &coordinatorProvider{coordinator: coordinator, startedAt: time.Now()}
+
+	if promAddr != "" {
+		prom := reporter.NewPrometheusServer(provider, promAddr)
+		if err := prom.Start(ctx); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: prometheus unavailable: %v\n", err)
+		} else {
+			fmt.Printf("Prometheus → http://%s/metrics\n\n", promAddr)
+		}
+	}
+
+	if err := reporter.RunTUI(provider, cancel, done); err != nil {
+		<-done
+	}
+	cancel()
+	<-done
+
+	if err != nil {
+		return err
+	}
+
+	reporter.PrintSummary(os.Stdout, sum)
+	return nil
+}
+
+// coordinatorProvider supplies live metrics snapshots from the coordinator (for TUI).
+type coordinatorProvider struct {
+	coordinator *distributed.Coordinator
+	startedAt   time.Time
+}
+
+func (p *coordinatorProvider) Snapshot() reporter.LiveSnapshot {
+	snap := p.coordinator.LiveSnapshot()
+	snap.Elapsed = time.Since(p.startedAt)
+	return snap
 }
 
 func runURL(url, method string, vus int, duration string, headers []string, body string, httpCfg protocols.HTTPConfig) (metrics.Summary, error) {

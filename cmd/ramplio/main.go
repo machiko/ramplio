@@ -16,6 +16,7 @@ var rootCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(newRunCmd())
+	rootCmd.AddCommand(newWorkerCmd())
 	rootCmd.AddCommand(newDiscoverCmd())
 	rootCmd.AddCommand(newImportCmd())
 	rootCmd.AddCommand(newInitCmd())
