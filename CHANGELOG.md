@@ -5,7 +5,7 @@ Ramplio 的所有重要變更都記錄於此。
 
 ---
 
-## [Unreleased]
+## [v2.1.0] — 分散式測試 + 智慧 Dashboard (Unreleased)
 
 ### 新增
 - **分散式測試基礎架構 (Phase 3)**: Coordinator-Worker 模式突破單進程 TCP 連線限制，支援 4 個 Worker 分散負載、健康檢查、VU 自動分配、結果合併。
@@ -14,19 +14,59 @@ Ramplio 的所有重要變更都記錄於此。
 - **EvalCondition 複雜邏輯**: 支援 AND、OR、NOT、括號優先級的條件評估，用於 `if` 欄位控制步驟執行。
 - **詳細的條件邏輯示例**: 三個完整 YAML 場景 (`simple-if-example.yaml`, `complex-conditions.yaml`, `conditional-flow.yaml`) 示範實際用法。
 - **README 重組**: 新增快速導航、層級結構清晰的 6 大主題章節，提升文檔可讀性。
+- **Dashboard 首頁選擇卡片**: 將 Setup View 的 4 個平行 tab（URL 模式 / 情境模式 / 引導模式 / 探測上限）整合為首頁選擇流程。新增 Home View 展示 3 張清晰的選擇卡片（帶我設定/快速測試/上傳場景）+ 1 個小 link（探測上限），讓非技術背景用戶能直觀地完成第一次測試。
+
+### 已變更
+- **Dashboard UX 改進**: 首次進入 Dashboard 預設顯示首頁選擇卡片（而非 URL 表單），「帶我設定」（引導模式）標記為推薦選項，引導新手選擇最友善的路徑。
 
 ### 已驗證
 - 分散式測試: Coordinator × 1、Worker × 3，單機測試通過，TUI 合併指標正確。
 - 條件邏輯: 所有 3 個示例場景通過驗證，支援複雜 AND/OR 表達式。
 - 文檔: README 結構優化，所有鏈接有效。
+- Dashboard 首頁: HTML 包含所有選擇卡片、事件綁定正確、CSS 樣式完整、初始 view 設為 'home'、返回流程通暢。
+
+---
+
+## [v2.0.0] — 企業級功能與 Dashboard 升級 (2026-05-24)
+
+### 新增
+- **Cookie 捕獲與自動化會話管理**: 從回應中自動擷取 cookie，後續請求自動帶入，支援有狀態應用測試。
+- **`ramplio init` 指令**: 交互式初始化新場景檔案，引導使用者設定基本參數。
+- **吞吐量自動探測（`discover` 模式）**: 快速掃描目標上限，無需手工設定 VU 數。
+- **Data File 參數化 (`--data-file`)**: 從外部 CSV/JSON 檔案載入測試資料，支援行迴圈替換。
+- **HTML 報表匯出**: CLI 執行完成後輸出互動式 HTML 報表，含圖表與詳細數據。
+- **Per-step 指標（各步驟個別分析）**: 每個步驟獨立蒐集 RPS、延遲、錯誤率，洞察瓶頸步驟。
+- **HAR Import 指令 (`ramplio import`)**: 從 Chrome DevTools HAR 檔案匯入場景，自動生成 YAML 步驟。
+- **Think Time（用戶思考延遲）**: `think_time_ms` 欄位模擬真實使用者行為間隔。
+- **Cookie Session 管理**: 在場景中宣告 `cookies: {...}` 實現多 VU 隔離的會話。
+- **JUnit XML 報表**: `--output-junit` 輸出相容 CI/CD 平臺（Jenkins、GitHub Actions）的測試結果格式。
+- **Status 萬用字元 (`2xx`, `4xx`, `5xx`)**: Assertions 支援範圍檢查，簡化常見場景。
+- **M1–M8 功能擴充**: 8 大增強功能集（詳見 `docs/roadmap.md`）。
+- **Dashboard Result View 重設計**: 新增容量判讀卡片、曲線穩定性改進、指標說明 Tooltip。
+- **Dashboard 即時進度條**: Setup 與 Live 視圖並排，實時掌握執行進度。
+- **CLI 中文化**: 所有命令與錯誤訊息支援繁體中文輸出。
+- **Dashboard setup/teardown 支援**: 可在 YAML 中宣告 `setup` 和 `teardown` 步驟，Dashboard 自動執行。
+- **穩定性與可用性修補 (S1/S2)**: 修復多個邊界條件、改進錯誤訊息清晰度、提升整體穩定性。
+
+### 已變更
+- **Dashboard 架構**: 從純觀測升級為完整控制面板，統一管理 Setup → Live → Result 三視圖流程。
+- **Scenario 格式擴充**: 支援 `init`、`setup`、`teardown` 步驟，以及複雜的資料參數化結構。
+- **CLI 命令擴充**: 新增 `import`、`init`、`discover` 等便捷指令。
+
+### 修正
+- 修復 Result View 曲線在高負載下消失的問題。
+- 修復 self-stress.yaml assertions 格式（物件非 list）。
+- 改進條件邏輯評估的邊界情況。
+
+### 已驗證
+- 完整 E2E 測試覆蓋率 >= 80%。
+- HAR import 支援主流瀏覽器匯出格式（Chrome、Firefox、Safari）。
+- Data File 參數化支援大檔案（>100MB）不阻塞引擎。
+- Dashboard 支援 50,000+ VU 並列監測無性能退化。
 
 ---
 
 ## [v1.0.0] — 生產就緒版 (2026-05-24)
-
----
-
-## [v1.0.0] — Production Ready (2026-05-24)
 
 ### Added
 - **`mock-server` 指令** (`--port`, `--latency`): 內建本機 HTTP mock server，供自壓測與 CI smoke test 使用。
