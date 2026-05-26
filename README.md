@@ -221,6 +221,46 @@ ramplio run --scenario smoke.yaml
 
 ---
 
+## 分散式測試（突破單進程限制）
+
+**使用情境：** 超過 10,000 VU 或需要避免單一機器的 TCP 連線數限制時，可以在多個進程間分散負載。
+
+### 一、啟動 Worker（每個終端一條指令）
+
+```bash
+# 終端 1：Worker A 監聽 :7700
+ramplio worker --addr :7700
+
+# 終端 2：Worker B 監聽 :7701
+ramplio worker --addr :7701
+
+# 終端 3：Worker C 監聽 :7702
+ramplio worker --addr :7702
+```
+
+### 二、執行分散式測試
+
+```bash
+# 用 --worker 旗標指定 worker 位址（可重複）
+ramplio run --scenario smoke.yaml \
+  --worker localhost:7700 \
+  --worker localhost:7701 \
+  --worker localhost:7702
+```
+
+Coordinator 自動做到：
+- ✓ 檢查所有 Worker 健康狀態
+- ✓ 運行 Setup 步驟（執行一次，集中於 Coordinator）
+- ✓ 按整數餘數法分配 VU（e.g. 100 VU → 3 Worker 各 33、33、34）
+- ✓ 廣播情境給所有 Worker，每個 Worker 執行自己的一份
+- ✓ 每秒輪詢所有 Worker 的即時指標，合并顯示在 TUI / Dashboard
+- ✓ 執行 Teardown（同樣在 Coordinator）
+- ✓ 合并所有 Worker 結果（加總、加權百分位數）
+
+**重要：** 分散模式下，`setup` 和 `teardown` 只在 Coordinator 執行一次；實際負載由 Worker 並行承擔。
+
+---
+
 ## Capacity Discovery
 
 不需要了解 VU 或 RPS 是什麼——直接告訴 Ramplio 網址，它自動幫你找出網站的最大承載量：
