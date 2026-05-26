@@ -31,10 +31,12 @@ func TestMemoryStability(t *testing.T) {
 
 	exec := protocols.NewHTTPExecutor(protocols.DefaultHTTPConfig())
 	col := metrics.NewCollector(vus)
-	eng := engine.New(engine.Config{
-		VUs:      vus,
-		Duration: 5 * time.Second,
-		Request:  protocols.Request{Method: "GET", URL: srv.URL},
+	eng := engine.NewRamp(engine.RampConfig{
+		Stages: []scenarios.Stage{{Duration: 5 * time.Second, Target: vus}},
+		Steps: []engine.RampStep{{
+			Name:    "GET " + srv.URL,
+			Request: protocols.Request{Method: "GET", URL: srv.URL},
+		}},
 		Executor: exec,
 	}, col)
 

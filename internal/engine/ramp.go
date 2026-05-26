@@ -28,7 +28,10 @@ type RampStep struct {
 	Assertions *scenarios.Assertions
 	Auth       *scenarios.Auth
 	Capture    *scenarios.Capture
-	Retry      *scenarios.RetryConfig
+	// CompiledRegexes holds pre-compiled patterns from Capture.Values to avoid
+	// repeated regexp.Compile calls in the hot VU loop. Key is the raw pattern string.
+	CompiledRegexes map[string]*regexp.Regexp
+	Retry           *scenarios.RetryConfig
 	// Pause is the think time after this step completes (0 = no delay).
 	Pause    time.Duration
 	Group    string // optional group name for aggregate reporting
@@ -370,7 +373,7 @@ func (e *RampEngine) runRateWorker(ctx context.Context, lim *rate.Limiter) {
 			}
 
 			if result.Error == nil {
-				applyCaptures(step.Capture, result, varCtx)
+				applyCaptures(step.Capture, step.CompiledRegexes, result, varCtx)
 				if step.Assertions != nil {
 					if assertErr := scenarios.EvalAssertions(step.Assertions, result); assertErr != nil {
 						result.Error = assertErr
@@ -468,7 +471,7 @@ func (e *RampEngine) runVU(ctx context.Context) {
 				}
 
 				if result.Error == nil {
-					applyCaptures(step.Capture, result, varCtx)
+					applyCaptures(step.Capture, step.CompiledRegexes, result, varCtx)
 					if step.Assertions != nil {
 						if assertErr := scenarios.EvalAssertions(step.Assertions, result); assertErr != nil {
 							result.Error = assertErr
@@ -552,7 +555,7 @@ func (e *RampEngine) executeSingleStep(ctx context.Context, step RampStep, varCt
 	}
 	result := exec.Execute(ctx, req)
 	if result.Error == nil {
-		applyCaptures(step.Capture, result, varCtx)
+		applyCaptures(step.Capture, step.CompiledRegexes, result, varCtx)
 	}
 }
 
@@ -621,7 +624,8 @@ func renderRequest(step RampStep, ctx *scenarios.VarContext) (protocols.Request,
 }
 
 // applyCaptures extracts values from the result and stores them in varCtx.Captures.
-func applyCaptures(cap *scenarios.Capture, result protocols.Result, ctx *scenarios.VarContext) {
+// compiled is a pre-built map of regex patterns to avoid repeated Compile calls in the hot loop.
+func applyCaptures(cap *scenarios.Capture, compiled map[string]*regexp.Regexp, result protocols.Result, ctx *scenarios.VarContext) {
 	if cap == nil {
 		return
 	}
@@ -639,7 +643,11 @@ func applyCaptures(cap *scenarios.Capture, result protocols.Result, ctx *scenari
 			ctx.Captures[key] = result.ResponseHeaders[http.CanonicalHeaderKey(strings.TrimPrefix(expr, "header:"))]
 		case strings.HasPrefix(expr, "regex:"):
 			pattern := strings.TrimPrefix(expr, "regex:")
-			if re, err := regexp.Compile(pattern); err == nil {
+			re := compiled[pattern]
+			if re == nil {
+				re, _ = regexp.Compile(pattern)
+			}
+			if re != nil {
 				if m := re.FindSubmatch(result.Body); len(m) > 1 {
 					ctx.Captures[key] = string(m[1])
 				}

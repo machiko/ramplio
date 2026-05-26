@@ -16,9 +16,9 @@ func ParseSink(dsn string) (Sink, error) {
 	case strings.HasPrefix(dsn, "csv:"):
 		path := strings.TrimPrefix(dsn, "csv:")
 		return NewCsvSink(path)
-	case strings.HasPrefix(dsn, "influxdb://"):
+	case strings.HasPrefix(dsn, "influxdb://"), strings.HasPrefix(dsn, "influxdbs://"):
 		return NewInfluxSink(dsn)
 	default:
-		return nil, fmt.Errorf("unknown sink scheme in %q — supported: csv:<path>, influxdb://...", dsn)
+		return nil, fmt.Errorf("unknown sink scheme in %q — supported: csv:<path>, influxdb://..., influxdbs://...", dsn)
 	}
 }

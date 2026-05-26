@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 
 	hdrhistogram "github.com/HdrHistogram/hdrhistogram-go"
@@ -44,6 +45,7 @@ type Collector struct {
 	hist      *hdrhistogram.Histogram
 	once      sync.Once
 	startedAt time.Time
+	dropped   atomic.Int64 // samples discarded due to full channel
 	// Per-step tracking; only populated when samples carry a non-empty StepName.
 	stepHists map[string]*hdrhistogram.Histogram
 	stepSums  map[string]Summary
@@ -79,6 +81,7 @@ func (c *Collector) Add(s Sample) {
 	case c.ch <- s:
 	case <-c.quit:
 	default:
+		c.dropped.Add(1)
 	}
 }
 
@@ -127,6 +130,7 @@ func (c *Collector) Stop() Summary {
 		}
 		c.sum.Groups = groups
 	}
+	c.sum.DroppedSamples = c.dropped.Load()
 	return c.sum
 }
 

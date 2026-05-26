@@ -11,18 +11,20 @@ import (
 	"github.com/ramplio/ramplio/internal/engine"
 	"github.com/ramplio/ramplio/internal/metrics"
 	"github.com/ramplio/ramplio/internal/protocols"
+	"github.com/ramplio/ramplio/internal/scenarios"
 	"github.com/stretchr/testify/assert"
 )
 
-func newTestEngine(t *testing.T, serverURL string, vus int, duration time.Duration) (*engine.Engine, *metrics.Collector) {
+func newTestEngine(t *testing.T, serverURL string, vus int, duration time.Duration) (*engine.RampEngine, *metrics.Collector) {
 	t.Helper()
 	col := metrics.NewCollector(vus)
-	exe := protocols.NewHTTPExecutor(protocols.DefaultHTTPConfig())
-	eng := engine.New(engine.Config{
-		VUs:      vus,
-		Duration: duration,
-		Request:  protocols.Request{Method: http.MethodGet, URL: serverURL},
-		Executor: exe,
+	eng := engine.NewRamp(engine.RampConfig{
+		Stages: []scenarios.Stage{{Duration: duration, Target: vus}},
+		Steps: []engine.RampStep{{
+			Name:    "GET " + serverURL,
+			Request: protocols.Request{Method: http.MethodGet, URL: serverURL},
+		}},
+		Executor: protocols.NewHTTPExecutor(protocols.DefaultHTTPConfig()),
 	}, col)
 	return eng, col
 }

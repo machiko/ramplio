@@ -2,6 +2,7 @@ package protocols
 
 import (
 	"context"
+	"net/http"
 	"strings"
 	"time"
 
@@ -19,8 +20,19 @@ func NewWSExecutor() *WSExecutor { return &WSExecutor{} }
 func (e *WSExecutor) Execute(ctx context.Context, req Request) Result {
 	start := time.Now()
 
-	dialer := websocket.DefaultDialer
-	conn, resp, err := dialer.DialContext(ctx, req.URL, nil)
+	// Forward request headers to the WebSocket handshake, excluding internal engine headers.
+	reqHeader := make(http.Header, len(req.Headers))
+	for k, v := range req.Headers {
+		if k != "X-WS-Expect" {
+			reqHeader.Set(k, v)
+		}
+	}
+	dialer := &websocket.Dialer{
+		Proxy:            websocket.DefaultDialer.Proxy,
+		HandshakeTimeout: websocket.DefaultDialer.HandshakeTimeout,
+		TLSClientConfig:  websocket.DefaultDialer.TLSClientConfig,
+	}
+	conn, resp, err := dialer.DialContext(ctx, req.URL, reqHeader)
 	if err != nil {
 		status := 0
 		if resp != nil {

@@ -20,6 +20,8 @@ type Summary struct {
 	Steps []StepSummary `json:"-"`
 	// Per-group breakdown; nil when no group names were recorded.
 	Groups []GroupSummary `json:"-"`
+	// DroppedSamples is the number of samples discarded because the collector channel was full.
+	DroppedSamples int64 `json:"-"`
 
 	sumLatency time.Duration
 }

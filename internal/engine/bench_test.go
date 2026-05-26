@@ -44,10 +44,12 @@ func BenchmarkEngine(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		exec := protocols.NewHTTPExecutor(protocols.DefaultHTTPConfig())
 		col := metrics.NewCollector(vus)
-		eng := engine.New(engine.Config{
-			VUs:      vus,
-			Duration: benchDuration,
-			Request:  protocols.Request{Method: http.MethodGet, URL: srv.URL},
+		eng := engine.NewRamp(engine.RampConfig{
+			Stages: []scenarios.Stage{{Duration: benchDuration, Target: vus}},
+			Steps: []engine.RampStep{{
+				Name:    "bench",
+				Request: protocols.Request{Method: http.MethodGet, URL: srv.URL},
+			}},
 			Executor: exec,
 		}, col)
 

@@ -11,10 +11,12 @@ import (
 // dnsCacheDialer wraps net.Dialer with a simple TTL-based DNS cache.
 // This prevents repeated DNS lookups from inflating per-request latency measurements.
 type dnsCacheDialer struct {
-	mu     sync.RWMutex
-	cache  map[string]dnsCacheEntry
-	ttl    time.Duration
-	dialer net.Dialer
+	mu         sync.RWMutex
+	cache      map[string]dnsCacheEntry
+	order      []string // FIFO insertion order for size-bounded eviction
+	maxEntries int
+	ttl        time.Duration
+	dialer     net.Dialer
 }
 
 type dnsCacheEntry struct {
@@ -27,8 +29,9 @@ func newDNSCacheDialer(ttl time.Duration) *dnsCacheDialer {
 		ttl = 60 * time.Second
 	}
 	return &dnsCacheDialer{
-		cache: make(map[string]dnsCacheEntry),
-		ttl:   ttl,
+		cache:      make(map[string]dnsCacheEntry),
+		maxEntries: 1024,
+		ttl:        ttl,
 	}
 }
 
@@ -77,6 +80,14 @@ func (d *dnsCacheDialer) resolve(ctx context.Context, host string) ([]string, er
 	}
 
 	d.mu.Lock()
+	if _, exists := d.cache[host]; !exists {
+		if len(d.cache) >= d.maxEntries && len(d.order) > 0 {
+			oldest := d.order[0]
+			d.order = d.order[1:]
+			delete(d.cache, oldest)
+		}
+		d.order = append(d.order, host)
+	}
 	d.cache[host] = dnsCacheEntry{addrs: addrs, expiry: time.Now().Add(d.ttl)}
 	d.mu.Unlock()
 

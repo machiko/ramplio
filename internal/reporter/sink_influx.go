@@ -33,8 +33,12 @@ func NewInfluxSink(dsn string) (*InfluxSink, error) {
 		return nil, fmt.Errorf("influx sink: bucket required in path (e.g. influxdb://host/mybucket)")
 	}
 
-	writeURL := fmt.Sprintf("http://%s/api/v2/write?bucket=%s&precision=ms",
-		host, url.QueryEscape(bucket))
+	scheme := "http"
+	if u.Scheme == "influxdbs" {
+		scheme = "https"
+	}
+	writeURL := fmt.Sprintf("%s://%s/api/v2/write?bucket=%s&precision=ms",
+		scheme, host, url.QueryEscape(bucket))
 	if org != "" {
 		writeURL += "&org=" + url.QueryEscape(org)
 	}

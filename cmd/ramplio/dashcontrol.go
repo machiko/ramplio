@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -174,6 +175,20 @@ func buildStepsFromScenario(sc *scenarios.Scenario) ([]engine.RampStep, []string
 			Protocol:   s.Protocol,
 			If:         s.If,
 			Loop:       s.Loop,
+		}
+		if s.Capture != nil {
+			compiled := make(map[string]*regexp.Regexp)
+			for _, expr := range s.Capture.Values {
+				if strings.HasPrefix(expr, "regex:") {
+					pattern := strings.TrimPrefix(expr, "regex:")
+					if re, err := regexp.Compile(pattern); err == nil {
+						compiled[pattern] = re
+					}
+				}
+			}
+			if len(compiled) > 0 {
+				steps[i].CompiledRegexes = compiled
+			}
 		}
 		names[i] = name
 	}

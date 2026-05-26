@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"syscall"
@@ -376,10 +377,9 @@ func runURL(url, method string, vus int, duration string, headers []string, body
 	}
 
 	col := metrics.NewCollector(vus)
-	eng := engine.New(engine.Config{
-		VUs:      vus,
-		Duration: dur,
-		Request:  req,
+	eng := engine.NewRamp(engine.RampConfig{
+		Stages: []scenarios.Stage{{Duration: dur, Target: vus}},
+		Steps:  []engine.RampStep{{Name: req.Method + " " + req.URL, Request: req}},
 		Executor: protocols.NewHTTPExecutor(httpCfg),
 	}, col)
 
@@ -533,6 +533,25 @@ func scenarioStepsToRamp(steps []scenarios.Step) []engine.RampStep {
 			Protocol:   s.Protocol,
 			If:         s.If,
 			Loop:       s.Loop,
+		}
+		if s.Capture != nil {
+			if compiled := precompileRegexes(s.Capture.Values); len(compiled) > 0 {
+				out[i].CompiledRegexes = compiled
+			}
+		}
+	}
+	return out
+}
+
+// precompileRegexes builds a map of pattern → *regexp.Regexp for all regex: capture expressions.
+func precompileRegexes(values map[string]string) map[string]*regexp.Regexp {
+	out := make(map[string]*regexp.Regexp)
+	for _, expr := range values {
+		if strings.HasPrefix(expr, "regex:") {
+			pattern := strings.TrimPrefix(expr, "regex:")
+			if re, err := regexp.Compile(pattern); err == nil {
+				out[pattern] = re
+			}
 		}
 	}
 	return out

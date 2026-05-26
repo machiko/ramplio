@@ -90,6 +90,10 @@ func PrintSummary(w io.Writer, sum metrics.Summary) {
 		}
 	}
 
+	if sum.DroppedSamples > 0 {
+		fmt.Fprintf(w, "\n⚠  警告：%d 個樣本因緩衝區滿被丟棄，指標可能不完整。\n", sum.DroppedSamples)
+	}
+
 	fmt.Fprintln(w, "\n"+divider)
 	printInterpretation(w, sum)
 }
