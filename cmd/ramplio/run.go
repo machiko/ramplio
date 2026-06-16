@@ -52,6 +52,7 @@ func newRunCmd() *cobra.Command {
 		tlsSkipVerify   bool
 		pollInterval    string
 		assignTimeout   string
+		noTUI           bool
 	)
 
 	cmd := &cobra.Command{
@@ -91,6 +92,7 @@ func newRunCmd() *cobra.Command {
 				if derr != nil {
 					return derr
 				}
+				dopts.noTUI = noTUI
 				return runDistributed(scenarioFile, workers, prometheusAddr, httpCfg, dopts)
 			}
 
@@ -229,6 +231,7 @@ New to load testing? Run:  ramplio run --dashboard`)
 	cmd.Flags().BoolVar(&tlsSkipVerify, "tls-skip-verify", false, "Skip TLS verification for https:// workers (self-signed certs)")
 	cmd.Flags().StringVar(&pollInterval, "poll-interval", "", "Live-metrics polling interval for distributed runs (e.g. 500ms, 2s; default 1s)")
 	cmd.Flags().StringVar(&assignTimeout, "assign-timeout", "", "Timeout for broadcasting work to workers (e.g. 10s, 30s; default 10s)")
+	cmd.Flags().BoolVar(&noTUI, "no-tui", false, "Disable the live TUI and print plain progress lines (auto-enabled when output is not a terminal; for distributed runs)")
 
 	return cmd
 }
@@ -419,6 +422,7 @@ type distOptions struct {
 	client        *http.Client
 	pollInterval  time.Duration
 	assignTimeout time.Duration
+	noTUI         bool
 }
 
 // buildDistOptions validates and assembles distributed-run options from flags.
@@ -502,7 +506,12 @@ func runDistributed(scenarioFile string, workerAddrs []string, promAddr string, 
 		}
 	}
 
-	if err := reporter.RunTUI(provider, cancel, done); err != nil {
+	// The TUI needs a real terminal. In CI/piped output (or with --no-tui),
+	// fall back to plain progress lines so the run completes instead of the
+	// TUI exiting immediately and cancelling the test.
+	if opts.noTUI || !isTerminal() {
+		runHeadlessProgress(provider, cancel, done, opts.pollInterval)
+	} else if err := reporter.RunTUI(provider, cancel, done); err != nil {
 		<-done
 	}
 	cancel()
@@ -733,6 +742,46 @@ func parseHeaders(raw []string) map[string]string {
 		}
 	}
 	return headers
+}
+
+// isTerminal reports whether stdout is an interactive terminal. When false
+// (CI, pipes, file redirection), the live TUI cannot run.
+func isTerminal() bool {
+	fi, err := os.Stdout.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice != 0
+}
+
+// runHeadlessProgress prints periodic plain-text progress lines until the run
+// finishes, and cancels the run on SIGINT/SIGTERM. Used in place of the TUI in
+// non-interactive environments.
+func runHeadlessProgress(provider reporter.LiveProvider, cancel context.CancelFunc, done <-chan struct{}, interval time.Duration) {
+	if interval <= 0 {
+		interval = 2 * time.Second
+	}
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigs)
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-done:
+			return
+		case <-sigs:
+			fmt.Fprintln(os.Stderr, "\nInterrupted — stopping workers...")
+			cancel()
+			return
+		case <-ticker.C:
+			s := provider.Snapshot()
+			fmt.Printf("[%s] VUs=%d  reqs=%d  errors=%d  rps=%.0f  p99=%dms\n",
+				s.Elapsed.Round(time.Second), s.ActiveVUs, s.Total, s.Errors, s.RPS, s.P99.Milliseconds())
+		}
+	}
 }
 
 // openBrowser opens url in the default system browser. Failures are silently

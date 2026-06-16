@@ -46,6 +46,7 @@
 | `reporter/junit.go` | JUnit XML（CI/CD 用） |
 | `reporter/sink_csv.go` | CSV Sink：追加寫入全域 Summary |
 | `reporter/sink_influx.go` | InfluxDB v2 Sink；支援 `influxdb://`（HTTP）與 `influxdbs://`（HTTPS）|
+| `reporter/sink_loki.go` | Grafana Loki Sink：`loki://`/`lokis://`；指標以 JSON log line 推送，stream label 低基數（job+scenario+使用者 labels），支援 `?labels=`/`?org=`/`?token=` |
 | `reporter/sink_factory.go` | `ParseSink(dsn)` 路由 |
 | `dashboard/server.go` | HTTP + WebSocket 儀表板伺服器；Bearer Token 保護（POST 端點 + WS `?token=`）；端點：`/api/run,stop,status,scenario,import-har,report,discover` |
 | `dashboard/controller.go` | Controller 介面；RunRequest/DiscoverRequest；Discover 回調型別 |
@@ -74,7 +75,7 @@
 | 優先度 | 項目 | 位置 |
 |--------|------|------|
 | MED | `dashboard/controller.go` 與 `dashcontrol.go` 職責重疊 | 兩者 |
-| LOW | 分散式 `run` 模式依賴 TUI，非 TTY 環境（CI/pipe）會提早結束；需 headless 輸出模式 | cmd/ramplio/run.go |
+| LOW | 單機 `runScenario` 仍依賴 TUI，非 TTY 下亦會提早結束（分散式已修，單機未做）| cmd/ramplio/run.go |
 | MED | `runRate()` worker 數 = maxRPS×5（上限 5000），高 RPS 記憶體壓力 | engine/ramp.go |
 | MED | Assertion 失敗不觸發 retry（assertion 在 executor 後才評估）| engine/ramp.go |
 | MED | WebSocket 每次請求開新連線（無持久連線）| protocols/ws.go |
@@ -132,9 +133,12 @@
 - ✅ **分散式 TLS** — worker `SetTLS` + `ListenAndServeTLS`；coordinator scheme-aware URL（worker 位址可帶 `https://`）+ 可注入 `*http.Client`；CLI `worker --tls-cert/--tls-key`、`run --tls-ca/--tls-skip-verify`
 - ✅ **設定生效** — `config.DistributedConfig.PollInterval()/AssignTimeout()` helper；coordinator `SetTiming`；CLI `run --poll-interval/--assign-timeout`
 
-**Phase 6+ — 功能擴張**
+**Phase 6 — Loki sink + 分散式 headless（✅ 已完成）**
+- ✅ **Loki Output Sink** — `reporter/sink_loki.go`，DSN `loki://host:port?labels=k=v&org=&token=`（含 `lokis://` HTTPS）；指標以 JSON log line 推送，含 per-step/group 明細
+- ✅ **分散式 headless 輸出** — `run --worker` 在非 TTY（CI/pipe）或 `--no-tui` 時改印進度行；修正分散式 run 在 pipeline 中提早結束的問題，並讓整個分散式流程可透過 CLI 端到端完成
+
+**Phase 7+ — 功能擴張（未做）**
 1. **WebSocket 持久連線模式**（MED，中）— `ws_mode: persistent`，VU 生命週期內保持連線
 2. **gRPC 協定支援**（MED，大）— `protocols/grpc.go` + .proto 載入
-3. **Loki Output Sink**（MED，中）— DSN `loki://host:port?labels=key=val`
-4. **分散式 headless 輸出**（LOW，小）— `run --worker` 非 TTY 時跳過 TUI，改印進度行（CI 友善）
-5. **Test Suite（多場景串接）**（LOW，中）
+3. **單機 headless**（LOW，小）— `runScenario` 比照分散式做非 TTY fallback
+4. **Test Suite（多場景串接）**（LOW，中）

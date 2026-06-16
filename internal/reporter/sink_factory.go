@@ -11,6 +11,7 @@ import (
 //
 //	csv:path/to/file.csv         — append rows to a CSV file
 //	influxdb://host:port/bucket  — push to InfluxDB v2 (token via ?token=)
+//	loki://host:port             — push to Grafana Loki (labels via ?labels=k=v,...)
 func ParseSink(dsn string) (Sink, error) {
 	switch {
 	case strings.HasPrefix(dsn, "csv:"):
@@ -18,7 +19,9 @@ func ParseSink(dsn string) (Sink, error) {
 		return NewCsvSink(path)
 	case strings.HasPrefix(dsn, "influxdb://"), strings.HasPrefix(dsn, "influxdbs://"):
 		return NewInfluxSink(dsn)
+	case strings.HasPrefix(dsn, "loki://"), strings.HasPrefix(dsn, "lokis://"):
+		return NewLokiSink(dsn)
 	default:
-		return nil, fmt.Errorf("unknown sink scheme in %q — supported: csv:<path>, influxdb://..., influxdbs://...", dsn)
+		return nil, fmt.Errorf("unknown sink scheme in %q — supported: csv:<path>, influxdb://..., influxdbs://..., loki://..., lokis://...", dsn)
 	}
 }
