@@ -3064,6 +3064,25 @@ createApp({
     const lastStepMetrics = ref([]);
     const lastGroupMetrics = ref([]);
 
+    // 以下解讀用語與門檻與終端／JSON／HTML 報告（Go reporter.Interpret）保持一致。
+    function humanMs(ms) {
+      ms = ms ?? 0;
+      return ms < 1000 ? `${ms} 毫秒` : `${(ms / 1000).toFixed(1)} 秒`;
+    }
+    function speedReading(p99) {
+      if (p99 < 100)  return { icon: '⚡', label: '非常快（幾乎即時）', note: '低於 0.1 秒，快到使用者根本感覺不到等待' };
+      if (p99 < 300)  return { icon: '⚡', label: '很快（流暢）',       note: '使用者幾乎感覺不到延遲' };
+      if (p99 < 1000) return { icon: '✓', label: '普通',               note: '使用者開始能感覺到一點點等待' };
+      if (p99 < 3000) return { icon: '⚠', label: '偏慢',               note: '使用者會明顯覺得卡頓' };
+      return { icon: '✗', label: '很慢', note: '使用者可能等不及就離開了' };
+    }
+    function stabilityReading(errPct, total, errors) {
+      if (errPct === 0)  return { label: '✓ 完美',     note: `這次共試了 ${(total ?? 0).toLocaleString()} 次，沒有任何一次失敗。` };
+      if (errPct < 1)    return { label: '✓ 良好',     note: `約每 ${Math.round(100 / errPct).toLocaleString()} 次才有 1 次失敗（${errPct.toFixed(2)}%），大致穩定。` };
+      if (errPct < 5)    return { label: '⚠ 有點不穩', note: `${errPct.toFixed(1)}% 的請求失敗（共 ${errors} 個），建議查一下原因。` };
+      return { label: '✗ 不穩定', note: `${errPct.toFixed(1)}% 的請求失敗（共 ${errors} 個），服務開始撐不住了。` };
+    }
+
     const finalVerdict = computed(() => {
       const r = finalResult.value;
       if (!r) return null;
@@ -3083,30 +3102,32 @@ createApp({
       const steps = lastStepMetrics.value;
       if (steps && steps.length > 1) {
         const slowest = steps.reduce((a, b) => b.p99_ms > a.p99_ms ? b : a);
-        bottleneck = `最慢步驟：「${slowest.name}」（p99 ${slowest.p99_ms}ms）`;
+        bottleneck = `最花時間的步驟是「${slowest.name}」（${humanMs(slowest.p99_ms)}內完成）。`;
       }
 
-      if (errPct >= 1 || p99 >= 1000) {
+      const spd = speedReading(p99);
+      const stb = stabilityReading(errPct, r.total, r.errors ?? 0);
+      const desc = `在 ${loadCtx} 壓力下，反應速度 ${spd.icon} ${spd.label}——99% 的人在 ${humanMs(p99)}內收到回應（${spd.note}）。穩定度 ${stb.label}——${stb.note}`;
+
+      // 門檻與 Go reporter.Interpret 一致：fail→overloaded、warn→borderline、pass→stable
+      if (errPct >= 5 || p99 >= 3000) {
         return {
-          level: 'overloaded', icon: '⚠', title: 'Overloaded — 系統超載',
-          desc: `錯誤率 ${errPct.toFixed(2)}%，p99 ${p99}ms，${loadCtx} 已超過系統承載能力。`,
-          bottleneck,
+          level: 'overloaded', icon: '✗', title: 'Overloaded — 系統超載',
+          desc, bottleneck,
           next: `建議降低負載至 ${nextLoad} 或先擴容，再重新測試找出穩定點。`,
         };
       }
-      if (errPct === 0 && p99 < 500) {
+      if (errPct >= 1 || p99 >= 1000) {
         return {
-          level: 'stable', icon: '✓', title: 'Stable — 系統穩定',
-          desc: `無錯誤，p99 ${p99}ms，系統在 ${loadCtx} 下表現穩定，尚有餘裕。`,
-          bottleneck,
-          next: `可嘗試提升至 ${moreLoad} 繼續探索系統上限。`,
+          level: 'borderline', icon: '⚠', title: 'Borderline — 接近極限',
+          desc, bottleneck,
+          next: '延遲偏高或有少量錯誤，建議先調查根因或優化服務，再提高負載。',
         };
       }
       return {
-        level: 'borderline', icon: '△', title: 'Borderline — 邊緣狀態',
-        desc: `錯誤率 ${errPct.toFixed(2)}%，p99 ${p99}ms，系統在 ${loadCtx} 下接近承載邊界。`,
-        bottleneck,
-        next: '延遲偏高或有少量錯誤，建議先調查 p99 尾端根因或優化服務，再提高負載。',
+        level: 'stable', icon: '✓', title: 'Stable — 系統穩定',
+        desc, bottleneck,
+        next: `系統還有餘裕，可嘗試提升至 ${moreLoad} 繼續探索系統上限。`,
       };
     });
     function fmtElapsed(s) {

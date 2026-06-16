@@ -40,7 +40,8 @@
 | `metrics/sample.go` | 單一請求測量資料結構 |
 | `reporter/terminal.go` | 靜態摘要（繁中）；per-step/group 表格；droppedSamples 警告；PrintInterpretation |
 | `reporter/html.go` | go:embed HTML 報告 |
-| `reporter/json.go` | Summary ↔ JSON；Verdict 計算（閾值寫死）|
+| `reporter/json.go` | Summary ↔ JSON；Verdict = `Interpret(sum)`（共用白話解讀）|
+| `reporter/interpret.go` | 單一來源白話解讀 `Interpret(sum)`：整體結論／反應速度／穩定度／承受能力／一句話總結；門檻統一（fail err≥5% 或 p99≥3s；warn err≥1% 或 p99≥1s）；終端／JSON／HTML 共用，Dashboard JS 鏡像同門檻與用語 |
 | `reporter/tui.go` | Bubbletea 即時終端儀表板 |
 | `reporter/prometheus.go` | `/metrics` 端點，500ms 更新 |
 | `reporter/junit.go` | JUnit XML（CI/CD 用） |
@@ -80,7 +81,6 @@
 | MED | Assertion 失敗不觸發 retry（assertion 在 executor 後才評估）| engine/ramp.go |
 | MED | WebSocket 每次請求開新連線（無持久連線）| protocols/ws.go |
 | LOW | HTML 報告無互動圖表 | reporter/html.go |
-| LOW | Verdict 判斷閾值寫死（errRate≥5% or p99≥1s）| reporter/json.go |
 | LOW | Setup 步驟執行結果不計入指標 | engine/ramp.go |
 | LOW | RetryExecutor 只支援固定 backoff（無指數退避/jitter）| protocols/retry.go |
 | LOW | `stop` 命令 Unix-only（lsof/kill）| cmd/ramplio/stop.go |

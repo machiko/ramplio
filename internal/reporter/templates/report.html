@@ -128,16 +128,15 @@
 
 <!-- Verdict card -->
 <div class="verdict {{.Verdict.Level}}">
-  <div class="verdict-icon">{{if eq .Verdict.Level "pass"}}✓{{else if eq .Verdict.Level "warn"}}⚠{{else}}✗{{end}}</div>
+  <div class="verdict-icon">{{.Verdict.Icon}}</div>
   <div>
-    <div class="verdict-label">
-      {{if eq .Verdict.Level "pass"}}PASS{{else if eq .Verdict.Level "warn"}}WARN{{else}}FAIL{{end}}
-      — {{.Verdict.Headline}}
-    </div>
+    <div class="verdict-label">整體結論 — {{.Verdict.Verdict}}</div>
     <div class="verdict-lines">
-      <span><strong>Speed:</strong> {{.Verdict.SpeedLine}}</span>
-      <span><strong>Reliability:</strong> {{.Verdict.ReliabilityLine}}</span>
-      {{if .Verdict.BottleneckLine}}<span><strong>Bottleneck:</strong> {{.Verdict.BottleneckLine}}</span>{{end}}
+      <span><strong>反應速度：</strong>{{.Verdict.Speed.Icon}} {{.Verdict.Speed.Label}}——99% 的人在 {{.Verdict.Speed.Value}}內收到回應（{{.Verdict.Speed.Note}}）</span>
+      <span><strong>穩定度：</strong>{{.Verdict.Stability.Icon}} {{.Verdict.Stability.Label}}——{{.Verdict.Stability.Note}}</span>
+      <span><strong>承受能力：</strong>每秒約 {{.Verdict.Capacity.Value}} 個請求——{{.Verdict.Capacity.Note}}</span>
+      {{if .Verdict.Bottleneck}}<span><strong>瓶頸：</strong>{{.Verdict.Bottleneck}}</span>{{end}}
+      <span><strong>一句話總結：</strong>{{.Verdict.OneLiner}}</span>
     </div>
   </div>
 </div>
