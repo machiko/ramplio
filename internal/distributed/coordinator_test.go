@@ -100,6 +100,26 @@ func TestAllocateVUsZeroTarget(t *testing.T) {
 	assert.Equal(t, 0, allocation[":7701"])
 }
 
+// TestSplitScheme verifies scheme extraction from worker addresses.
+func TestSplitScheme(t *testing.T) {
+	tests := []struct {
+		input    string
+		scheme   string
+		hostport string
+	}{
+		{":7700", "http", ":7700"},
+		{"localhost:7700", "http", "localhost:7700"},
+		{"http://localhost:7700", "http", "localhost:7700"},
+		{"https://w1:7700", "https", "w1:7700"},
+		{"https://10.0.0.1", "https", "10.0.0.1"},
+	}
+	for _, tt := range tests {
+		scheme, hostport := splitScheme(tt.input)
+		assert.Equal(t, tt.scheme, scheme, "scheme for %q", tt.input)
+		assert.Equal(t, tt.hostport, hostport, "hostport for %q", tt.input)
+	}
+}
+
 // TestNormalizeAddrWithPort tests address normalization with port
 func TestNormalizeAddrWithPort(t *testing.T) {
 	tests := []struct {

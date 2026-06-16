@@ -32,6 +32,8 @@ const (
 type Worker struct {
 	id        string
 	secret    string // shared secret required on HTTP requests; empty disables auth
+	certFile  string // TLS certificate path; empty serves plain HTTP
+	keyFile   string // TLS private key path
 	state     WorkerState
 	mu        sync.RWMutex
 	cancel    context.CancelFunc
@@ -54,6 +56,15 @@ func (w *Worker) SetSecret(secret string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.secret = secret
+}
+
+// SetTLS configures the worker to serve HTTPS using the given certificate and
+// key files. When either is empty the worker serves plain HTTP.
+func (w *Worker) SetTLS(certFile, keyFile string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.certFile = certFile
+	w.keyFile = keyFile
 }
 
 // Assign assigns a scenario to the worker and starts running it.
@@ -219,6 +230,12 @@ func (w *Worker) StartHTTPServer(addr string) error {
 		Handler: w.authMiddleware(mux),
 	}
 
+	w.mu.RLock()
+	certFile, keyFile := w.certFile, w.keyFile
+	w.mu.RUnlock()
+	if certFile != "" && keyFile != "" {
+		return server.ListenAndServeTLS(certFile, keyFile)
+	}
 	return server.ListenAndServe()
 }
 

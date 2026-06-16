@@ -26,6 +26,10 @@ type Coordinator struct {
 	httpCfg      protocols.HTTPConfig
 	secret       string // shared secret sent to workers; empty disables auth
 
+	client        *http.Client  // HTTP client for worker requests (TLS-configurable)
+	pollInterval  time.Duration // live-metrics polling interval
+	assignTimeout time.Duration // timeout for /assign broadcast
+
 	mu           sync.RWMutex
 	liveSnapshot reporter.LiveSnapshot
 	startedAt    time.Time
@@ -34,16 +38,47 @@ type Coordinator struct {
 // NewCoordinator creates a new coordinator with the given worker addresses.
 func NewCoordinator(workers []string, scenarioYAML []byte, cfg *scenarios.Scenario, httpCfg protocols.HTTPConfig) *Coordinator {
 	return &Coordinator{
-		workers:      workers,
-		scenarioYAML: scenarioYAML,
-		cfg:          cfg,
-		httpCfg:      httpCfg,
+		workers:       workers,
+		scenarioYAML:  scenarioYAML,
+		cfg:           cfg,
+		httpCfg:       httpCfg,
+		client:        &http.Client{},
+		pollInterval:  time.Second,
+		assignTimeout: 10 * time.Second,
 	}
 }
 
 // SetSecret configures the shared secret sent to workers as a bearer token.
 func (c *Coordinator) SetSecret(secret string) {
 	c.secret = secret
+}
+
+// SetHTTPClient injects a custom HTTP client, e.g. one with a TLS config that
+// trusts a private CA or skips verification for self-signed worker certs.
+func (c *Coordinator) SetHTTPClient(client *http.Client) {
+	if client != nil {
+		c.client = client
+	}
+}
+
+// SetTiming overrides the polling interval and assign timeout. Non-positive
+// values are ignored, leaving the existing default in place.
+func (c *Coordinator) SetTiming(pollInterval, assignTimeout time.Duration) {
+	if pollInterval > 0 {
+		c.pollInterval = pollInterval
+	}
+	if assignTimeout > 0 {
+		c.assignTimeout = assignTimeout
+	}
+}
+
+// httpClient returns the configured client, falling back to the default client
+// when the coordinator was built via a struct literal (e.g. in tests).
+func (c *Coordinator) httpClient() *http.Client {
+	if c.client != nil {
+		return c.client
+	}
+	return http.DefaultClient
 }
 
 // Run orchestrates the distributed test execution.
@@ -114,9 +149,11 @@ func (c *Coordinator) LiveSnapshot() reporter.LiveSnapshot {
 }
 
 // newRequest builds an HTTP request to a worker endpoint with the shared
-// secret attached as a bearer token when configured.
+// secret attached as a bearer token when configured. The worker address may
+// carry an explicit http:// or https:// scheme; bare addresses default to http.
 func (c *Coordinator) newRequest(ctx context.Context, method, addr, path string, body io.Reader) (*http.Request, error) {
-	url := fmt.Sprintf("http://%s%s", normalizeAddr(addr), path)
+	scheme, hostport := splitScheme(addr)
+	url := fmt.Sprintf("%s://%s%s", scheme, normalizeAddr(hostport), path)
 	req, err := http.NewRequestWithContext(ctx, method, url, body)
 	if err != nil {
 		return nil, err
@@ -140,7 +177,7 @@ func (c *Coordinator) healthCheckWorkers(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("worker %s request build failed: %w", addr, err)
 		}
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := c.httpClient().Do(req)
 		if err != nil {
 			return fmt.Errorf("worker %s health check failed: %w", addr, err)
 		}
@@ -185,7 +222,7 @@ func (c *Coordinator) allocateVUs() map[string]int {
 
 // broadcastAssign sends assign requests to all workers.
 func (c *Coordinator) broadcastAssign(ctx context.Context, allocation map[string]int, setupCaptures map[string]string) error {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, c.assignTimeout)
 	defer cancel()
 
 	var wg sync.WaitGroup
@@ -207,7 +244,7 @@ func (c *Coordinator) broadcastAssign(ctx context.Context, allocation map[string
 				errCh <- fmt.Errorf("worker %s request build failed: %w", addr, err)
 				return
 			}
-			resp, err := http.DefaultClient.Do(req)
+			resp, err := c.httpClient().Do(req)
 			if err != nil {
 				errCh <- fmt.Errorf("worker %s assign failed: %w", addr, err)
 				return
@@ -234,7 +271,7 @@ func (c *Coordinator) broadcastAssign(ctx context.Context, allocation map[string
 
 // pollWorkers periodically polls all workers for live metrics until they complete.
 func (c *Coordinator) pollWorkers(ctx context.Context) error {
-	ticker := time.NewTicker(1 * time.Second)
+	ticker := time.NewTicker(c.pollInterval)
 	defer ticker.Stop()
 
 	allDone := false
@@ -261,7 +298,7 @@ func (c *Coordinator) pollWorkers(ctx context.Context) error {
 						mu.Unlock()
 						return
 					}
-					resp, err := http.DefaultClient.Do(req)
+					resp, err := c.httpClient().Do(req)
 					if err != nil {
 						mu.Lock()
 						if pollErr == nil {
@@ -369,7 +406,7 @@ func (c *Coordinator) stopAllWorkers(ctx context.Context) error {
 				mu.Unlock()
 				return
 			}
-			resp, err := http.DefaultClient.Do(req)
+			resp, err := c.httpClient().Do(req)
 			if err != nil {
 				mu.Lock()
 				if firstErr == nil {
@@ -409,7 +446,7 @@ func (c *Coordinator) collectResults(ctx context.Context) ([]metrics.HistogramEx
 				mu.Unlock()
 				return
 			}
-			resp, err := http.DefaultClient.Do(req)
+			resp, err := c.httpClient().Do(req)
 			if err != nil {
 				mu.Lock()
 				if firstErr == nil {
@@ -488,6 +525,19 @@ func (c *Coordinator) runTeardown(ctx context.Context, setupCaptures map[string]
 	}, col)
 	eng.RunTeardown(ctx, setupCaptures)
 	return nil
+}
+
+// splitScheme separates an optional http:// or https:// prefix from a worker
+// address. Bare addresses default to http for backward compatibility.
+func splitScheme(addr string) (scheme, hostport string) {
+	switch {
+	case strings.HasPrefix(addr, "https://"):
+		return "https", strings.TrimPrefix(addr, "https://")
+	case strings.HasPrefix(addr, "http://"):
+		return "http", strings.TrimPrefix(addr, "http://")
+	default:
+		return "http", addr
+	}
 }
 
 // normalizeAddr ensures the address has a port.

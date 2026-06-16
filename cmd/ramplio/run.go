@@ -2,7 +2,10 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -45,6 +48,10 @@ func newRunCmd() *cobra.Command {
 		ignoreErrors    bool
 		workers         []string
 		workerSecret    string
+		tlsCA           string
+		tlsSkipVerify   bool
+		pollInterval    string
+		assignTimeout   string
 	)
 
 	cmd := &cobra.Command{
@@ -80,7 +87,11 @@ func newRunCmd() *cobra.Command {
 				if workerSecret == "" {
 					workerSecret = os.Getenv("RAMPLIO_WORKER_SECRET")
 				}
-				return runDistributed(scenarioFile, workers, workerSecret, prometheusAddr, httpCfg)
+				dopts, derr := buildDistOptions(workerSecret, tlsCA, tlsSkipVerify, pollInterval, assignTimeout)
+				if derr != nil {
+					return derr
+				}
+				return runDistributed(scenarioFile, workers, prometheusAddr, httpCfg, dopts)
 			}
 
 			// Dashboard mode: browser handles test setup and control.
@@ -212,8 +223,12 @@ New to load testing? Run:  ramplio run --dashboard`)
 	cmd.Flags().StringVar(&requestTimeout, "timeout", "", "Per-request timeout (e.g. 10s, 500ms); overrides scenario default")
 	cmd.Flags().StringArrayVar(&sinkDSNs, "sink", nil, "Push results to an external sink (repeatable): csv:<file>  influxdb://host/bucket?token=T")
 	cmd.Flags().BoolVar(&ignoreErrors, "ignore-errors", false, "Exit 0 even when errors or threshold violations occur (useful during debugging)")
-	cmd.Flags().StringArrayVar(&workers, "worker", nil, "Worker address for distributed testing (repeatable, e.g. --worker localhost:7700 --worker localhost:7701)")
+	cmd.Flags().StringArrayVar(&workers, "worker", nil, "Worker address for distributed testing (repeatable, e.g. --worker localhost:7700 or --worker https://w1:7700)")
 	cmd.Flags().StringVar(&workerSecret, "worker-secret", "", "Shared secret for authenticating with workers (or set RAMPLIO_WORKER_SECRET)")
+	cmd.Flags().StringVar(&tlsCA, "tls-ca", "", "CA certificate file to verify https:// worker certs")
+	cmd.Flags().BoolVar(&tlsSkipVerify, "tls-skip-verify", false, "Skip TLS verification for https:// workers (self-signed certs)")
+	cmd.Flags().StringVar(&pollInterval, "poll-interval", "", "Live-metrics polling interval for distributed runs (e.g. 500ms, 2s; default 1s)")
+	cmd.Flags().StringVar(&assignTimeout, "assign-timeout", "", "Timeout for broadcasting work to workers (e.g. 10s, 30s; default 10s)")
 
 	return cmd
 }
@@ -397,8 +412,54 @@ func runScenario(path, promAddr string, httpCfg protocols.HTTPConfig) (metrics.S
 	return sum, sc.Thresholds, nil
 }
 
+// distOptions carries the authentication, TLS and timing knobs for a
+// distributed run, assembled from CLI flags.
+type distOptions struct {
+	secret        string
+	client        *http.Client
+	pollInterval  time.Duration
+	assignTimeout time.Duration
+}
+
+// buildDistOptions validates and assembles distributed-run options from flags.
+func buildDistOptions(secret, tlsCA string, tlsSkipVerify bool, pollInterval, assignTimeout string) (distOptions, error) {
+	opts := distOptions{secret: secret}
+
+	if tlsCA != "" || tlsSkipVerify {
+		tlsCfg := &tls.Config{InsecureSkipVerify: tlsSkipVerify} //nolint:gosec // opt-in for self-signed workers
+		if tlsCA != "" {
+			pem, err := os.ReadFile(tlsCA)
+			if err != nil {
+				return opts, fmt.Errorf("reading --tls-ca: %w", err)
+			}
+			pool := x509.NewCertPool()
+			if !pool.AppendCertsFromPEM(pem) {
+				return opts, fmt.Errorf("--tls-ca %q contains no valid certificates", tlsCA)
+			}
+			tlsCfg.RootCAs = pool
+		}
+		opts.client = &http.Client{Transport: &http.Transport{TLSClientConfig: tlsCfg}}
+	}
+
+	if pollInterval != "" {
+		d, err := time.ParseDuration(pollInterval)
+		if err != nil {
+			return opts, fmt.Errorf("invalid --poll-interval %q: %w", pollInterval, err)
+		}
+		opts.pollInterval = d
+	}
+	if assignTimeout != "" {
+		d, err := time.ParseDuration(assignTimeout)
+		if err != nil {
+			return opts, fmt.Errorf("invalid --assign-timeout %q: %w", assignTimeout, err)
+		}
+		opts.assignTimeout = d
+	}
+	return opts, nil
+}
+
 // runDistributed orchestrates a distributed load test across multiple worker processes.
-func runDistributed(scenarioFile string, workerAddrs []string, secret, promAddr string, httpCfg protocols.HTTPConfig) error {
+func runDistributed(scenarioFile string, workerAddrs []string, promAddr string, httpCfg protocols.HTTPConfig, opts distOptions) error {
 	sc, err := scenarios.ParseFile(scenarioFile)
 	if err != nil {
 		return fmt.Errorf("loading scenario: %w", err)
@@ -410,7 +471,9 @@ func runDistributed(scenarioFile string, workerAddrs []string, secret, promAddr 
 	}
 
 	coordinator := distributed.NewCoordinator(workerAddrs, yamlBytes, sc, httpCfg)
-	coordinator.SetSecret(secret)
+	coordinator.SetSecret(opts.secret)
+	coordinator.SetHTTPClient(opts.client)
+	coordinator.SetTiming(opts.pollInterval, opts.assignTimeout)
 
 	fmt.Printf("Running scenario %q on %d worker(s)  (%d stages, %d step(s))\n\n", sc.Name, len(workerAddrs), len(sc.Stages), len(sc.Steps))
 	for i, addr := range workerAddrs {

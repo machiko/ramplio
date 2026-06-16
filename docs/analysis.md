@@ -73,8 +73,8 @@
 
 | 優先度 | 項目 | 位置 |
 |--------|------|------|
-| MED | 分散式僅走明文 HTTP（`http://`），無 TLS；poll interval 寫死 1s（`PollIntervalMs` 未生效）| distributed/coordinator.go |
 | MED | `dashboard/controller.go` 與 `dashcontrol.go` 職責重疊 | 兩者 |
+| LOW | 分散式 `run` 模式依賴 TUI，非 TTY 環境（CI/pipe）會提早結束；需 headless 輸出模式 | cmd/ramplio/run.go |
 | MED | `runRate()` worker 數 = maxRPS×5（上限 5000），高 RPS 記憶體壓力 | engine/ramp.go |
 | MED | Assertion 失敗不觸發 retry（assertion 在 executor 後才評估）| engine/ramp.go |
 | MED | WebSocket 每次請求開新連線（無持久連線）| protocols/ws.go |
@@ -86,7 +86,8 @@
 | LOW | Discover 探測序列寫死（無法自訂步距）| discover/prober.go |
 
 > 已解決（自 `72a7b52`）：~~分散式測試缺失~~、~~Sink per-step 明細~~、~~EvalCondition AND/OR~~。
-> 已解決（Phase 4，本次）：~~分散式百分位合併錯誤~~（改用 HDR 直方圖序列化合併，`metrics.MergeExports`，含 step/group 明細）、~~repo 產物被追蹤~~（已移除並補 `.gitignore`）、~~Worker 端點無認證~~（shared secret + Bearer middleware）、~~分散式 Setup/Teardown stub~~（coordinator 集中執行 setup，captures 透過 `RampConfig.SeedCaptures` 廣播注入 worker）。
+> 已解決（Phase 4）：~~分散式百分位合併錯誤~~（改用 HDR 直方圖序列化合併，`metrics.MergeExports`，含 step/group 明細）、~~repo 產物被追蹤~~（已移除並補 `.gitignore`）、~~Worker 端點無認證~~（shared secret + Bearer middleware）、~~分散式 Setup/Teardown stub~~（coordinator 集中執行 setup，captures 透過 `RampConfig.SeedCaptures` 廣播注入 worker）、~~worker 執行 context 隨 HTTP 請求取消導致 0 請求~~（改用 `context.WithoutCancel`）。
+> 已解決（Phase 5，本次）：~~分散式僅明文 HTTP / 無 TLS~~（worker `ListenAndServeTLS` + coordinator scheme-aware URL 與可注入 TLS client；CLI `--tls-cert/--tls-key/--tls-ca/--tls-skip-verify`）、~~PollIntervalMs/AssignTimeoutSec 未生效~~（coordinator `SetTiming` + CLI `--poll-interval/--assign-timeout`，config helper）。
 
 ---
 
@@ -112,7 +113,7 @@
 | Per-step Thresholds | ✓ | ✓ | - | ✓ |
 | Retry + Circuit Breaker | ✓ | - | - | ✓ |
 | Logic Controllers（If/Loop + AND/OR/NOT）| ✓ | - | - | ✓ |
-| 分散式測試 | ✓ | ✓ | ✓ | ✓（HDR 直方圖合併、shared secret 認證、集中 setup/teardown；TLS 待補）|
+| 分散式測試 | ✓ | ✓ | ✓ | ✓（HDR 直方圖合併、shared secret 認證、集中 setup/teardown、TLS、可調 poll/timeout）|
 | Cookie / Data File | ✓ | ✓ | - | ✓ |
 
 ---
@@ -127,9 +128,13 @@
 3. ✅ **分散式 Setup/Teardown** — engine 暴露 `RunSetup`/`RunTeardown` 與 `RampConfig.SeedCaptures`；coordinator 集中執行 setup，captures 廣播注入各 worker
 4. ✅ **repo 衛生** — 移除追蹤的 `ramplio`/`sessions.csv`/`scenario.yaml`，補 `.gitignore`
 
-**Phase 5+ — 功能擴張**
-1. **分散式 TLS + 設定生效**（MED，中）— 支援 `https://` worker 連線；讓 `PollIntervalMs`/`AssignTimeoutSec` 真正套用
-2. **WebSocket 持久連線模式**（MED，中）— `ws_mode: persistent`，VU 生命週期內保持連線
-3. **gRPC 協定支援**（MED，大）— `protocols/grpc.go` + .proto 載入
-4. **Loki Output Sink**（MED，中）— DSN `loki://host:port?labels=key=val`
+**Phase 5 — 分散式 TLS + 設定生效（✅ 已完成）**
+- ✅ **分散式 TLS** — worker `SetTLS` + `ListenAndServeTLS`；coordinator scheme-aware URL（worker 位址可帶 `https://`）+ 可注入 `*http.Client`；CLI `worker --tls-cert/--tls-key`、`run --tls-ca/--tls-skip-verify`
+- ✅ **設定生效** — `config.DistributedConfig.PollInterval()/AssignTimeout()` helper；coordinator `SetTiming`；CLI `run --poll-interval/--assign-timeout`
+
+**Phase 6+ — 功能擴張**
+1. **WebSocket 持久連線模式**（MED，中）— `ws_mode: persistent`，VU 生命週期內保持連線
+2. **gRPC 協定支援**（MED，大）— `protocols/grpc.go` + .proto 載入
+3. **Loki Output Sink**（MED，中）— DSN `loki://host:port?labels=key=val`
+4. **分散式 headless 輸出**（LOW，小）— `run --worker` 非 TTY 時跳過 TUI，改印進度行（CI 友善）
 5. **Test Suite（多場景串接）**（LOW，中）

@@ -13,8 +13,10 @@ import (
 
 func newWorkerCmd() *cobra.Command {
 	var (
-		addr   string
-		secret string
+		addr    string
+		secret  string
+		tlsCert string
+		tlsKey  string
 	)
 
 	cmd := &cobra.Command{
@@ -41,13 +43,23 @@ Example:
 				secret = os.Getenv("RAMPLIO_WORKER_SECRET")
 			}
 
+			if (tlsCert == "") != (tlsKey == "") {
+				return fmt.Errorf("--tls-cert and --tls-key must be provided together")
+			}
+
 			worker := distributed.NewWorker("ramplio-worker")
 			worker.SetSecret(secret)
-			if secret == "" {
-				log.Printf("Starting worker on %s (no auth — set --secret to protect this endpoint)", addr)
-			} else {
-				log.Printf("Starting worker on %s (auth enabled)", addr)
+			worker.SetTLS(tlsCert, tlsKey)
+
+			scheme := "http"
+			if tlsCert != "" {
+				scheme = "https"
 			}
+			authNote := "no auth — set --secret to protect this endpoint"
+			if secret != "" {
+				authNote = "auth enabled"
+			}
+			log.Printf("Starting worker on %s (%s, %s)", addr, scheme, authNote)
 
 			// Handle graceful shutdown on SIGINT/SIGTERM
 			sigChan := make(chan os.Signal, 1)
@@ -66,6 +78,8 @@ Example:
 
 	cmd.Flags().StringVarP(&addr, "addr", "a", "", "Listen address (e.g., :7700)")
 	cmd.Flags().StringVar(&secret, "secret", "", "Shared secret required on requests (or set RAMPLIO_WORKER_SECRET)")
+	cmd.Flags().StringVar(&tlsCert, "tls-cert", "", "TLS certificate file (serve HTTPS; requires --tls-key)")
+	cmd.Flags().StringVar(&tlsKey, "tls-key", "", "TLS private key file (requires --tls-cert)")
 
 	return cmd
 }
