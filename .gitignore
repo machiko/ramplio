@@ -3,3 +3,10 @@ coverage.out
 *.prof
 dist/
 dashboard/dist/
+
+# 編譯產物（go build -o ramplio ./cmd/ramplio）
+/ramplio
+
+# 執行殘留物與本機測試檔
+/sessions.csv
+/scenario.yaml
