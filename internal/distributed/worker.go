@@ -31,12 +31,12 @@ const (
 // and reports metrics back to a coordinator.
 type Worker struct {
 	id        string
+	secret    string // shared secret required on HTTP requests; empty disables auth
 	state     WorkerState
 	mu        sync.RWMutex
 	cancel    context.CancelFunc
 	engine    *engine.RampEngine
 	collector *metrics.Collector
-	result    *metrics.Summary
 	startedAt time.Time
 }
 
@@ -48,8 +48,21 @@ func NewWorker(id string) *Worker {
 	}
 }
 
+// SetSecret configures the shared secret required on incoming requests.
+// An empty secret leaves the worker open (no authentication).
+func (w *Worker) SetSecret(secret string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.secret = secret
+}
+
 // Assign assigns a scenario to the worker and starts running it.
 // Returns 409 Conflict if the worker is already running.
+//
+// The load run deliberately does NOT inherit ctx: when invoked from the HTTP
+// handler, ctx is the request context, which net/http cancels the moment the
+// /assign response is written — that would kill the engine instantly. The run
+// lives until it finishes naturally or /stop calls w.cancel.
 func (w *Worker) Assign(ctx context.Context, req *AssignRequest) error {
 	w.mu.Lock()
 
@@ -69,23 +82,24 @@ func (w *Worker) Assign(ctx context.Context, req *AssignRequest) error {
 	// Scale VU counts based on assigned VUs
 	scaleScenario(sc, req.AssignedVUs)
 
-	// Convert scenario steps to engine steps
+	// Convert scenario steps to engine steps. Setup steps are intentionally
+	// not converted here — the coordinator runs setup centrally.
 	steps := scenarioStepsToEngineSteps(sc.Steps)
-	setupSteps := scenarioStepsToEngineSteps(sc.Setup)
 	teardownSteps := scenarioStepsToEngineSteps(sc.Teardown)
 
-	// Build engine config from scenario
+	// Build engine config from scenario. The coordinator runs setup centrally
+	// and broadcasts the captured values, so workers seed those captures rather
+	// than re-running setup themselves.
 	cfg := engine.RampConfig{
 		Stages:         sc.Stages,
 		Steps:          steps,
-		SetupSteps:     setupSteps,
 		TeardownSteps:  teardownSteps,
 		Vars:           sc.Vars,
+		SeedCaptures:   req.SetupCaptures,
 		CircuitBreaker: sc.CircuitBreaker,
 		Executor:       protocols.NewHTTPExecutor(protocols.DefaultHTTPConfig()),
 		WSExecutor:     protocols.NewWSExecutor(),
 	}
-
 	// Create collector
 	collector := metrics.NewCollector(req.AssignedVUs)
 	w.collector = collector
@@ -94,19 +108,20 @@ func (w *Worker) Assign(ctx context.Context, req *AssignRequest) error {
 	eng := engine.NewRamp(cfg, collector)
 	w.engine = eng
 
-	// Start the engine in a background goroutine
-	runCtx, cancel := context.WithCancel(ctx)
+	// Start the engine in a background goroutine. The run context is rooted at
+	// Background (not the assign request) so it outlives the HTTP handler; /stop
+	// cancels it via w.cancel.
+	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	w.cancel = cancel
 	w.startedAt = time.Now()
 	w.state = WorkerStateRunning
 	w.mu.Unlock() // Release lock before starting goroutine
 
 	go func() {
-		result := w.engine.Run(runCtx)
+		w.engine.Run(runCtx)
 		w.collector.Stop()
 
 		w.mu.Lock()
-		w.result = &result
 		w.state = WorkerStateDone
 		w.mu.Unlock()
 	}()
@@ -172,50 +187,25 @@ func (w *Worker) GetLiveMetrics() *LiveMetricsResponse {
 	}
 }
 
-// GetResult returns the final result summary.
-func (w *Worker) GetResult() *PartialSummary {
+// GetResult returns the worker's final serialized histogram snapshot, or nil
+// if the run has not finished. The coordinator merges these snapshots to
+// recompute correct cluster-wide percentiles.
+func (w *Worker) GetResult() *ResultResponse {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
-	if w.result == nil {
+	if w.state != WorkerStateDone || w.collector == nil {
 		return nil
 	}
-
-	summary := &PartialSummary{
-		WorkerID:       w.id,
-		Total:          w.result.Total,
-		Errors:         w.result.Errors,
-		MinNs:          w.result.MinLatency.Nanoseconds(),
-		MaxNs:          w.result.MaxLatency.Nanoseconds(),
-		P50Ns:          w.result.P50.Nanoseconds(),
-		P90Ns:          w.result.P90.Nanoseconds(),
-		P95Ns:          w.result.P95.Nanoseconds(),
-		P99Ns:          w.result.P99.Nanoseconds(),
-		BytesIn:        w.result.BytesIn,
-		WallNs:         w.result.WallTime.Nanoseconds(),
-		DroppedSamples: w.result.DroppedSamples,
+	return &ResultResponse{
+		WorkerID: w.id,
+		Export:   w.collector.Export(),
 	}
-
-	// Convert step summaries
-	if len(w.result.Steps) > 0 {
-		summary.Steps = make([]PartialStepSummary, len(w.result.Steps))
-		for i, step := range w.result.Steps {
-			summary.Steps[i] = PartialStepSummary{
-				Name:    step.Name,
-				Total:   step.Total,
-				Errors:  step.Errors,
-				P50Ns:   step.P50.Nanoseconds(),
-				P90Ns:   step.P90.Nanoseconds(),
-				P95Ns:   step.P95.Nanoseconds(),
-				P99Ns:   step.P99.Nanoseconds(),
-			}
-		}
-	}
-
-	return summary
 }
 
-// StartHTTPServer starts the HTTP server for the worker.
+// StartHTTPServer starts the HTTP server for the worker. When a secret is
+// configured (via SetSecret), all endpoints require a matching
+// "Authorization: Bearer <secret>" header.
 func (w *Worker) StartHTTPServer(addr string) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /assign", w.handleAssign)
@@ -226,10 +216,26 @@ func (w *Worker) StartHTTPServer(addr string) error {
 
 	server := &http.Server{
 		Addr:    addr,
-		Handler: mux,
+		Handler: w.authMiddleware(mux),
 	}
 
 	return server.ListenAndServe()
+}
+
+// authMiddleware rejects requests lacking the configured shared secret.
+// A worker with no secret accepts all requests (open mode).
+func (w *Worker) authMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		w.mu.RLock()
+		secret := w.secret
+		w.mu.RUnlock()
+
+		if secret != "" && r.Header.Get("Authorization") != "Bearer "+secret {
+			http.Error(rw, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(rw, r)
+	})
 }
 
 // HTTP Handlers

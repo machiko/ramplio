@@ -8,9 +8,9 @@
 
 | 欄位 | 值 |
 |------|-----|
-| 分析時間 | 2026-05-26 |
-| 分析基準 commit | `72a7b52` |
-| 完整 commit hash | `72a7b523c274a2c10f34318d1f2076d4ed174159` |
+| 分析時間 | 2026-06-16 |
+| 分析基準 commit | `f09a456` |
+| 完整 commit hash | `f09a456dd770ee9a1e61c998225b06cc19a330c4` |
 
 ---
 
@@ -29,6 +29,12 @@
 | `protocols/retry.go` | RetryingExecutor：count/onCodes/backoff 固定延遲 |
 | `protocols/dns_cache.go` | DNS TTL 快取；FIFO 淘汰（maxEntries=1024）|
 | `protocols/executor.go` | Executor 介面；Request/Result（含 RawSetCookies） |
+| `scenarios/eval_condition.go` | **新增** 條件運算式 Lexer/Parser/AST：支援 AND/OR/NOT、括號、`== != < <= > >=`；運算子優先序 NOT>AND>OR；`EvalCondition` 解析失敗時印警告並回傳 true（不跳過步驟） |
+| `distributed/coordinator.go` | **新增** 協調者：health check → VU 分配（整數最大餘數法）→ broadcast `/assign` → 輪詢 `/live`（1s）聚合 → 收集 `/result` → `mergePartials` 合併 |
+| `distributed/worker.go` | **新增** 工作節點：`/assign /stop /live /result /health` HTTP 端點；`scaleScenario` 依分配 VU 等比縮放 stage target；單節點跑 RampEngine |
+| `distributed/api.go` | **新增** 分散式 DTO：AssignRequest / PartialSummary / LiveMetricsResponse / StatusResponse |
+| `config/distributed.go` | **新增** DistributedConfig（Workers/ListenAddr/Secret/PollIntervalMs/AssignTimeoutSec）；Secret 與部分欄位定義但未被使用 |
+| `reporter/sink.go` | **新增** Sink 介面 + DetailedSink 選用介面（WriteDetailed 輸出 per-step/group 明細） |
 | `metrics/collector.go` | Channel 驅動聚集器；HDR 直方圖；per-step/group；緩衝區滿計數 dropped 並在 Stop() 輸出警告 |
 | `metrics/summary.go` | 聚集統計；`RPS() = Total/WallTime`；`MeanLatency` |
 | `metrics/sample.go` | 單一請求測量資料結構 |
@@ -50,7 +56,8 @@
 | `importer/converter.go` | HAR → YAML 場景；自動偵測認證/captures/JWT |
 | `importer/detector.go` | HAR 啟發式偵測（pre-auth token、login entry）|
 | `importer/filter.go` | 靜態資產過濾（JS/CSS/圖片/字體）|
-| `cmd/ramplio/run.go` | `run` 命令：URL/RPS/場景/儀表板四模式；`--ignore-errors`；`--dashboard-token` |
+| `cmd/ramplio/run.go` | `run` 命令：URL/RPS/場景/儀表板/**分散式**五模式；`--worker`（可重複）；`--ignore-errors`；`--dashboard-token` |
+| `cmd/ramplio/worker.go` | **新增** `worker` 命令：啟動工作節點 HTTP server（`--addr`）；SIGINT/SIGTERM 優雅關閉 |
 | `cmd/ramplio/dashcontrol.go` | 儀表板 Controller 實作；Discover 狀態機；buildOverrideStages |
 | `cmd/ramplio/validate.go` | `validate` 命令：stages/steps/captures/vars/thresholds/circuit breaker 詳細輸出 |
 | `cmd/ramplio/stop.go` | `stop` 命令：SIGTERM → 5s 輪詢 → SIGKILL 升級 |
@@ -66,19 +73,20 @@
 
 | 優先度 | 項目 | 位置 |
 |--------|------|------|
-| HIGH | 分散式測試（Agent 模式）缺失 | 架構層 |
+| MED | 分散式僅走明文 HTTP（`http://`），無 TLS；poll interval 寫死 1s（`PollIntervalMs` 未生效）| distributed/coordinator.go |
 | MED | `dashboard/controller.go` 與 `dashcontrol.go` 職責重疊 | 兩者 |
 | MED | `runRate()` worker 數 = maxRPS×5（上限 5000），高 RPS 記憶體壓力 | engine/ramp.go |
 | MED | Assertion 失敗不觸發 retry（assertion 在 executor 後才評估）| engine/ramp.go |
-| MED | Sink（CSV/InfluxDB）只含全域 Summary，缺 per-step/group 明細 | reporter/sink_*.go |
 | MED | WebSocket 每次請求開新連線（無持久連線）| protocols/ws.go |
-| LOW | `EvalCondition` 不支援 AND/OR 複合條件 | scenarios/template.go |
 | LOW | HTML 報告無互動圖表 | reporter/html.go |
 | LOW | Verdict 判斷閾值寫死（errRate≥5% or p99≥1s）| reporter/json.go |
 | LOW | Setup 步驟執行結果不計入指標 | engine/ramp.go |
 | LOW | RetryExecutor 只支援固定 backoff（無指數退避/jitter）| protocols/retry.go |
 | LOW | `stop` 命令 Unix-only（lsof/kill）| cmd/ramplio/stop.go |
 | LOW | Discover 探測序列寫死（無法自訂步距）| discover/prober.go |
+
+> 已解決（自 `72a7b52`）：~~分散式測試缺失~~、~~Sink per-step 明細~~、~~EvalCondition AND/OR~~。
+> 已解決（Phase 4，本次）：~~分散式百分位合併錯誤~~（改用 HDR 直方圖序列化合併，`metrics.MergeExports`，含 step/group 明細）、~~repo 產物被追蹤~~（已移除並補 `.gitignore`）、~~Worker 端點無認證~~（shared secret + Bearer middleware）、~~分散式 Setup/Teardown stub~~（coordinator 集中執行 setup，captures 透過 `RampConfig.SeedCaptures` 廣播注入 worker）。
 
 ---
 
@@ -96,27 +104,32 @@
 | 即時 TUI | - | △ | - | ✓ |
 | Web Dashboard + Guided Mode | - | - | - | ✓ |
 | JUnit XML / Prometheus | ✓ | ✓ | - | ✓ |
-| CSV / InfluxDB Sink | ✓ | ✓ | ✓ | △ |
+| CSV / InfluxDB Sink（含 per-step 明細）| ✓ | ✓ | ✓ | ✓ |
 | WebSocket | ✓ | ✓ | - | △ |
 | gRPC | ✓ | ✓ | - | - |
 | Lifecycle Hooks（Setup/Teardown）| ✓ | ✓ | - | ✓ |
 | Groups / Transactions | ✓ | ✓ | - | ✓ |
 | Per-step Thresholds | ✓ | ✓ | - | ✓ |
 | Retry + Circuit Breaker | ✓ | - | - | ✓ |
-| Logic Controllers（If/Loop）| ✓ | - | - | △ |
-| 分散式測試 | ✓ | ✓ | ✓ | - |
+| Logic Controllers（If/Loop + AND/OR/NOT）| ✓ | - | - | ✓ |
+| 分散式測試 | ✓ | ✓ | ✓ | ✓（HDR 直方圖合併、shared secret 認證、集中 setup/teardown；TLS 待補）|
 | Cookie / Data File | ✓ | ✓ | - | ✓ |
 
 ---
 
 ## 下一步建議
 
-依優先度排列（Sprint S1 & S2 已於 `72a7b52` 完成）：
+分散式測試的「快樂路徑」已通，但有正確性、安全性、認證三道缺口讓它尚不可用於真實場景。下一階段應為 **「分散式硬化」**——把 Phase 3 的骨架補成可信賴的功能，而非急著開新功能。
 
-1. **Sink per-step/group 明細**（MED，小）— `Sink` 介面擴充 `WriteDetailed`，CSV/InfluxDB 補充細粒度欄位
+**Phase 4 — 分散式硬化（✅ 已完成）**
+1. ✅ **HDR 直方圖合併** — `metrics.HistogramExport` + `Collector.Export()` + `MergeExports()`；worker 序列化直方圖、coordinator 合併求真實百分位（含 step/group）；測試以「合併結果 == 單一 collector 全量 ground truth」驗證正確性
+2. ✅ **Worker 認證** — `Worker.SetSecret` + Bearer middleware；`Coordinator.SetSecret` 帶 Authorization header；CLI `--secret`/`--worker-secret` 與 `RAMPLIO_WORKER_SECRET` env
+3. ✅ **分散式 Setup/Teardown** — engine 暴露 `RunSetup`/`RunTeardown` 與 `RampConfig.SeedCaptures`；coordinator 集中執行 setup，captures 廣播注入各 worker
+4. ✅ **repo 衛生** — 移除追蹤的 `ramplio`/`sessions.csv`/`scenario.yaml`，補 `.gitignore`
+
+**Phase 5+ — 功能擴張**
+1. **分散式 TLS + 設定生效**（MED，中）— 支援 `https://` worker 連線；讓 `PollIntervalMs`/`AssignTimeoutSec` 真正套用
 2. **WebSocket 持久連線模式**（MED，中）— `ws_mode: persistent`，VU 生命週期內保持連線
-3. **Loki Output Sink**（MED，中）— DSN `loki://host:port?labels=key=val`
-4. **gRPC 協定支援**（MED，大）— `protocols/grpc.go` + .proto 載入
-5. **分散式測試**（HIGH，大）— coordinator-worker 協定 + 指標聚合
-6. **EvalCondition AND/OR**（LOW，小）
-7. **Test Suite（多場景串接）**（LOW，中）
+3. **gRPC 協定支援**（MED，大）— `protocols/grpc.go` + .proto 載入
+4. **Loki Output Sink**（MED，中）— DSN `loki://host:port?labels=key=val`
+5. **Test Suite（多場景串接）**（LOW，中）

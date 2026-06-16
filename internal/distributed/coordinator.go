@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ramplio/ramplio/internal/engine"
 	"github.com/ramplio/ramplio/internal/metrics"
 	"github.com/ramplio/ramplio/internal/protocols"
 	"github.com/ramplio/ramplio/internal/reporter"
@@ -23,11 +24,11 @@ type Coordinator struct {
 	scenarioYAML []byte
 	cfg          *scenarios.Scenario
 	httpCfg      protocols.HTTPConfig
+	secret       string // shared secret sent to workers; empty disables auth
 
-	mu          sync.RWMutex
+	mu           sync.RWMutex
 	liveSnapshot reporter.LiveSnapshot
-	collector   *metricsCollector
-	startedAt   time.Time
+	startedAt    time.Time
 }
 
 // NewCoordinator creates a new coordinator with the given worker addresses.
@@ -37,10 +38,12 @@ func NewCoordinator(workers []string, scenarioYAML []byte, cfg *scenarios.Scenar
 		scenarioYAML: scenarioYAML,
 		cfg:          cfg,
 		httpCfg:      httpCfg,
-		collector: &metricsCollector{
-			partials: make(map[string]*PartialSummary),
-		},
 	}
+}
+
+// SetSecret configures the shared secret sent to workers as a bearer token.
+func (c *Coordinator) SetSecret(secret string) {
+	c.secret = secret
 }
 
 // Run orchestrates the distributed test execution.
@@ -52,14 +55,10 @@ func (c *Coordinator) Run(ctx context.Context) (metrics.Summary, error) {
 		return metrics.Summary{}, fmt.Errorf("health check failed: %w", err)
 	}
 
-	// Step 2: Run setup steps locally and capture values
-	setupCaptures := make(map[string]string)
-	if len(c.cfg.Setup) > 0 {
-		captures, err := c.runSetup(ctx)
-		if err != nil {
-			return metrics.Summary{}, fmt.Errorf("setup failed: %w", err)
-		}
-		setupCaptures = captures
+	// Step 2: Run setup steps centrally and capture values
+	setupCaptures, err := c.runSetup(ctx)
+	if err != nil {
+		return metrics.Summary{}, fmt.Errorf("setup failed: %w", err)
 	}
 
 	// Step 3: Allocate VUs to workers
@@ -90,20 +89,18 @@ func (c *Coordinator) Run(ctx context.Context) (metrics.Summary, error) {
 		<-done
 	}
 
-	// Step 6: Collect final results from all workers
-	partials, err := c.collectResults(ctx)
+	// Step 6: Collect final histogram snapshots from all workers
+	exports, err := c.collectResults(ctx)
 	if err != nil {
 		return metrics.Summary{}, fmt.Errorf("collect results failed: %w", err)
 	}
 
-	// Step 7: Merge partial summaries into final summary
-	summary := mergePartials(partials)
+	// Step 7: Merge snapshots into a statistically correct summary
+	summary := metrics.MergeExports(exports)
 
-	// Step 8: Run teardown steps
-	if len(c.cfg.Teardown) > 0 {
-		if err := c.runTeardown(ctx); err != nil {
-			fmt.Fprintf(io.Discard, "warning: teardown failed: %v\n", err)
-		}
+	// Step 8: Run teardown steps centrally, seeded with setup captures
+	if err := c.runTeardown(ctx, setupCaptures); err != nil {
+		fmt.Fprintf(io.Discard, "warning: teardown failed: %v\n", err)
 	}
 
 	return summary, nil
@@ -116,13 +113,34 @@ func (c *Coordinator) LiveSnapshot() reporter.LiveSnapshot {
 	return c.liveSnapshot
 }
 
+// newRequest builds an HTTP request to a worker endpoint with the shared
+// secret attached as a bearer token when configured.
+func (c *Coordinator) newRequest(ctx context.Context, method, addr, path string, body io.Reader) (*http.Request, error) {
+	url := fmt.Sprintf("http://%s%s", normalizeAddr(addr), path)
+	req, err := http.NewRequestWithContext(ctx, method, url, body)
+	if err != nil {
+		return nil, err
+	}
+	if c.secret != "" {
+		req.Header.Set("Authorization", "Bearer "+c.secret)
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	return req, nil
+}
+
 // healthCheckWorkers performs health check on all workers.
 func (c *Coordinator) healthCheckWorkers(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	for _, addr := range c.workers {
-		resp, err := http.Get(fmt.Sprintf("http://%s/health", normalizeAddr(addr)))
+		req, err := c.newRequest(ctx, http.MethodGet, addr, "/health", nil)
+		if err != nil {
+			return fmt.Errorf("worker %s request build failed: %w", addr, err)
+		}
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			return fmt.Errorf("worker %s health check failed: %w", addr, err)
 		}
@@ -178,25 +196,26 @@ func (c *Coordinator) broadcastAssign(ctx context.Context, allocation map[string
 		wg.Add(1)
 		go func(addr string, vus int) {
 			defer wg.Done()
-			req := &AssignRequest{
+			payload := &AssignRequest{
 				ScenarioYAML:  c.scenarioYAML,
 				AssignedVUs:   vus,
 				SetupCaptures: setupCaptures,
 			}
-			body, _ := json.Marshal(req)
-			resp, err := http.Post(
-				fmt.Sprintf("http://%s/assign", normalizeAddr(addr)),
-				"application/json",
-				bytes.NewReader(body),
-			)
+			body, _ := json.Marshal(payload)
+			req, err := c.newRequest(ctx, http.MethodPost, addr, "/assign", bytes.NewReader(body))
+			if err != nil {
+				errCh <- fmt.Errorf("worker %s request build failed: %w", addr, err)
+				return
+			}
+			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
 				errCh <- fmt.Errorf("worker %s assign failed: %w", addr, err)
 				return
 			}
 			defer resp.Body.Close()
 			if resp.StatusCode != http.StatusOK {
-				body, _ := io.ReadAll(resp.Body)
-				errCh <- fmt.Errorf("worker %s returned status %d: %s", addr, resp.StatusCode, string(body))
+				msg, _ := io.ReadAll(resp.Body)
+				errCh <- fmt.Errorf("worker %s returned status %d: %s", addr, resp.StatusCode, string(msg))
 			}
 		}(worker, assignedVUs)
 	}
@@ -233,7 +252,16 @@ func (c *Coordinator) pollWorkers(ctx context.Context) error {
 				wg.Add(1)
 				go func(addr string) {
 					defer wg.Done()
-					resp, err := http.Get(fmt.Sprintf("http://%s/live", normalizeAddr(addr)))
+					req, err := c.newRequest(ctx, http.MethodGet, addr, "/live", nil)
+					if err != nil {
+						mu.Lock()
+						if pollErr == nil {
+							pollErr = fmt.Errorf("worker %s request build failed: %w", addr, err)
+						}
+						mu.Unlock()
+						return
+					}
+					resp, err := http.DefaultClient.Do(req)
 					if err != nil {
 						mu.Lock()
 						if pollErr == nil {
@@ -244,8 +272,8 @@ func (c *Coordinator) pollWorkers(ctx context.Context) error {
 					}
 					defer resp.Body.Close()
 
-					var metrics LiveMetricsResponse
-					if err := json.NewDecoder(resp.Body).Decode(&metrics); err != nil {
+					var lm LiveMetricsResponse
+					if err := json.NewDecoder(resp.Body).Decode(&lm); err != nil {
 						mu.Lock()
 						if pollErr == nil {
 							pollErr = fmt.Errorf("worker %s decode failed: %w", addr, err)
@@ -255,7 +283,7 @@ func (c *Coordinator) pollWorkers(ctx context.Context) error {
 					}
 
 					mu.Lock()
-					liveMetrics[addr] = &metrics
+					liveMetrics[addr] = &lm
 					mu.Unlock()
 				}(worker)
 			}
@@ -271,8 +299,8 @@ func (c *Coordinator) pollWorkers(ctx context.Context) error {
 
 			// Check if all workers are done
 			allDone = true
-			for _, metrics := range liveMetrics {
-				if !metrics.Done {
+			for _, lm := range liveMetrics {
+				if !lm.Done {
 					allDone = false
 					break
 				}
@@ -284,6 +312,8 @@ func (c *Coordinator) pollWorkers(ctx context.Context) error {
 }
 
 // aggregateLiveMetrics aggregates live metrics from all workers into a LiveSnapshot.
+// Note: P99 here is the max across workers — an approximation acceptable for the
+// live view only. The final report uses MergeExports for an exact percentile.
 func (c *Coordinator) aggregateLiveMetrics(liveMetrics map[string]*LiveMetricsResponse) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -330,11 +360,16 @@ func (c *Coordinator) stopAllWorkers(ctx context.Context) error {
 		wg.Add(1)
 		go func(addr string) {
 			defer wg.Done()
-			resp, err := http.Post(
-				fmt.Sprintf("http://%s/stop", normalizeAddr(addr)),
-				"application/json",
-				nil,
-			)
+			req, err := c.newRequest(ctx, http.MethodPost, addr, "/stop", nil)
+			if err != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = fmt.Errorf("worker %s request build failed: %w", addr, err)
+				}
+				mu.Unlock()
+				return
+			}
+			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
 				mu.Lock()
 				if firstErr == nil {
@@ -351,12 +386,12 @@ func (c *Coordinator) stopAllWorkers(ctx context.Context) error {
 	return firstErr
 }
 
-// collectResults fetches final results from all workers.
-func (c *Coordinator) collectResults(ctx context.Context) ([]PartialSummary, error) {
+// collectResults fetches final histogram snapshots from all workers.
+func (c *Coordinator) collectResults(ctx context.Context) ([]metrics.HistogramExport, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	results := make([]PartialSummary, 0, len(c.workers))
+	results := make([]metrics.HistogramExport, 0, len(c.workers))
 	mu := sync.Mutex{}
 	var wg sync.WaitGroup
 	var firstErr error
@@ -365,7 +400,16 @@ func (c *Coordinator) collectResults(ctx context.Context) ([]PartialSummary, err
 		wg.Add(1)
 		go func(addr string) {
 			defer wg.Done()
-			resp, err := http.Get(fmt.Sprintf("http://%s/result", normalizeAddr(addr)))
+			req, err := c.newRequest(ctx, http.MethodGet, addr, "/result", nil)
+			if err != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = fmt.Errorf("worker %s request build failed: %w", addr, err)
+				}
+				mu.Unlock()
+				return
+			}
+			resp, err := http.DefaultClient.Do(req)
 			if err != nil {
 				mu.Lock()
 				if firstErr == nil {
@@ -385,7 +429,7 @@ func (c *Coordinator) collectResults(ctx context.Context) ([]PartialSummary, err
 				return
 			}
 
-			var result PartialSummary
+			var result ResultResponse
 			if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 				mu.Lock()
 				if firstErr == nil {
@@ -396,7 +440,7 @@ func (c *Coordinator) collectResults(ctx context.Context) ([]PartialSummary, err
 			}
 
 			mu.Lock()
-			results = append(results, result)
+			results = append(results, result.Export)
 			mu.Unlock()
 		}(worker)
 	}
@@ -410,100 +454,40 @@ func (c *Coordinator) collectResults(ctx context.Context) ([]PartialSummary, err
 	return results, nil
 }
 
-// runSetup executes setup steps and returns captured values.
+// runSetup executes the scenario's setup steps once on the coordinator and
+// returns the captured values, which are broadcast to every worker so all VUs
+// share the same auth tokens.
 func (c *Coordinator) runSetup(ctx context.Context) (map[string]string, error) {
-	// For now, return empty map. Full implementation would run setup steps
-	// using a local engine similar to the run command.
-	return make(map[string]string), nil
+	if len(c.cfg.Setup) == 0 {
+		return map[string]string{}, nil
+	}
+	col := metrics.NewCollector(1)
+	defer col.Stop()
+	eng := engine.NewRamp(engine.RampConfig{
+		SetupSteps: scenarioStepsToEngineSteps(c.cfg.Setup),
+		Vars:       c.cfg.Vars,
+		Executor:   protocols.NewHTTPExecutor(c.httpCfg),
+		WSExecutor: protocols.NewWSExecutor(),
+	}, col)
+	return eng.RunSetup(ctx), nil
 }
 
-// runTeardown executes teardown steps.
-func (c *Coordinator) runTeardown(ctx context.Context) error {
-	// For now, no-op. Full implementation would run teardown steps.
+// runTeardown executes the scenario's teardown steps once on the coordinator,
+// seeded with the setup captures (so a logout step can use the auth token).
+func (c *Coordinator) runTeardown(ctx context.Context, setupCaptures map[string]string) error {
+	if len(c.cfg.Teardown) == 0 {
+		return nil
+	}
+	col := metrics.NewCollector(1)
+	defer col.Stop()
+	eng := engine.NewRamp(engine.RampConfig{
+		TeardownSteps: scenarioStepsToEngineSteps(c.cfg.Teardown),
+		Vars:          c.cfg.Vars,
+		Executor:      protocols.NewHTTPExecutor(c.httpCfg),
+		WSExecutor:    protocols.NewWSExecutor(),
+	}, col)
+	eng.RunTeardown(ctx, setupCaptures)
 	return nil
-}
-
-// mergePartials combines partial results from all workers into a single summary.
-func mergePartials(partials []PartialSummary) metrics.Summary {
-	var sum metrics.Summary
-
-	if len(partials) == 0 {
-		return sum
-	}
-
-	// Aggregate basic metrics
-	for _, p := range partials {
-		sum.Total += p.Total
-		sum.Errors += p.Errors
-		sum.BytesIn += p.BytesIn
-		sum.DroppedSamples += p.DroppedSamples
-
-		// Track min/max latencies
-		if p.MinNs > 0 && (sum.MinLatency == 0 || time.Duration(p.MinNs) < sum.MinLatency) {
-			sum.MinLatency = time.Duration(p.MinNs)
-		}
-		if p.MaxNs > sum.MaxLatency.Nanoseconds() {
-			sum.MaxLatency = time.Duration(p.MaxNs)
-		}
-
-		// Track wall time
-		if time.Duration(p.WallNs) > sum.WallTime {
-			sum.WallTime = time.Duration(p.WallNs)
-		}
-	}
-
-	// Calculate weighted percentiles
-	if sum.Total > 0 {
-		sum.P50 = weightedPercentile(partials, func(p *PartialSummary) int64 { return p.P50Ns })
-		sum.P90 = weightedPercentile(partials, func(p *PartialSummary) int64 { return p.P90Ns })
-		sum.P95 = weightedPercentile(partials, func(p *PartialSummary) int64 { return p.P95Ns })
-		sum.P99 = weightedPercentile(partials, func(p *PartialSummary) int64 { return p.P99Ns })
-	}
-
-	// Merge step summaries
-	stepMap := make(map[string]*metrics.StepSummary)
-	for _, p := range partials {
-		for _, step := range p.Steps {
-			if stepMap[step.Name] == nil {
-				stepMap[step.Name] = &metrics.StepSummary{Name: step.Name}
-			}
-			merged := stepMap[step.Name]
-			merged.Total += step.Total
-			merged.Errors += step.Errors
-			// For step percentiles, also use weighted average
-		}
-	}
-
-	// Convert map to slice
-	sum.Steps = make([]metrics.StepSummary, 0, len(stepMap))
-	for _, step := range stepMap {
-		sum.Steps = append(sum.Steps, *step)
-	}
-
-	return sum
-}
-
-// weightedPercentile calculates a weighted average of percentiles.
-func weightedPercentile(partials []PartialSummary, getter func(*PartialSummary) int64) time.Duration {
-	if len(partials) == 0 {
-		return 0
-	}
-
-	var totalWeight int64
-	var weightedSum int64
-
-	for i := range partials {
-		p := &partials[i]
-		val := getter(p)
-		totalWeight += p.Total
-		weightedSum += val * p.Total
-	}
-
-	if totalWeight == 0 {
-		return 0
-	}
-
-	return time.Duration(weightedSum / totalWeight)
 }
 
 // normalizeAddr ensures the address has a port.
@@ -512,10 +496,4 @@ func normalizeAddr(addr string) string {
 		return addr + ":7700"
 	}
 	return addr
-}
-
-// metricsCollector tracks partial results from workers.
-type metricsCollector struct {
-	mu       sync.RWMutex
-	partials map[string]*PartialSummary
 }

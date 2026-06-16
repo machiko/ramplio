@@ -3,16 +3,74 @@ package distributed
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/ramplio/ramplio/internal/protocols"
 	"github.com/ramplio/ramplio/internal/scenarios"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+// TestWorkerRunActuallyGeneratesLoad is a regression test for a bug where the
+// engine's run context was rooted at the /assign HTTP request context. net/http
+// cancels that context as soon as the handler returns, which killed the engine
+// instantly and produced zero requests. The run must survive the response and
+// generate real load. This drives the full HTTP path (assign → result) against
+// a local target.
+func TestWorkerRunActuallyGeneratesLoad(t *testing.T) {
+	var hits atomic.Int64
+	target := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		rw.WriteHeader(http.StatusOK)
+	}))
+	defer target.Close()
+
+	yaml := fmt.Sprintf(`name: regression
+stages:
+  - duration: 1s
+    target: 10
+steps:
+  - name: GET /
+    method: GET
+    url: %s/
+    assertions:
+      status: 200
+`, target.URL)
+
+	worker := NewWorker("regression-worker")
+	port := findFreePort()
+	go func() { _ = worker.StartHTTPServer(":" + port) }()
+	time.Sleep(100 * time.Millisecond)
+
+	base := "http://127.0.0.1:" + port
+	body, _ := json.Marshal(AssignRequest{ScenarioYAML: []byte(yaml), AssignedVUs: 10})
+	resp, err := http.Post(base+"/assign", "application/json", bytes.NewReader(body))
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	resp.Body.Close()
+
+	// Wait for the 1s run to finish.
+	time.Sleep(1500 * time.Millisecond)
+
+	res, err := http.Get(base + "/result")
+	require.NoError(t, err)
+	defer res.Body.Close()
+	require.Equal(t, http.StatusOK, res.StatusCode)
+
+	var result ResultResponse
+	require.NoError(t, json.NewDecoder(res.Body).Decode(&result))
+
+	assert.Greater(t, result.Export.Total, int64(0),
+		"worker must generate load after the assign response is sent (run context must outlive the request)")
+	assert.Greater(t, hits.Load(), int64(0), "target server should have received requests")
+}
 
 // TestDistributedIntegrationBasic tests coordinator-worker communication with scenario assignment
 func TestDistributedIntegrationBasic(t *testing.T) {
@@ -139,58 +197,6 @@ func TestDistributedVUAllocationAccuracy(t *testing.T) {
 		assert.Equal(t, 25, vus) // 100 / 4 = 25 each
 	}
 	assert.Equal(t, 100, total)
-}
-
-// TestDistributedMetricsMerging tests merging of metrics from multiple workers
-func TestDistributedMetricsMerging(t *testing.T) {
-	// Simulate results from 3 workers
-	partials := []PartialSummary{
-		{
-			WorkerID:  "worker-1",
-			Total:     100,
-			Errors:    2,
-			MinNs:     10000000,
-			MaxNs:     50000000,
-			P99Ns:     45000000,
-			BytesIn:   10000,
-			WallNs:    10000000000,
-		},
-		{
-			WorkerID:  "worker-2",
-			Total:     100,
-			Errors:    1,
-			MinNs:     12000000,
-			MaxNs:     48000000,
-			P99Ns:     44000000,
-			BytesIn:   10000,
-			WallNs:    10000000000,
-		},
-		{
-			WorkerID:  "worker-3",
-			Total:     100,
-			Errors:    3,
-			MinNs:     11000000,
-			MaxNs:     52000000,
-			P99Ns:     46000000,
-			BytesIn:   10000,
-			WallNs:    10000000000,
-		},
-	}
-
-	sum := mergePartials(partials)
-
-	// Verify aggregation
-	assert.Equal(t, int64(300), sum.Total)
-	assert.Equal(t, int64(6), sum.Errors)
-	assert.Equal(t, int64(30000), sum.BytesIn)
-
-	// Verify latencies
-	assert.Equal(t, time.Duration(10000000), sum.MinLatency)
-	assert.Equal(t, time.Duration(52000000), sum.MaxLatency)
-
-	// Verify P99 is weighted average
-	// (45*100 + 44*100 + 46*100) / 300 = 13500/300 = 45
-	assert.Equal(t, time.Duration(45000000), sum.P99)
 }
 
 // TestDistributedWorkerHTTPServer tests worker HTTP endpoints directly

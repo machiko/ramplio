@@ -12,7 +12,10 @@ import (
 )
 
 func newWorkerCmd() *cobra.Command {
-	var addr string
+	var (
+		addr   string
+		secret string
+	)
 
 	cmd := &cobra.Command{
 		Use:   "worker",
@@ -21,6 +24,9 @@ func newWorkerCmd() *cobra.Command {
 
 The worker listens for load test assignments from a coordinator process via HTTP
 and executes them locally, reporting metrics back to the coordinator.
+
+When a shared secret is set (via --secret or the RAMPLIO_WORKER_SECRET env var),
+every request must carry a matching "Authorization: Bearer <secret>" header.
 
 Example:
   Terminal 1: ramplio worker --addr :7700
@@ -31,8 +37,17 @@ Example:
 				return fmt.Errorf("--addr flag is required (e.g., :7700)")
 			}
 
+			if secret == "" {
+				secret = os.Getenv("RAMPLIO_WORKER_SECRET")
+			}
+
 			worker := distributed.NewWorker("ramplio-worker")
-			log.Printf("Starting worker on %s", addr)
+			worker.SetSecret(secret)
+			if secret == "" {
+				log.Printf("Starting worker on %s (no auth — set --secret to protect this endpoint)", addr)
+			} else {
+				log.Printf("Starting worker on %s (auth enabled)", addr)
+			}
 
 			// Handle graceful shutdown on SIGINT/SIGTERM
 			sigChan := make(chan os.Signal, 1)
@@ -50,6 +65,7 @@ Example:
 	}
 
 	cmd.Flags().StringVarP(&addr, "addr", "a", "", "Listen address (e.g., :7700)")
+	cmd.Flags().StringVar(&secret, "secret", "", "Shared secret required on requests (or set RAMPLIO_WORKER_SECRET)")
 
 	return cmd
 }

@@ -199,6 +199,58 @@ func TestWorkerHandleStop(t *testing.T) {
 	assert.True(t, resp.OK)
 }
 
+// TestWorkerAuthMiddleware verifies the shared-secret gate on worker endpoints.
+func TestWorkerAuthMiddleware(t *testing.T) {
+	called := false
+	next := http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		called = true
+		rw.WriteHeader(http.StatusOK)
+	})
+
+	t.Run("no secret allows all", func(t *testing.T) {
+		w := NewWorker("w")
+		called = false
+		rec := httptest.NewRecorder()
+		w.authMiddleware(next).ServeHTTP(rec, httptest.NewRequest("GET", "/health", nil))
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.True(t, called)
+	})
+
+	t.Run("wrong secret rejected", func(t *testing.T) {
+		w := NewWorker("w")
+		w.SetSecret("s3cret")
+		called = false
+		req := httptest.NewRequest("GET", "/health", nil)
+		req.Header.Set("Authorization", "Bearer wrong")
+		rec := httptest.NewRecorder()
+		w.authMiddleware(next).ServeHTTP(rec, req)
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+		assert.False(t, called)
+	})
+
+	t.Run("missing header rejected", func(t *testing.T) {
+		w := NewWorker("w")
+		w.SetSecret("s3cret")
+		called = false
+		rec := httptest.NewRecorder()
+		w.authMiddleware(next).ServeHTTP(rec, httptest.NewRequest("GET", "/health", nil))
+		assert.Equal(t, http.StatusUnauthorized, rec.Code)
+		assert.False(t, called)
+	})
+
+	t.Run("correct secret allows", func(t *testing.T) {
+		w := NewWorker("w")
+		w.SetSecret("s3cret")
+		called = false
+		req := httptest.NewRequest("GET", "/health", nil)
+		req.Header.Set("Authorization", "Bearer s3cret")
+		rec := httptest.NewRecorder()
+		w.authMiddleware(next).ServeHTTP(rec, req)
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.True(t, called)
+	})
+}
+
 // TestWorkerHandleHealth tests health check endpoint
 func TestWorkerHandleHealth(t *testing.T) {
 	w := NewWorker("test-worker")

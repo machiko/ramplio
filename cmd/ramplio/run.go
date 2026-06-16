@@ -44,6 +44,7 @@ func newRunCmd() *cobra.Command {
 		requestTimeout  string
 		ignoreErrors    bool
 		workers         []string
+		workerSecret    string
 	)
 
 	cmd := &cobra.Command{
@@ -76,7 +77,10 @@ func newRunCmd() *cobra.Command {
 				if url != "" {
 					return fmt.Errorf("--url and --worker are mutually exclusive")
 				}
-				return runDistributed(scenarioFile, workers, prometheusAddr, httpCfg)
+				if workerSecret == "" {
+					workerSecret = os.Getenv("RAMPLIO_WORKER_SECRET")
+				}
+				return runDistributed(scenarioFile, workers, workerSecret, prometheusAddr, httpCfg)
 			}
 
 			// Dashboard mode: browser handles test setup and control.
@@ -209,6 +213,7 @@ New to load testing? Run:  ramplio run --dashboard`)
 	cmd.Flags().StringArrayVar(&sinkDSNs, "sink", nil, "Push results to an external sink (repeatable): csv:<file>  influxdb://host/bucket?token=T")
 	cmd.Flags().BoolVar(&ignoreErrors, "ignore-errors", false, "Exit 0 even when errors or threshold violations occur (useful during debugging)")
 	cmd.Flags().StringArrayVar(&workers, "worker", nil, "Worker address for distributed testing (repeatable, e.g. --worker localhost:7700 --worker localhost:7701)")
+	cmd.Flags().StringVar(&workerSecret, "worker-secret", "", "Shared secret for authenticating with workers (or set RAMPLIO_WORKER_SECRET)")
 
 	return cmd
 }
@@ -393,7 +398,7 @@ func runScenario(path, promAddr string, httpCfg protocols.HTTPConfig) (metrics.S
 }
 
 // runDistributed orchestrates a distributed load test across multiple worker processes.
-func runDistributed(scenarioFile string, workerAddrs []string, promAddr string, httpCfg protocols.HTTPConfig) error {
+func runDistributed(scenarioFile string, workerAddrs []string, secret, promAddr string, httpCfg protocols.HTTPConfig) error {
 	sc, err := scenarios.ParseFile(scenarioFile)
 	if err != nil {
 		return fmt.Errorf("loading scenario: %w", err)
@@ -405,6 +410,7 @@ func runDistributed(scenarioFile string, workerAddrs []string, promAddr string, 
 	}
 
 	coordinator := distributed.NewCoordinator(workerAddrs, yamlBytes, sc, httpCfg)
+	coordinator.SetSecret(secret)
 
 	fmt.Printf("Running scenario %q on %d worker(s)  (%d stages, %d step(s))\n\n", sc.Name, len(workerAddrs), len(sc.Stages), len(sc.Steps))
 	for i, addr := range workerAddrs {

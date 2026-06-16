@@ -53,6 +53,11 @@ type RampConfig struct {
 	Executor       protocols.Executor
 	WSExecutor     protocols.Executor // used when step.Protocol == "websocket"
 	CircuitBreaker *scenarios.CircuitBreakerConfig
+	// SeedCaptures pre-populates the shared setup captures before any VU starts.
+	// In distributed mode the coordinator runs setup once and broadcasts the
+	// captured values here, so every worker's VUs inherit the same auth tokens
+	// without each worker re-running setup.
+	SeedCaptures map[string]string
 }
 
 // dataSource distributes data file rows to VUs.
@@ -209,6 +214,15 @@ func (e *RampEngine) maxTargetRPS() int {
 }
 
 func (e *RampEngine) Run(ctx context.Context) metrics.Summary {
+	// Seed captures supplied by a coordinator take effect before any VU starts.
+	if len(e.cfg.SeedCaptures) > 0 {
+		seeded := make(map[string]string, len(e.cfg.SeedCaptures))
+		for k, v := range e.cfg.SeedCaptures {
+			seeded[k] = v
+		}
+		e.setupCaptures = seeded
+	}
+
 	// Setup: run once, single-goroutine; captures shared with all VUs.
 	if len(e.cfg.SetupSteps) > 0 {
 		setupCtx := e.newVarContext()
@@ -233,6 +247,40 @@ func (e *RampEngine) Run(ctx context.Context) metrics.Summary {
 		}
 	}
 	return sum
+}
+
+// RunSetup executes only the configured setup steps once and returns the
+// captured values. The coordinator uses this to obtain auth tokens centrally
+// before broadcasting them to workers; no stages or metrics are involved.
+func (e *RampEngine) RunSetup(ctx context.Context) map[string]string {
+	if len(e.cfg.SetupSteps) == 0 {
+		return map[string]string{}
+	}
+	setupCtx := e.newVarContext()
+	for _, step := range e.cfg.SetupSteps {
+		e.executeSingleStep(ctx, step, setupCtx, e.pickExecutor(step))
+	}
+	return setupCtx.Captures
+}
+
+// RunTeardown executes only the configured teardown steps once, seeding them
+// with captures (e.g. an auth token needed to log out). Used by the
+// coordinator after a distributed run completes.
+func (e *RampEngine) RunTeardown(ctx context.Context, seed map[string]string) {
+	if len(e.cfg.TeardownSteps) == 0 {
+		return
+	}
+	if len(seed) > 0 {
+		seeded := make(map[string]string, len(seed))
+		for k, v := range seed {
+			seeded[k] = v
+		}
+		e.setupCaptures = seeded
+	}
+	tdCtx := e.newVarContext()
+	for _, step := range e.cfg.TeardownSteps {
+		e.executeSingleStep(ctx, step, tdCtx, e.pickExecutor(step))
+	}
 }
 
 // runVUs is the former Run() body for VU mode; extracted so Run() can wrap it.
