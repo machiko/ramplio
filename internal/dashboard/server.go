@@ -13,6 +13,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/ramplio/ramplio/internal/importer"
 	"github.com/ramplio/ramplio/internal/metrics"
+	"github.com/ramplio/ramplio/internal/reporter"
 )
 
 // StepMetric is the per-step metrics payload in a wsMessage.
@@ -53,6 +54,9 @@ type wsMessage struct {
 	StagePct       float64        `json:"stage_pct"`
 	ElapsedS       float64        `json:"elapsed_s"`
 	State         State          `json:"state"`
+	// Verdict is the live plain-language reading of the current snapshot, using
+	// the same shared source as the CLI so the live view speaks identical wording.
+	Verdict       *reporter.Interpretation `json:"verdict,omitempty"`
 	Result        *RunResult     `json:"result,omitempty"`
 	ScenarioInfo  *ScenarioMeta  `json:"scenario_info,omitempty"`
 	GuidedProfile  *GuidedProfile     `json:"guided_profile,omitempty"` // non-nil during a guided test
@@ -304,6 +308,10 @@ func (s *Server) buildWSMessage() wsMessage {
 		Result:        s.ctrl.Result(),
 		ScenarioInfo:  s.ctrl.ScenarioInfo(),
 		GuidedProfile: s.ctrl.ActiveGuidedProfile(),
+	}
+	if snap.Total > 0 {
+		v := reporter.ReadingsFor(snap.P99, errPct, snap.RPS, snap.Total, snap.Errors, "")
+		msg.Verdict = &v
 	}
 	if len(snap.StepMetrics) > 0 {
 		msg.StepMetrics = toWSStepMetrics(snap.StepMetrics)

@@ -42,7 +42,10 @@ type RunResult struct {
 	MeanMs        int64          `json:"mean_ms"`
 	RPS           float64        `json:"rps"`
 	WallSec       float64        `json:"wall_sec"`
-	GuidedVerdict *GuidedVerdict `json:"guided_verdict,omitempty"` // set when started via guided wizard
+	// Verdict is the shared plain-language reading (same source as the terminal,
+	// JSON and HTML outputs) so the browser speaks identical wording to the CLI.
+	Verdict       reporter.Interpretation `json:"verdict"`
+	GuidedVerdict *GuidedVerdict          `json:"guided_verdict,omitempty"` // set when started via guided wizard
 }
 
 // ScenarioMeta holds display metadata for a YAML scenario loaded via --scenario flag.

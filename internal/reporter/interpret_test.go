@@ -81,6 +81,27 @@ func TestInterpret_BottleneckOnlyWithMultipleSteps(t *testing.T) {
 	assert.Contains(t, multi.Bottleneck, "slow")
 }
 
+// TestReadingsFor_MatchesInterpret proves the shared core produces the identical
+// reading as Interpret(sum) — guaranteeing the dashboard speaks the same language.
+func TestReadingsFor_MatchesInterpret(t *testing.T) {
+	sum := metrics.Summary{Total: 20046, Errors: 0, WallTime: 5 * time.Second, P99: 9 * time.Millisecond}
+	want := reporter.Interpret(sum)
+	got := reporter.ReadingsFor(sum.P99, sum.ErrorRate(), sum.RPS(), sum.Total, sum.Errors, "")
+	assert.Equal(t, want, got)
+}
+
+// TestReadingsFor_Standalone verifies the dashboard-facing entry point classifies
+// scalar inputs without needing a metrics.Summary.
+func TestReadingsFor_Standalone(t *testing.T) {
+	in := reporter.ReadingsFor(2500*time.Millisecond, 0, 100, 1000, 0, "")
+	assert.Equal(t, "warn", in.Level)
+	assert.Equal(t, "偏慢", in.Speed.Label)
+	assert.Equal(t, "完美", in.Stability.Label)
+
+	withBottleneck := reporter.ReadingsFor(50*time.Millisecond, 0, 100, 1000, 0, "最花時間的步驟是「x」")
+	assert.Contains(t, withBottleneck.Bottleneck, "x")
+}
+
 // TestOutputsShareWording proves the terminal and JSON outputs render the exact
 // same plain-language verdict — the whole point of the shared Interpret source.
 func TestOutputsShareWording(t *testing.T) {

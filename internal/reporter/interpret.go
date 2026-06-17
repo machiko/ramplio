@@ -54,8 +54,27 @@ const (
 
 // Interpret turns raw metrics into the shared plain-language interpretation.
 func Interpret(sum metrics.Summary) Interpretation {
-	errRate := sum.ErrorRate()
-	p99ms := sum.P99.Milliseconds()
+	bottleneck := ""
+	if len(sum.Steps) > 1 {
+		var name string
+		var slowest time.Duration
+		for _, s := range sum.Steps {
+			if s.P99 > slowest {
+				slowest = s.P99
+				name = s.Name
+			}
+		}
+		bottleneck = fmt.Sprintf("最花時間的步驟是「%s」（%s內完成），要加快先從這裡下手。", name, humanizeDuration(slowest))
+	}
+	return ReadingsFor(sum.P99, sum.ErrorRate(), sum.RPS(), sum.Total, sum.Errors, bottleneck)
+}
+
+// ReadingsFor builds an Interpretation from raw scalar metrics. It is the shared
+// core behind Interpret() and is reused by the dashboard (live snapshots and
+// completed runs) so every surface — terminal, JSON, HTML and browser — speaks
+// the exact same plain language. bottleneck may be "" when not applicable.
+func ReadingsFor(p99 time.Duration, errRate, rps float64, total, errors int64, bottleneck string) Interpretation {
+	p99ms := p99.Milliseconds()
 
 	in := Interpretation{}
 
@@ -69,28 +88,17 @@ func Interpret(sum metrics.Summary) Interpretation {
 	}
 
 	si, sl, sn := speedReading(p99ms)
-	in.Speed = SpeedReading{Icon: si, Label: sl, Note: sn, Value: humanizeDuration(sum.P99)}
+	in.Speed = SpeedReading{Icon: si, Label: sl, Note: sn, Value: humanizeDuration(p99)}
 
-	ti, tl, tn := stabilityReading(errRate, sum.Total, sum.Errors)
+	ti, tl, tn := stabilityReading(errRate, total, errors)
 	in.Stability = StabilityReading{Icon: ti, Label: tl, Note: tn}
 
 	in.Capacity = CapacityReading{
-		Value: humanizeInt(int64(sum.RPS() + 0.5)),
+		Value: humanizeInt(int64(rps + 0.5)),
 		Note:  capacityNote(errRate),
 	}
 
-	if len(sum.Steps) > 1 {
-		var name string
-		var slowest time.Duration
-		for _, s := range sum.Steps {
-			if s.P99 > slowest {
-				slowest = s.P99
-				name = s.Name
-			}
-		}
-		in.Bottleneck = fmt.Sprintf("最花時間的步驟是「%s」（%s內完成），要加快先從這裡下手。", name, humanizeDuration(slowest))
-	}
-
+	in.Bottleneck = bottleneck
 	in.OneLiner = oneLineSummary(p99ms, errRate)
 	return in
 }

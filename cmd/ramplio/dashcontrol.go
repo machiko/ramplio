@@ -471,6 +471,7 @@ func (c *dashController) runLoop(
 				MeanMs:   sum.MeanLatency().Milliseconds(),
 				RPS:      sum.RPS(),
 				WallSec:  sum.WallTime.Seconds(),
+				Verdict:  reporter.Interpret(sum),
 			}
 			if c.lastProfile != nil {
 				verdict := dashboard.InterpretResult(*c.lastProfile, *result)
