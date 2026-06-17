@@ -112,6 +112,34 @@
     .status-dot.done { background: var(--accent2); }
     .status-dot.idle { background: var(--muted); }
 
+    /* ── Flow stepper (設定 → 執行中 → 結果) ───────────── */
+    .flow-stepper {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .flow-step {
+      padding: 3px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      white-space: nowrap;
+      transition: all 0.3s;
+    }
+    .flow-step.active {
+      color: #fff;
+      background: var(--accent);
+      border-color: var(--accent);
+      box-shadow: 0 0 8px var(--accent);
+    }
+    .flow-step.done {
+      color: var(--accent2);
+      border-color: var(--accent2);
+    }
+    .flow-sep { color: var(--border); }
+    @media (max-width: 720px) { .flow-stepper { display: none; } }
+
     /* ── Tooltip ─────────────────────────────────────── */
     .tip-wrap {
       position: relative;
@@ -1450,6 +1478,13 @@
       <div class="logo-dot"></div>
       Ramplio
     </div>
+    <nav class="flow-stepper" v-if="['setup','live','result'].includes(view)" aria-label="測試流程進度">
+      <span class="flow-step" :class="{ active: view === 'setup', done: view === 'live' || view === 'result' }">① 設定</span>
+      <span class="flow-sep">→</span>
+      <span class="flow-step" :class="{ active: view === 'live', done: view === 'result' }">② 執行中</span>
+      <span class="flow-sep">→</span>
+      <span class="flow-step" :class="{ active: view === 'result' }">③ 結果</span>
+    </nav>
     <div class="header-right">
       <div v-if="view === 'live' && snap.stage_total > 0" class="stage-info">
         <span class="stage-label">Stage {{ snap.stage_current }}/{{ snap.stage_total }}</span>
@@ -1870,7 +1905,7 @@
         <div class="kpi-value" :class="latClass(snap.p99_ms)">{{ snap.p99_ms ?? 0 }}ms</div>
         <div class="kpi-footer">
           <div class="kpi-sub">p50 {{ snap.p50_ms ?? 0 }}ms · p90 {{ snap.p90_ms ?? 0 }}ms</div>
-          <div class="kpi-health" :class="latClass(snap.p99_ms)">{{ latLabel(snap.p99_ms) }}</div>
+          <div class="kpi-health" :class="latClass(snap.p99_ms)">{{ snap.verdict?.speed?.label || latLabel(snap.p99_ms) }}</div>
         </div>
       </div>
 
@@ -1894,7 +1929,7 @@
         <div class="kpi-value" :class="errClass(snap.error_pct)">{{ fmt2(snap.error_pct) }}%</div>
         <div class="kpi-footer">
           <div class="kpi-sub">{{ snap.errors ?? 0 }} errors</div>
-          <div class="kpi-health" :class="errClass(snap.error_pct)">{{ errLabel(snap.error_pct) }}</div>
+          <div class="kpi-health" :class="errClass(snap.error_pct)">{{ snap.verdict?.stability?.label || errLabel(snap.error_pct) }}</div>
         </div>
       </div>
 
@@ -2096,7 +2131,7 @@
         <div class="kpi-value" :class="latClass(finalResult?.p99_ms)">{{ finalResult?.p99_ms ?? 0 }}ms</div>
         <div class="kpi-footer">
           <div class="kpi-sub">p50 {{ finalResult?.p50_ms ?? 0 }}ms · Mean {{ finalResult?.mean_ms ?? 0 }}ms</div>
-          <div class="kpi-health" :class="latClass(finalResult?.p99_ms)">{{ latLabel(finalResult?.p99_ms) }}</div>
+          <div class="kpi-health" :class="latClass(finalResult?.p99_ms)">{{ finalResult?.verdict?.speed?.label || latLabel(finalResult?.p99_ms) }}</div>
         </div>
       </div>
       <div class="kpi">
@@ -2118,7 +2153,7 @@
         <div class="kpi-value" :class="errClass(finalResult?.error_pct)">{{ fmt2(finalResult?.error_pct) }}%</div>
         <div class="kpi-footer">
           <div class="kpi-sub">{{ finalResult?.errors ?? 0 }} errors</div>
-          <div class="kpi-health" :class="errClass(finalResult?.error_pct)">{{ errLabel(finalResult?.error_pct) }}</div>
+          <div class="kpi-health" :class="errClass(finalResult?.error_pct)">{{ finalResult?.verdict?.stability?.label || errLabel(finalResult?.error_pct) }}</div>
         </div>
       </div>
       <div class="kpi">
@@ -3105,11 +3140,35 @@ createApp({
         bottleneck = `最花時間的步驟是「${slowest.name}」（${humanMs(slowest.p99_ms)}內完成）。`;
       }
 
+      // Prefer the server's shared reading (reporter.Interpret) so the browser
+      // shows the EXACT same plain language as the CLI/HTML/JSON. The dashboard
+      // only adds its load-aware "next step" and bilingual title on top. The
+      // local computation below is kept purely as a fallback if verdict is absent.
+      const v = r.verdict;
+      if (v && v.level) {
+        const levelMap = { pass: 'stable', warn: 'borderline', fail: 'overloaded' };
+        const titleMap = { pass: 'Stable — 系統穩定', warn: 'Borderline — 接近極限', fail: 'Overloaded — 系統超載' };
+        const nextMap = {
+          pass: `系統還有餘裕，可嘗試提升至 ${moreLoad} 繼續探索系統上限。`,
+          warn: '延遲偏高或有少量錯誤，建議先調查根因或優化服務，再提高負載。',
+          fail: `建議降低負載至 ${nextLoad} 或先擴容，再重新測試找出穩定點。`,
+        };
+        const desc = `在 ${loadCtx} 壓力下，反應速度 ${v.speed.icon} ${v.speed.label}——99% 的人在 ${v.speed.value}內收到回應（${v.speed.note}）。穩定度 ${v.stability.label}——${v.stability.note}`;
+        return {
+          level: levelMap[v.level] || 'stable',
+          icon: v.icon,
+          title: titleMap[v.level] || v.verdict,
+          desc,
+          bottleneck: v.bottleneck || bottleneck,
+          next: nextMap[v.level] || '',
+        };
+      }
+
+      // Fallback: local computation. 門檻與 Go reporter.Interpret 一致。
       const spd = speedReading(p99);
       const stb = stabilityReading(errPct, r.total, r.errors ?? 0);
       const desc = `在 ${loadCtx} 壓力下，反應速度 ${spd.icon} ${spd.label}——99% 的人在 ${humanMs(p99)}內收到回應（${spd.note}）。穩定度 ${stb.label}——${stb.note}`;
 
-      // 門檻與 Go reporter.Interpret 一致：fail→overloaded、warn→borderline、pass→stable
       if (errPct >= 5 || p99 >= 3000) {
         return {
           level: 'overloaded', icon: '✗', title: 'Overloaded — 系統超載',
