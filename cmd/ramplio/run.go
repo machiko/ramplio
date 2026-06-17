@@ -103,14 +103,13 @@ func newRunCmd() *cobra.Command {
 
 			// CLI mode: --url or --scenario required.
 			if scenarioFile == "" && url == "" {
-				fmt.Fprintln(os.Stderr, `No target specified. Quick start:
-
-  ramplio run --url https://example.com                     test with 1 user for 30 seconds
-  ramplio run --url https://example.com --vus 50 -d 1m      50 concurrent users for 1 minute
-  ramplio run --scenario my-test.yaml                       run a YAML scenario file
-  ramplio run --dashboard                                   open the visual control panel
-
-New to load testing? Run:  ramplio run --dashboard`)
+				printNextSteps(os.Stderr, "\n還沒指定測試目標。可以這樣開始：",
+					nextStep{"測 1 個用戶 30 秒", "ramplio run --url https://example.com"},
+					nextStep{"50 個同時用戶測 1 分鐘", "ramplio run --url https://example.com --vus 50 -d 1m"},
+					nextStep{"執行 YAML 情境檔", "ramplio run --scenario my-test.yaml"},
+					nextStep{"開視覺控制面板（最推薦）", "ramplio run --dashboard"},
+				)
+				fmt.Fprintln(os.Stderr, "\n  第一次用壓力測試？建議先跑：ramplio run --dashboard")
 				return fmt.Errorf("--url or --scenario is required")
 			}
 			if scenarioFile != "" && url != "" {
@@ -129,7 +128,7 @@ New to load testing? Run:  ramplio run --dashboard`)
 				sum, err = runRPS(url, method, rps, duration, headers, body, httpCfg)
 			} else {
 				if !cmd.Flags().Changed("vus") {
-					fmt.Println("Tip: running with 1 virtual user (default). Use --vus 50 to simulate more traffic.")
+					fmt.Println("提示：目前用 1 個虛擬用戶（預設）。加上 --vus 50 可模擬更多同時流量。")
 				}
 				sum, err = runURL(url, method, vus, duration, headers, body, httpCfg)
 			}
@@ -189,16 +188,16 @@ New to load testing? Run:  ramplio run --dashboard`)
 			}
 
 			if thresholdMsg != "" {
-				fmt.Fprintf(os.Stderr, "\n✗ Threshold exceeded: %s\n", thresholdMsg)
-				fmt.Fprintln(os.Stderr, "\n  Common causes: server overloaded, API rate limit, auth expired, slow database")
-				fmt.Fprintln(os.Stderr, "  Try:  reduce --vus  ·  check server logs  ·  run with --dashboard for live view")
+				fmt.Fprintf(os.Stderr, "\n✗ 未達標準：%s\n", thresholdMsg)
+				fmt.Fprintln(os.Stderr, "\n  常見原因：伺服器過載、API 流量限制、認證過期、資料庫太慢")
+				fmt.Fprintln(os.Stderr, "  可以試：降低 --vus　·　檢查伺服器日誌　·　加 --dashboard 即時觀察")
 				if !ignoreErrors {
 					os.Exit(1)
 				}
 			}
 			if sum.ErrorRate() > 0 && thresholds == nil {
-				fmt.Fprintf(os.Stderr, "\nWarning: %.1f%% error rate detected (%d errors).\n", sum.ErrorRate(), sum.Errors)
-				fmt.Fprintln(os.Stderr, "  Add thresholds to a scenario YAML for pass/fail control: ramplio run --scenario my.yaml")
+				fmt.Fprintf(os.Stderr, "\n警告：偵測到 %.1f%% 的錯誤率（共 %d 個錯誤）。\n", sum.ErrorRate(), sum.Errors)
+				fmt.Fprintln(os.Stderr, "  想要自動判定通過/失敗，可在情境 YAML 設定 thresholds：ramplio run --scenario my.yaml")
 				if !ignoreErrors {
 					os.Exit(1)
 				}

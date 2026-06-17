@@ -12,6 +12,12 @@ var rootCmd = &cobra.Command{
 	Short:   "Developer-first HTTP stress testing tool",
 	Long:    "Ramplio generates configurable load against HTTP APIs and websites, collecting real-time performance metrics.",
 	Version: "1.0.0",
+	// With no subcommand, show a friendly front door pointing at the three
+	// primary paths instead of dumping the full command help. --help and
+	// --version are handled by cobra before Run and are unaffected.
+	Run: func(cmd *cobra.Command, args []string) {
+		printWelcome(os.Stdout)
+	},
 }
 
 func init() {
