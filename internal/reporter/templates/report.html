@@ -4,16 +4,37 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Ramplio Report</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <style>
+    :root {
+      --bg: #202124; --surface: #292a2d; --card: #303134; --border: #3c4043;
+      --text: #e8eaed; --muted: #9aa0a6; --accent: #8ab4f8;
+      --green: #81c995; --amber: #fdd663; --red: #f28b82;
+      --g-blue: #4285f4; --g-red: #ea4335; --g-yellow: #fbbc05; --g-green: #34a853;
+      --font-sans: 'Roboto','Noto Sans TC',system-ui,-apple-system,'Segoe UI',sans-serif;
+      --font-mono: 'Roboto Mono',ui-monospace,'SF Mono',monospace;
+      --radius: 12px; --radius-lg: 16px;
+      --shadow-1: 0 1px 2px rgba(0,0,0,.3), 0 1px 3px 1px rgba(0,0,0,.15);
+      --shadow-2: 0 1px 3px rgba(0,0,0,.3), 0 4px 8px 3px rgba(0,0,0,.15);
+    }
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #0b0e1a; color: #e2e8f0; min-height: 100vh; padding: 2rem;
+      font-family: var(--font-sans);
+      -webkit-font-smoothing: antialiased;
+      background: var(--bg); color: var(--text); min-height: 100vh; padding: 2.5rem 2rem;
+      max-width: 1100px; margin: 0 auto;
+    }
+    /* Google four-colour top band — shared identity with the dashboard */
+    body::before {
+      content: ""; position: fixed; top: 0; left: 0; right: 0; height: 4px; z-index: 10;
+      background: linear-gradient(90deg, var(--g-blue) 0 25%, var(--g-red) 25% 50%, var(--g-yellow) 50% 75%, var(--g-green) 75% 100%);
     }
     .header { margin-bottom: 2rem; }
-    .header h1 { font-size: 1.4rem; font-weight: 700; letter-spacing: -.02em; }
-    .header .meta { color: #475569; font-size: 0.82rem; margin-top: 0.25rem; }
+    .header h1 { font-size: 1.5rem; font-weight: 500; letter-spacing: -.01em; }
+    .header .meta { color: var(--muted); font-size: 0.82rem; margin-top: 0.25rem; }
 
     .kpi-grid {
       display: grid;
@@ -21,64 +42,66 @@
       gap: 1rem; margin-bottom: 1.5rem;
     }
     .kpi {
-      background: #131929; border: 1px solid #1e2d45;
-      border-radius: 12px; padding: 1.25rem 1.5rem;
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: var(--radius-lg); padding: 1.25rem 1.5rem;
+      box-shadow: var(--shadow-1);
     }
     .kpi-label {
       font-size: 0.7rem; text-transform: uppercase; letter-spacing: .08em;
-      color: #475569; margin-bottom: 0.5rem;
+      color: #9aa0a6; margin-bottom: 0.5rem;
     }
     .kpi-value { font-size: 2rem; font-weight: 700; line-height: 1; }
-    .kpi-sub   { font-size: 0.75rem; color: #475569; margin-top: 0.3rem; }
-    .ok   { color: #34d399; }
-    .warn { color: #fbbf24; }
-    .bad  { color: #f87171; }
+    .kpi-sub   { font-size: 0.75rem; color: #9aa0a6; margin-top: 0.3rem; }
+    .ok   { color: #81c995; }
+    .warn { color: #fdd663; }
+    .bad  { color: #f28b82; }
 
     .card {
-      background: #131929; border: 1px solid #1e2d45;
-      border-radius: 12px; padding: 1.5rem; margin-bottom: 1.25rem;
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: var(--radius-lg); padding: 1.5rem; margin-bottom: 1.25rem;
+      box-shadow: var(--shadow-1);
     }
     .card-title {
       font-size: 0.75rem; font-weight: 600; text-transform: uppercase;
-      letter-spacing: .07em; color: #475569; margin-bottom: 1.25rem;
+      letter-spacing: .07em; color: #9aa0a6; margin-bottom: 1.25rem;
     }
     .chart-wrap { position: relative; height: 200px; }
 
     /* ── Per-step table ───────────────────────────────────── */
     .step-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
     .step-table th {
-      color: #475569; font-weight: 500; font-size: 0.75rem;
+      color: #9aa0a6; font-weight: 500; font-size: 0.75rem;
       text-transform: uppercase; letter-spacing: .06em;
       padding: 0 0.75rem 0.75rem; text-align: right;
     }
     .step-table th:first-child { text-align: left; }
     .step-table td {
-      padding: 0.65rem 0.75rem; border-top: 1px solid #1a2540;
+      padding: 0.65rem 0.75rem; border-top: 1px solid #3c4043;
       text-align: right; font-variant-numeric: tabular-nums;
     }
     .step-table td:first-child { text-align: left; font-weight: 500; }
     .step-table tr.bottleneck td:first-child::after {
       content: " ◀";
-      font-size: 0.65rem; color: #f87171; margin-left: 0.4rem; vertical-align: middle;
+      font-size: 0.65rem; color: #f28b82; margin-left: 0.4rem; vertical-align: middle;
     }
 
     /* latency bar inside table cell */
     .bar-cell { display: flex; align-items: center; gap: 0.5rem; justify-content: flex-end; }
     .bar-track {
       flex: 1; max-width: 80px; height: 4px;
-      background: #1e2d45; border-radius: 2px; overflow: hidden;
+      background: #3c4043; border-radius: 2px; overflow: hidden;
     }
-    .bar-fill { height: 100%; border-radius: 2px; background: #3b82f6; }
-    .bar-fill.warn { background: #fbbf24; }
-    .bar-fill.bad  { background: #f87171; }
+    .bar-fill { height: 100%; border-radius: 2px; background: #8ab4f8; }
+    .bar-fill.warn { background: #fdd663; }
+    .bar-fill.bad  { background: #f28b82; }
 
     .badge {
       display: inline-block; padding: 2px 7px; border-radius: 4px;
       font-size: 0.7rem; font-weight: 600;
     }
-    .badge.ok  { background: #052e16; color: #34d399; }
-    .badge.warn{ background: #422006; color: #fbbf24; }
-    .badge.bad { background: #450a0a; color: #f87171; }
+    .badge.ok  { background: #133a28; color: #81c995; }
+    .badge.warn{ background: #3e2f0a; color: #fdd663; }
+    .badge.bad { background: #3e1c1a; color: #f28b82; }
 
     /* ── Verdict card ─────────────────────────────────────── */
     .verdict {
@@ -86,45 +109,45 @@
       border-radius: 12px; padding: 1.25rem 1.5rem; margin-bottom: 1.5rem;
       border-width: 1px; border-style: solid;
     }
-    .verdict.pass { background: #052e16; border-color: #166534; }
-    .verdict.warn { background: #422006; border-color: #92400e; }
-    .verdict.fail { background: #450a0a; border-color: #991b1b; }
+    .verdict.pass { background: #133a28; border-color: #2e6b45; }
+    .verdict.warn { background: #3e2f0a; border-color: #6b4e12; }
+    .verdict.fail { background: #3e1c1a; border-color: #8c3a32; }
     .verdict-icon {
       font-size: 2rem; line-height: 1; flex-shrink: 0; margin-top: 0.1rem;
     }
-    .verdict.pass .verdict-icon { color: #34d399; }
-    .verdict.warn .verdict-icon { color: #fbbf24; }
-    .verdict.fail .verdict-icon { color: #f87171; }
+    .verdict.pass .verdict-icon { color: #81c995; }
+    .verdict.warn .verdict-icon { color: #fdd663; }
+    .verdict.fail .verdict-icon { color: #f28b82; }
     .verdict-label {
       font-weight: 700; font-size: 1rem; margin-bottom: 0.6rem;
     }
-    .verdict.pass .verdict-label { color: #34d399; }
-    .verdict.warn .verdict-label { color: #fbbf24; }
-    .verdict.fail .verdict-label { color: #f87171; }
+    .verdict.pass .verdict-label { color: #81c995; }
+    .verdict.warn .verdict-label { color: #fdd663; }
+    .verdict.fail .verdict-label { color: #f28b82; }
     .verdict-lines { display: flex; flex-direction: column; gap: 0.25rem; }
-    .verdict-lines span { font-size: 0.875rem; color: #cbd5e1; }
-    .verdict-lines span::before { font-weight: 600; color: #94a3b8; margin-right: 0.3rem; }
+    .verdict-lines span { font-size: 0.875rem; color: #bdc1c6; }
+    .verdict-lines span::before { font-weight: 600; color: #9aa0a6; margin-right: 0.3rem; }
 
     /* ── Diagnosis cards ──────────────────────────────────── */
-    .diag-section-title { font-size: 1rem; font-weight: 700; margin: 1.75rem 0 0.75rem; color: #cbd5e1; }
+    .diag-section-title { font-size: 1rem; font-weight: 700; margin: 1.75rem 0 0.75rem; color: #bdc1c6; }
     .diag {
       border-radius: 10px; padding: 1rem 1.25rem; margin-bottom: 0.75rem;
-      border-left: 3px solid #475569; background: #111a2e;
+      border-left: 3px solid #9aa0a6; background: #303134;
     }
-    .diag.critical { border-left-color: #f87171; }
-    .diag.warn     { border-left-color: #fbbf24; }
-    .diag.info     { border-left-color: #60a5fa; }
-    .diag.good     { border-left-color: #34d399; }
-    .diag-title    { font-weight: 600; font-size: 0.95rem; color: #e2e8f0; margin-bottom: 0.35rem; }
-    .diag-cause    { font-size: 0.85rem; color: #cbd5e1; margin-bottom: 0.25rem; }
-    .diag-evidence { font-size: 0.8rem; color: #94a3b8; margin-bottom: 0.25rem; font-variant-numeric: tabular-nums; }
-    .diag-action   { font-size: 0.85rem; color: #cbd5e1; }
-    .diag-action::before { content: "→ 建議："; color: #94a3b8; font-weight: 600; }
+    .diag.critical { border-left-color: #f28b82; }
+    .diag.warn     { border-left-color: #fdd663; }
+    .diag.info     { border-left-color: #8ab4f8; }
+    .diag.good     { border-left-color: #81c995; }
+    .diag-title    { font-weight: 600; font-size: 0.95rem; color: #e8eaed; margin-bottom: 0.35rem; }
+    .diag-cause    { font-size: 0.85rem; color: #bdc1c6; margin-bottom: 0.25rem; }
+    .diag-evidence { font-size: 0.8rem; color: #9aa0a6; margin-bottom: 0.25rem; font-variant-numeric: tabular-nums; }
+    .diag-action   { font-size: 0.85rem; color: #bdc1c6; }
+    .diag-action::before { content: "→ 建議："; color: #9aa0a6; font-weight: 600; }
 
     /* ── Summary table ────────────────────────────────────── */
     .summary-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
-    .summary-table td { padding: 0.5rem 0; border-bottom: 1px solid #1a2540; }
-    .summary-table td:first-child { color: #64748b; }
+    .summary-table td { padding: 0.5rem 0; border-bottom: 1px solid #3c4043; }
+    .summary-table td:first-child { color: #9aa0a6; }
     .summary-table td:last-child  { text-align: right; font-variant-numeric: tabular-nums; }
     .summary-table tr:last-child td { border-bottom: none; }
   </style>
@@ -186,12 +209,12 @@
   </div>
   <div class="kpi">
     <div class="kpi-label">p50 Latency</div>
-    <div class="kpi-value">{{.Latency.P50Ms}}<span style="font-size:1rem;font-weight:400;color:#475569">ms</span></div>
+    <div class="kpi-value">{{.Latency.P50Ms}}<span style="font-size:1rem;font-weight:400;color:#9aa0a6">ms</span></div>
   </div>
   <div class="kpi">
     <div class="kpi-label">p99 Latency</div>
     <div class="kpi-value {{if gt .Latency.P99Ms 1000}}bad{{else if gt .Latency.P99Ms 500}}warn{{else}}ok{{end}}">
-      {{.Latency.P99Ms}}<span style="font-size:1rem;font-weight:400;color:#475569">ms</span>
+      {{.Latency.P99Ms}}<span style="font-size:1rem;font-weight:400;color:#9aa0a6">ms</span>
     </div>
   </div>
 </div>
@@ -278,8 +301,8 @@ const chartDefaults = {
   maintainAspectRatio: false,
   plugins: { legend: { display: false } },
   scales: {
-    x: { grid: { color: '#1e2d45' }, ticks: { color: '#64748b' } },
-    y: { grid: { color: '#1e2d45' }, ticks: { color: '#64748b', callback: v => v + 'ms' } }
+    x: { grid: { color: '#3c4043' }, ticks: { color: '#9aa0a6' } },
+    y: { grid: { color: '#3c4043' }, ticks: { color: '#9aa0a6', callback: v => v + 'ms' } }
   }
 };
 
@@ -290,7 +313,7 @@ new Chart(document.getElementById('overallChart'), {
     labels: ['p50', 'p90', 'p95', 'p99', 'max'],
     datasets: [{
       data: [{{.Latency.P50Ms}}, {{.Latency.P90Ms}}, {{.Latency.P95Ms}}, {{.Latency.P99Ms}}, {{.Latency.MaxMs}}],
-      backgroundColor: ['#3b82f6','#6366f1','#8b5cf6','#a855f7','#ec4899'],
+      backgroundColor: ['#8ab4f8','#4285f4','#8ab4f8','#aecbfa','#ea4335'],
       borderRadius: 6,
     }]
   },
@@ -317,9 +340,9 @@ new Chart(document.getElementById('stepChart'), {
   data: {
     labels: stepData.map(s => s.name),
     datasets: [
-      { label: 'p50', data: stepData.map(s => s.p50), backgroundColor: '#3b82f6', borderRadius: 4 },
-      { label: 'p90', data: stepData.map(s => s.p90), backgroundColor: '#8b5cf6', borderRadius: 4 },
-      { label: 'p99', data: stepData.map(s => s.p99), backgroundColor: '#f87171', borderRadius: 4 },
+      { label: 'p50', data: stepData.map(s => s.p50), backgroundColor: '#8ab4f8', borderRadius: 4 },
+      { label: 'p90', data: stepData.map(s => s.p90), backgroundColor: '#8ab4f8', borderRadius: 4 },
+      { label: 'p99', data: stepData.map(s => s.p99), backgroundColor: '#f28b82', borderRadius: 4 },
     ]
   },
   options: {
@@ -328,12 +351,12 @@ new Chart(document.getElementById('stepChart'), {
     plugins: {
       legend: {
         display: true,
-        labels: { color: '#94a3b8', boxWidth: 12, font: { size: 11 } }
+        labels: { color: '#9aa0a6', boxWidth: 12, font: { size: 11 } }
       }
     },
     scales: {
-      x: { grid: { color: '#1e2d45' }, ticks: { color: '#64748b' } },
-      y: { grid: { color: '#1e2d45' }, ticks: { color: '#64748b', callback: v => v + 'ms' } }
+      x: { grid: { color: '#3c4043' }, ticks: { color: '#9aa0a6' } },
+      y: { grid: { color: '#3c4043' }, ticks: { color: '#9aa0a6', callback: v => v + 'ms' } }
     }
   }
 });

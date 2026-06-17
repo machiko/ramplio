@@ -5,38 +5,62 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Ramplio</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
   <script src="https://unpkg.com/vue@3.5/dist/vue.global.prod.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <style>
     :root {
-      --bg:        #0f1117;
-      --surface:   #161b27;
-      --card:      #1e2330;
-      --border:    #2d3748;
-      --accent:    #7c3aed;
-      --accent2:   #a78bfa;
-      --text:      #e2e8f0;
-      --muted:     #64748b;
-      --green:     #34d399;
-      --amber:     #fbbf24;
-      --red:       #f87171;
-      --blue:      #60a5fa;
-      --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
+      /* Material dark surfaces (Google grey family) */
+      --bg:        #202124;
+      --surface:   #292a2d;
+      --card:      #303134;
+      --elevated:  #35363a;
+      --border:    #3c4043;
 
-      --radius:    8px;
-      --input-h:   40px;
+      /* Google blue as primary (dark-mode tint) */
+      --accent:    #8ab4f8;
+      --accent2:   #aecbfa;
+
+      --text:      #e8eaed;
+      --muted:     #9aa0a6;
+
+      /* Material dark semantic colours */
+      --green:     #81c995;
+      --amber:     #fdd663;
+      --red:       #f28b82;
+      --blue:      #8ab4f8;
+
+      /* Google signature four colours (for identity moments) */
+      --g-blue:    #4285f4;
+      --g-red:     #ea4335;
+      --g-yellow:  #fbbc05;
+      --g-green:   #34a853;
+
+      --font-sans: 'Roboto', 'Noto Sans TC', system-ui, -apple-system, 'Segoe UI', sans-serif;
+      --font-mono: 'Roboto Mono', ui-monospace, 'SF Mono', monospace;
+
+      --radius:      12px;
+      --radius-lg:   16px;
+      --radius-pill: 999px;
+      --input-h:     44px;
+
+      /* Material elevation */
+      --shadow-1: 0 1px 2px rgba(0,0,0,.3), 0 1px 3px 1px rgba(0,0,0,.15);
+      --shadow-2: 0 1px 3px rgba(0,0,0,.3), 0 4px 8px 3px rgba(0,0,0,.15);
+      --shadow-3: 0 4px 8px rgba(0,0,0,.3), 0 8px 16px 6px rgba(0,0,0,.15);
+
+      --ease: cubic-bezier(0.2, 0, 0, 1);
     }
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; }
     body {
       background: var(--bg);
-      background-image:
-        radial-gradient(ellipse 80% 50% at 50% -10%, rgba(124,58,237,0.18) 0%, transparent 100%),
-        radial-gradient(circle at 1px 1px, rgba(255,255,255,0.045) 1px, transparent 0);
-      background-size: 100% 100%, 24px 24px;
+      background-image: radial-gradient(ellipse 90% 55% at 50% -15%, rgba(138,180,248,0.10) 0%, transparent 70%);
       color: var(--text);
-      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      font-family: var(--font-sans);
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
       display: flex;
       flex-direction: column;
       min-height: 100vh;
@@ -44,31 +68,45 @@
 
     /* ── Header ─────────────────────────────────────── */
     .header {
+      position: relative;
       display: flex;
       align-items: center;
       justify-content: space-between;
       padding: 0 24px;
-      height: 52px;
+      height: 56px;
       background: var(--surface);
       border-bottom: 1px solid var(--border);
       flex-shrink: 0;
-      transition: border-color 0.4s;
+      z-index: 5;
     }
-    .header.is-live { border-bottom-color: rgba(52,211,153,0.5); }
+    /* Google four-colour flowing band — the memorable "running" moment */
+    .header.is-live::after {
+      content: "";
+      position: absolute;
+      left: 0; right: 0; bottom: -1px;
+      height: 3px;
+      background: linear-gradient(90deg,
+        var(--g-blue), var(--g-red), var(--g-yellow), var(--g-green), var(--g-blue));
+      background-size: 300% 100%;
+      animation: googleFlow 3s linear infinite;
+    }
+    @keyframes googleFlow {
+      from { background-position: 0 0; }
+      to   { background-position: 300% 0; }
+    }
     .logo {
-      font-size: 15px;
-      font-weight: 700;
-      letter-spacing: -0.3px;
-      color: var(--accent2);
+      font-size: 18px;
+      font-weight: 500;
+      letter-spacing: 0;
+      color: var(--text);
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 10px;
     }
     .logo-dot {
-      width: 10px; height: 10px;
+      width: 12px; height: 12px;
       border-radius: 50%;
-      background: var(--accent);
-      box-shadow: 0 0 8px var(--accent);
+      background: conic-gradient(var(--g-blue) 0 90deg, var(--g-red) 90deg 180deg, var(--g-yellow) 180deg 270deg, var(--g-green) 270deg 360deg);
     }
     .header-right {
       display: flex;
@@ -128,7 +166,7 @@
       transition: all 0.3s;
     }
     .flow-step.active {
-      color: #fff;
+      color: #202124;
       background: var(--accent);
       border-color: var(--accent);
       box-shadow: 0 0 8px var(--accent);
@@ -161,7 +199,7 @@
       flex-shrink: 0;
       transition: background 0.15s;
     }
-    .tip-icon:hover { background: var(--accent); color: #fff; }
+    .tip-icon:hover { background: var(--accent); color: #202124; }
     .tip-box {
       display: none;
       position: absolute;
@@ -169,7 +207,7 @@
       left: 50%;
       transform: translateX(-50%);
       width: 220px;
-      background: #0d111b;
+      background: #202124;
       border: 1px solid var(--border);
       border-radius: var(--radius);
       padding: 10px 12px;
@@ -226,7 +264,8 @@
     .setup-form-box {
       background: var(--card);
       border: 1px solid var(--border);
-      border-radius: var(--radius);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-1);
       padding: 28px 32px 24px;
     }
     .field {
@@ -264,7 +303,7 @@
       -webkit-appearance: none;
     }
     .field input:focus,
-    .field select:focus { border-color: var(--accent2); }
+    .field select:focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
     .field select { cursor: pointer; }
     .field-row {
       display: grid;
@@ -276,18 +315,19 @@
       height: 44px;
       margin-top: 8px;
       background: var(--accent);
-      color: #fff;
+      color: #202124;
       border: none;
-      border-radius: var(--radius);
+      border-radius: var(--radius-pill);
       font-size: 14px;
-      font-weight: 600;
+      font-weight: 500;
       cursor: pointer;
-      transition: opacity 0.15s, transform 0.1s;
+      box-shadow: var(--shadow-1);
+      transition: filter .2s var(--ease), box-shadow .2s var(--ease), transform .1s var(--ease);
       letter-spacing: 0.01em;
     }
-    .btn-run:hover:not(:disabled) { opacity: 0.88; }
+    .btn-run:hover:not(:disabled) { filter: brightness(1.06); box-shadow: var(--shadow-2); }
     .btn-run:active:not(:disabled) { transform: scale(0.99); }
-    .btn-run:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-run:disabled { opacity: 0.4; cursor: not-allowed; box-shadow: none; }
     .error-msg {
       margin-top: 12px;
       padding: 10px 14px;
@@ -384,9 +424,9 @@
       padding: 1px 6px;
       border-radius: 4px;
     }
-    .kpi-health.ok   { background: rgba(52,211,153,.15); color: var(--green); }
-    .kpi-health.warn { background: rgba(251,191,36,.15); color: var(--amber); }
-    .kpi-health.bad  { background: rgba(248,113,113,.15); color: var(--red); }
+    .kpi-health.ok   { background: rgba(129,201,149,.15); color: var(--green); }
+    .kpi-health.warn { background: rgba(253,214,99,.15); color: var(--amber); }
+    .kpi-health.bad  { background: rgba(242,139,130,.15); color: var(--red); }
 
     /* ── Charts ──────────────────────────────────────── */
     .charts-area {
@@ -459,7 +499,7 @@
       flex-shrink: 0;
     }
     .pct-name { font-weight: 500; }
-    .pct-meaning { color: #475569; }
+    .pct-meaning { color: #5f6368; }
 
     /* ── Interpretation bar ─────────────────────────── */
     .interpret-bar {
@@ -564,18 +604,18 @@
       border-bottom: 1px solid var(--border);
       border-left: 4px solid transparent;
     }
-    .verdict-card.stable     { border-left-color: var(--green); background: rgba(52,211,153,.04); }
-    .verdict-card.borderline { border-left-color: var(--amber); background: rgba(251,191,36,.04); }
-    .verdict-card.overloaded { border-left-color: var(--red);   background: rgba(248,113,113,.04); }
+    .verdict-card.stable     { border-left-color: var(--green); background: rgba(129,201,149,.04); }
+    .verdict-card.borderline { border-left-color: var(--amber); background: rgba(253,214,99,.04); }
+    .verdict-card.overloaded { border-left-color: var(--red);   background: rgba(242,139,130,.04); }
     .verdict-icon-lg {
       width: 48px; height: 48px;
       border-radius: 50%;
       display: flex; align-items: center; justify-content: center;
       font-size: 1.4rem; line-height: 1; flex-shrink: 0;
     }
-    .verdict-card.stable     .verdict-icon-lg { color: var(--green);  background: rgba(52,211,153,.12); }
-    .verdict-card.borderline .verdict-icon-lg { color: var(--amber);  background: rgba(251,191,36,.12); }
-    .verdict-card.overloaded .verdict-icon-lg { color: var(--red);    background: rgba(248,113,113,.12); }
+    .verdict-card.stable     .verdict-icon-lg { color: var(--green);  background: rgba(129,201,149,.12); }
+    .verdict-card.borderline .verdict-icon-lg { color: var(--amber);  background: rgba(253,214,99,.12); }
+    .verdict-card.overloaded .verdict-icon-lg { color: var(--red);    background: rgba(242,139,130,.12); }
     .verdict-badge {
       display: inline-flex;
       align-items: center;
@@ -586,9 +626,9 @@
       border-radius: 20px;
       margin-bottom: 8px;
     }
-    .verdict-badge.stable    { background: rgba(52,211,153,.15); color: var(--green); }
-    .verdict-badge.borderline{ background: rgba(251,191,36,.15);  color: var(--amber); }
-    .verdict-badge.overloaded{ background: rgba(248,113,113,.15); color: var(--red); }
+    .verdict-badge.stable    { background: rgba(129,201,149,.15); color: var(--green); }
+    .verdict-badge.borderline{ background: rgba(253,214,99,.15);  color: var(--amber); }
+    .verdict-badge.overloaded{ background: rgba(242,139,130,.15); color: var(--red); }
     .verdict-lines { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
     .verdict-line  { font-size: 13px; color: var(--text); line-height: 1.6; }
     .verdict-desc {
@@ -664,7 +704,7 @@
       background: var(--accent);
       border: none;
       border-radius: var(--radius);
-      color: #fff;
+      color: #202124;
       font-size: 13px;
       font-weight: 600;
       cursor: pointer;
@@ -721,9 +761,9 @@
       border-radius: 3px;
       white-space: nowrap;
     }
-    .summary-health.ok   { background: rgba(52,211,153,.15); color: var(--green); }
-    .summary-health.warn { background: rgba(251,191,36,.15);  color: var(--amber); }
-    .summary-health.bad  { background: rgba(248,113,113,.15); color: var(--red); }
+    .summary-health.ok   { background: rgba(129,201,149,.15); color: var(--green); }
+    .summary-health.warn { background: rgba(253,214,99,.15);  color: var(--amber); }
+    .summary-health.bad  { background: rgba(242,139,130,.15); color: var(--red); }
     .summary-benchmark {
       margin-top: 14px;
       padding-top: 10px;
@@ -771,7 +811,7 @@
     /* ── Verdict basis ───────────────────────────────── */
     .verdict-basis {
       font-size: 11px;
-      color: #4a5568;
+      color: #5f6368;
       padding: 5px 10px;
       background: rgba(255,255,255,0.03);
       border-left: 2px solid var(--border);
@@ -803,7 +843,7 @@
       white-space: nowrap;
     }
     .mode-tab:hover { color: var(--text); }
-    .mode-tab.active { background: var(--accent); color: #fff; box-shadow: 0 2px 8px rgba(124,58,237,0.45); }
+    .mode-tab.active { background: var(--accent); color: #202124; box-shadow: 0 2px 8px rgba(138,180,248,0.45); }
 
     /* ── File upload zone ────────────────────────────── */
     .upload-zone {
@@ -821,7 +861,7 @@
     }
     .upload-zone:hover {
       border-color: var(--accent2);
-      background: rgba(124,58,237,.05);
+      background: rgba(138,180,248,.05);
     }
     .upload-icon { font-size: 28px; line-height: 1; }
     .upload-label { font-size: 14px; font-weight: 500; color: var(--text); }
@@ -829,8 +869,8 @@
     .upload-loading {
       margin-top: 10px;
       padding: 8px 14px;
-      background: rgba(124,58,237,.1);
-      border: 1px solid rgba(124,58,237,.3);
+      background: rgba(138,180,248,.1);
+      border: 1px solid rgba(138,180,248,.3);
       border-radius: var(--radius);
       color: var(--accent2);
       font-size: 13px;
@@ -860,10 +900,10 @@
     }
 
     /* ── HAR Import ─────────────────────────────────── */
-    .har-zone { border-color: #2d4a6e; }
+    .har-zone { border-color: #3c4043; }
     .har-zone:hover, .har-zone.dragging {
       border-color: var(--blue);
-      background: rgba(96,165,250,.05);
+      background: rgba(138,180,248,.05);
     }
     .har-steps-hint {
       display: flex;
@@ -955,7 +995,7 @@
     }
     .radio-card input { display: none; }
     .radio-card:hover { border-color: var(--accent2); }
-    .radio-card.checked { border-color: var(--accent); background: rgba(124,58,237,.08); }
+    .radio-card.checked { border-color: var(--accent); background: rgba(138,180,248,.08); }
     .radio-card-icon { font-size: 24px; margin-bottom: 8px; line-height: 1; }
     .radio-card-title { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
     .radio-card-desc  { font-size: 11px; color: var(--muted); line-height: 1.45; }
@@ -978,7 +1018,7 @@
       cursor: pointer;
       transition: border-color 0.15s, color 0.15s, background 0.15s;
     }
-    .chip.active { border-color: var(--accent); color: var(--accent2); background: rgba(124,58,237,.1); }
+    .chip.active { border-color: var(--accent); color: var(--accent2); background: rgba(138,180,248,.1); }
     .chip:hover:not(.active) { border-color: var(--accent2); color: var(--text); }
 
     /* range slider */
@@ -999,7 +1039,7 @@
       border-radius: 50%;
       background: var(--accent);
       cursor: pointer;
-      box-shadow: 0 0 4px rgba(124,58,237,.5);
+      box-shadow: 0 0 4px rgba(138,180,248,.5);
     }
     .slider-value {
       font-family: var(--font-mono);
@@ -1028,7 +1068,7 @@
     }
     .traffic-card input { display: none; }
     .traffic-card:hover { border-color: var(--accent2); }
-    .traffic-card.checked { border-color: var(--accent); background: rgba(124,58,237,.08); }
+    .traffic-card.checked { border-color: var(--accent); background: rgba(138,180,248,.08); }
     .traffic-sparkline {
       width: 100%; height: 32px;
       color: var(--muted);
@@ -1042,8 +1082,8 @@
     /* pre-run summary box */
     .guided-summary {
       padding: 12px 16px;
-      background: rgba(124,58,237,.07);
-      border: 1px solid rgba(124,58,237,.22);
+      background: rgba(138,180,248,.07);
+      border: 1px solid rgba(138,180,248,.22);
       border-radius: var(--radius);
       font-size: 13px;
       color: var(--text);
@@ -1070,9 +1110,9 @@
       border-radius: 20px;
       margin-bottom: 12px;
     }
-    .guided-verdict-badge.pass { background: rgba(52,211,153,.15); color: var(--green); }
-    .guided-verdict-badge.warn { background: rgba(251,191,36,.15);  color: var(--amber); }
-    .guided-verdict-badge.fail { background: rgba(248,113,113,.15); color: var(--red); }
+    .guided-verdict-badge.pass { background: rgba(129,201,149,.15); color: var(--green); }
+    .guided-verdict-badge.warn { background: rgba(253,214,99,.15);  color: var(--amber); }
+    .guided-verdict-badge.fail { background: rgba(242,139,130,.15); color: var(--red); }
     .guided-verdict-headline {
       font-size: 15px;
       font-weight: 600;
@@ -1103,7 +1143,7 @@
       background: var(--accent);
       border: none;
       border-radius: var(--radius);
-      color: #fff;
+      color: #202124;
       font-size: 13px;
       font-weight: 600;
       cursor: pointer;
@@ -1157,8 +1197,8 @@
       border-radius: 4px;
       letter-spacing: 0.03em;
     }
-    .lifecycle-setup    { background: rgba(52,211,153,.15); color: #34d399; border: 1px solid rgba(52,211,153,.3); }
-    .lifecycle-teardown { background: rgba(148,163,184,.12); color: #94a3b8; border: 1px solid rgba(148,163,184,.25); }
+    .lifecycle-setup    { background: rgba(129,201,149,.15); color: #81c995; border: 1px solid rgba(129,201,149,.3); }
+    .lifecycle-teardown { background: rgba(154,160,166,.12); color: #9aa0a6; border: 1px solid rgba(154,160,166,.25); }
     .scenario-steps {
       display: flex;
       flex-direction: column;
@@ -1179,7 +1219,7 @@
       height: 20px;
       border-radius: 50%;
       background: var(--accent);
-      color: #fff;
+      color: #202124;
       font-size: 10px;
       font-weight: 700;
       flex-shrink: 0;
@@ -1311,8 +1351,8 @@
 
     /* ── Current probe progress card ────────────────── */
     .probe-current-card {
-      background: rgba(124,58,237,.07);
-      border: 1px solid rgba(124,58,237,.25);
+      background: rgba(138,180,248,.07);
+      border: 1px solid rgba(138,180,248,.25);
       border-radius: var(--radius);
       padding: 14px 18px;
       margin-bottom: 20px;
@@ -1379,8 +1419,8 @@
     .capacity-card.safe  .capacity-card-value { color: var(--green); }
     .capacity-card.breaking .capacity-card-value { color: var(--red); }
     .capacity-insight {
-      background: rgba(124,58,237,.06);
-      border: 1px solid rgba(124,58,237,.2);
+      background: rgba(138,180,248,.06);
+      border: 1px solid rgba(138,180,248,.2);
       border-left: 3px solid var(--accent);
       border-radius: 0 var(--radius) var(--radius) 0;
       padding: 14px 18px;
@@ -1402,8 +1442,9 @@
       text-align: center;
     }
     .home-heading {
-      font-size: 32px;
-      font-weight: 700;
+      font-size: 34px;
+      font-weight: 400;
+      letter-spacing: -0.5px;
       color: var(--text);
       margin-bottom: 48px;
     }
@@ -1421,20 +1462,21 @@
       align-items: center;
       justify-content: center;
       padding: 32px 24px;
-      border: 1px solid var(--border);
-      border-radius: 12px;
+      border: 1px solid transparent;
+      border-radius: var(--radius-lg);
       background: var(--card);
+      box-shadow: var(--shadow-1);
       cursor: pointer;
-      transition: all 0.3s ease;
+      transition: box-shadow .25s var(--ease), transform .25s var(--ease), border-color .25s var(--ease);
       position: relative;
     }
-    .home-card:hover { border-color: var(--accent); box-shadow: 0 4px 12px rgba(124,58,237,0.2); }
+    .home-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-3); border-color: var(--accent); }
     .home-card--primary {
       border-color: var(--accent);
-      background: rgba(124,58,237,0.06);
-      box-shadow: 0 2px 8px rgba(124,58,237,0.15);
+      background: rgba(138,180,248,0.08);
+      box-shadow: var(--shadow-2);
     }
-    .home-card--primary:hover { box-shadow: 0 4px 16px rgba(124,58,237,0.25); }
+    .home-card--primary:hover { box-shadow: var(--shadow-3); }
     .home-card-icon {
       font-size: 48px;
       margin-bottom: 12px;
@@ -1455,12 +1497,13 @@
       top: -8px;
       right: -8px;
       background: var(--accent);
-      color: #fff;
-      padding: 4px 10px;
-      border-radius: 12px;
+      color: #202124;
+      padding: 4px 12px;
+      border-radius: var(--radius-pill);
       font-size: 11px;
-      font-weight: 600;
+      font-weight: 500;
       letter-spacing: 0.5px;
+      box-shadow: var(--shadow-1);
     }
     .home-discover-link {
       font-size: 14px;
@@ -1915,9 +1958,9 @@
               <strong>第 99 百分位延遲</strong><br>
               99% 的請求在此時間內完成。這是尾端延遲，反映「最慢的 1%」使用者的體驗。
               <div class="tip-threshold">
-                <div class="tip-t"><div class="tip-dot" style="background:#34d399"></div>&lt; 500ms：良好</div>
-                <div class="tip-t"><div class="tip-dot" style="background:#fbbf24"></div>500–1000ms：需注意</div>
-                <div class="tip-t"><div class="tip-dot" style="background:#f87171"></div>&gt; 1000ms：過慢</div>
+                <div class="tip-t"><div class="tip-dot" style="background:#81c995"></div>&lt; 500ms：良好</div>
+                <div class="tip-t"><div class="tip-dot" style="background:#fdd663"></div>500–1000ms：需注意</div>
+                <div class="tip-t"><div class="tip-dot" style="background:#f28b82"></div>&gt; 1000ms：過慢</div>
               </div>
             </div>
           </div>
@@ -1939,9 +1982,9 @@
               <strong>錯誤率</strong><br>
               HTTP 4xx／5xx 或連線失敗佔總請求的比例。
               <div class="tip-threshold">
-                <div class="tip-t"><div class="tip-dot" style="background:#34d399"></div>0%：完全正常</div>
-                <div class="tip-t"><div class="tip-dot" style="background:#fbbf24"></div>0–1%：需要調查</div>
-                <div class="tip-t"><div class="tip-dot" style="background:#f87171"></div>&gt; 1%：嚴重問題</div>
+                <div class="tip-t"><div class="tip-dot" style="background:#81c995"></div>0%：完全正常</div>
+                <div class="tip-t"><div class="tip-dot" style="background:#fdd663"></div>0–1%：需要調查</div>
+                <div class="tip-t"><div class="tip-dot" style="background:#f28b82"></div>&gt; 1%：嚴重問題</div>
               </div>
             </div>
           </div>
@@ -1987,17 +2030,17 @@
           </div>
           <div class="pct-legend">
             <div class="pct-item">
-              <div class="pct-dot" style="background:#34d399"></div>
+              <div class="pct-dot" style="background:#81c995"></div>
               <span class="pct-name">p50</span>
               <span class="pct-meaning">— 中位數（典型使用者）</span>
             </div>
             <div class="pct-item">
-              <div class="pct-dot" style="background:#fbbf24"></div>
+              <div class="pct-dot" style="background:#fdd663"></div>
               <span class="pct-name">p90</span>
               <span class="pct-meaning">— 90% 使用者</span>
             </div>
             <div class="pct-item">
-              <div class="pct-dot" style="background:#f87171"></div>
+              <div class="pct-dot" style="background:#f28b82"></div>
               <span class="pct-name">p99</span>
               <span class="pct-meaning">— 尾端延遲</span>
             </div>
@@ -2007,15 +2050,15 @@
       </div>
       <div class="interpret-bar">
         <div class="interpret-item">
-          <div class="interpret-dot" style="background:#34d399"></div>
+          <div class="interpret-dot" style="background:#81c995"></div>
           p99 &lt; 500ms：良好
         </div>
         <div class="interpret-item">
-          <div class="interpret-dot" style="background:#fbbf24"></div>
+          <div class="interpret-dot" style="background:#fdd663"></div>
           p99 500–1000ms：需注意
         </div>
         <div class="interpret-item">
-          <div class="interpret-dot" style="background:#f87171"></div>
+          <div class="interpret-dot" style="background:#f28b82"></div>
           p99 &gt; 1000ms：過慢
         </div>
         <div class="interpret-item" style="margin-left: auto;">
@@ -2152,9 +2195,9 @@
               <strong>第 99 百分位延遲</strong><br>
               99% 的請求在此時間內完成，反映「最慢的 1%」使用者的體驗。
               <div class="tip-threshold">
-                <div class="tip-t"><div class="tip-dot" style="background:#34d399"></div>&lt; 500ms：良好</div>
-                <div class="tip-t"><div class="tip-dot" style="background:#fbbf24"></div>500–1000ms：需注意</div>
-                <div class="tip-t"><div class="tip-dot" style="background:#f87171"></div>&gt; 1000ms：過慢</div>
+                <div class="tip-t"><div class="tip-dot" style="background:#81c995"></div>&lt; 500ms：良好</div>
+                <div class="tip-t"><div class="tip-dot" style="background:#fdd663"></div>500–1000ms：需注意</div>
+                <div class="tip-t"><div class="tip-dot" style="background:#f28b82"></div>&gt; 1000ms：過慢</div>
               </div>
             </div>
           </div>
@@ -2174,9 +2217,9 @@
               <strong>錯誤率</strong><br>
               HTTP 4xx／5xx 或連線失敗佔總請求的比例。
               <div class="tip-threshold">
-                <div class="tip-t"><div class="tip-dot" style="background:#34d399"></div>0%：完全正常</div>
-                <div class="tip-t"><div class="tip-dot" style="background:#fbbf24"></div>0–1%：需要調查</div>
-                <div class="tip-t"><div class="tip-dot" style="background:#f87171"></div>&gt; 1%：嚴重問題</div>
+                <div class="tip-t"><div class="tip-dot" style="background:#81c995"></div>0%：完全正常</div>
+                <div class="tip-t"><div class="tip-dot" style="background:#fdd663"></div>0–1%：需要調查</div>
+                <div class="tip-t"><div class="tip-dot" style="background:#f28b82"></div>&gt; 1%：嚴重問題</div>
               </div>
             </div>
           </div>
@@ -2301,10 +2344,10 @@
       </div>
       <div class="summary-benchmark">
         <span class="bench-label">延遲基準</span>
-        <div class="bench-item"><div class="bench-dot" style="background:#34d399"></div>&lt; 200ms 優秀</div>
-        <div class="bench-item"><div class="bench-dot" style="background:#6ee7b7"></div>200–500ms 良好</div>
-        <div class="bench-item"><div class="bench-dot" style="background:#fbbf24"></div>500–1000ms 需注意</div>
-        <div class="bench-item"><div class="bench-dot" style="background:#f87171"></div>&gt; 1000ms 過慢</div>
+        <div class="bench-item"><div class="bench-dot" style="background:#81c995"></div>&lt; 200ms 優秀</div>
+        <div class="bench-item"><div class="bench-dot" style="background:#a8dab5"></div>200–500ms 良好</div>
+        <div class="bench-item"><div class="bench-dot" style="background:#fdd663"></div>500–1000ms 需注意</div>
+        <div class="bench-item"><div class="bench-dot" style="background:#f28b82"></div>&gt; 1000ms 過慢</div>
       </div>
     </div>
 
@@ -2615,24 +2658,24 @@ createApp({
       plugins: {
         legend: { display: false },
         tooltip: {
-          backgroundColor: '#0d111b',
-          borderColor: '#2d3748',
+          backgroundColor: '#202124',
+          borderColor: '#3c4043',
           borderWidth: 1,
-          titleColor: '#94a3b8',
-          bodyColor: '#e2e8f0',
+          titleColor: '#9aa0a6',
+          bodyColor: '#e8eaed',
           padding: 10,
         },
       },
       scales: {
         x: {
-          ticks: { color: '#3d4f63', maxTicksLimit: 8, font: { size: 10 } },
-          grid: { color: '#1a2035' },
-          border: { color: '#2d3748' },
+          ticks: { color: '#3c4043', maxTicksLimit: 8, font: { size: 10 } },
+          grid: { color: '#303134' },
+          border: { color: '#3c4043' },
         },
         y: {
-          ticks: { color: '#64748b', font: { size: 11 } },
-          grid: { color: '#1a2035' },
-          border: { color: '#2d3748' },
+          ticks: { color: '#9aa0a6', font: { size: 11 } },
+          grid: { color: '#303134' },
+          border: { color: '#3c4043' },
           beginAtZero: true,
         },
       },
@@ -2651,7 +2694,7 @@ createApp({
       if (!rpsCanvas.value || !latCanvas.value) return;
       rpsChart = new Chart(rpsCanvas.value, {
         type: 'line',
-        data: { labels, datasets: [{ ...mkLine('RPS', '#7c3aed', true), data: rpsData }] },
+        data: { labels, datasets: [{ ...mkLine('RPS', '#8ab4f8', true), data: rpsData }] },
         options: {
           ...baseOpts,
           plugins: {
@@ -2668,9 +2711,9 @@ createApp({
         data: {
           labels,
           datasets: [
-            { ...mkLine('p50 中位數', '#34d399'), data: lat50Data },
-            { ...mkLine('p90', '#fbbf24'), data: lat90Data },
-            { ...mkLine('p99 尾端', '#f87171'), data: lat99Data },
+            { ...mkLine('p50 中位數', '#81c995'), data: lat50Data },
+            { ...mkLine('p90', '#fdd663'), data: lat90Data },
+            { ...mkLine('p99 尾端', '#f28b82'), data: lat99Data },
           ],
         },
         options: {
