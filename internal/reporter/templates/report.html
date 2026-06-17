@@ -13,7 +13,7 @@
       --bg: #202124; --surface: #292a2d; --card: #303134; --border: #3c4043;
       --text: #e8eaed; --muted: #9aa0a6; --accent: #8ab4f8;
       --green: #81c995; --amber: #fdd663; --red: #f28b82;
-      --g-blue: #4285f4; --g-red: #ea4335; --g-yellow: #fbbc05; --g-green: #34a853;
+      --brand-1: #7b2ff7; --brand-2: #ff2d75; --brand-3: #ff9e2c;
       --font-sans: 'Roboto','Noto Sans TC',system-ui,-apple-system,'Segoe UI',sans-serif;
       --font-mono: 'Roboto Mono',ui-monospace,'SF Mono',monospace;
       --radius: 12px; --radius-lg: 16px;
@@ -27,12 +27,26 @@
       background: var(--bg); color: var(--text); min-height: 100vh; padding: 2.5rem 2rem;
       max-width: 1100px; margin: 0 auto;
     }
-    /* Google four-colour top band — shared identity with the dashboard */
+    /* Thermal plasma top band — shared brand identity with the dashboard */
     body::before {
       content: ""; position: fixed; top: 0; left: 0; right: 0; height: 4px; z-index: 10;
-      background: linear-gradient(90deg, var(--g-blue) 0 25%, var(--g-red) 25% 50%, var(--g-yellow) 50% 75%, var(--g-green) 75% 100%);
+      background: linear-gradient(90deg, var(--brand-1), var(--brand-2), var(--brand-3));
+      box-shadow: 0 0 10px rgba(255,45,117,.35);
     }
     .header { margin-bottom: 2rem; }
+    .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 1rem; }
+    .brand-word { font-size: 1.25rem; font-weight: 500; letter-spacing: .5px; color: var(--text); display: inline-flex; align-items: baseline; }
+    .rampi { position: relative; display: inline-block; width: .30em; height: 1em; vertical-align: baseline; }
+    .rampi::before {
+      content: ""; position: absolute; left: 50%; transform: translateX(-50%);
+      bottom: .02em; width: .135em; height: .54em; border-radius: .07em;
+      background: linear-gradient(to top, var(--brand-1), var(--brand-2), var(--brand-3));
+    }
+    .rampi::after {
+      content: ""; position: absolute; left: 50%; transform: translateX(-50%);
+      bottom: .66em; width: .20em; height: .20em; border-radius: 50%;
+      background: var(--brand-3); box-shadow: 0 0 .26em rgba(255,158,44,.7);
+    }
     .header h1 { font-size: 1.5rem; font-weight: 500; letter-spacing: -.01em; }
     .header .meta { color: var(--muted); font-size: 0.82rem; margin-top: 0.25rem; }
 
@@ -155,7 +169,15 @@
 <body>
 
 <div class="header">
-  <h1>Ramplio Load Test Report</h1>
+  <div class="brand">
+    <svg width="24" height="24" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+      <path d="M6 27 L10.5 27 L14.5 18 L10 18 Z" fill="#7b2ff7"/>
+      <path d="M13 27 L17.5 27 L21.5 12 L17 12 Z" fill="#ff2d75"/>
+      <path d="M20 27 L24.5 27 L28.5 6 L24 6 Z" fill="#ff9e2c"/>
+    </svg>
+    <span class="brand-word">Rampl<span class="rampi"></span>o</span>
+  </div>
+  <h1>Load Test Report</h1>
   <p class="meta">
     {{.GeneratedAt.Format "2006-01-02 15:04:05 UTC"}}
     &nbsp;·&nbsp;
@@ -313,7 +335,7 @@ new Chart(document.getElementById('overallChart'), {
     labels: ['p50', 'p90', 'p95', 'p99', 'max'],
     datasets: [{
       data: [{{.Latency.P50Ms}}, {{.Latency.P90Ms}}, {{.Latency.P95Ms}}, {{.Latency.P99Ms}}, {{.Latency.MaxMs}}],
-      backgroundColor: ['#8ab4f8','#4285f4','#8ab4f8','#aecbfa','#ea4335'],
+      backgroundColor: ['#7b2ff7','#a83af0','#ff2d75','#ff6b3d','#ff9e2c'],
       borderRadius: 6,
     }]
   },

@@ -6,7 +6,7 @@
   <title>Ramplio</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;700&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&display=swap" rel="stylesheet">
   <script src="https://unpkg.com/vue@3.5/dist/vue.global.prod.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <style>
@@ -31,11 +31,11 @@
       --red:       #f28b82;
       --blue:      #8ab4f8;
 
-      /* Google signature four colours (for identity moments) */
-      --g-blue:    #4285f4;
-      --g-red:     #ea4335;
-      --g-yellow:  #fbbc05;
-      --g-green:   #34a853;
+      /* Thermal plasma — brand identity (logo, bands, home icons)
+         壓力升高＝升溫：紫(起點) → 洋紅 → 琥珀(熱點) */
+      --brand-1: #7b2ff7;
+      --brand-2: #ff2d75;
+      --brand-3: #ff9e2c;
 
       --font-sans: 'Roboto', 'Noto Sans TC', system-ui, -apple-system, 'Segoe UI', sans-serif;
       --font-mono: 'Roboto Mono', ui-monospace, 'SF Mono', monospace;
@@ -86,27 +86,55 @@
       left: 0; right: 0; bottom: -1px;
       height: 3px;
       background: linear-gradient(90deg,
-        var(--g-blue), var(--g-red), var(--g-yellow), var(--g-green), var(--g-blue));
+        var(--brand-1), var(--brand-2), var(--brand-3), var(--brand-2), var(--brand-1));
       background-size: 300% 100%;
-      animation: googleFlow 3s linear infinite;
+      animation: brandFlow 3s linear infinite;
+      box-shadow: 0 0 8px rgba(255,45,117,.4);
     }
-    @keyframes googleFlow {
+    @keyframes brandFlow {
       from { background-position: 0 0; }
       to   { background-position: 300% 0; }
     }
     .logo {
-      font-size: 18px;
-      font-weight: 500;
-      letter-spacing: 0;
-      color: var(--text);
       display: flex;
       align-items: center;
       gap: 10px;
     }
-    .logo-dot {
-      width: 12px; height: 12px;
-      border-radius: 50%;
-      background: conic-gradient(var(--g-blue) 0 90deg, var(--g-red) 90deg 180deg, var(--g-yellow) 180deg 270deg, var(--g-green) 270deg 360deg);
+    .logo-mark { display: block; flex-shrink: 0; filter: drop-shadow(0 0 3px rgba(255,45,117,.45)); }
+    .logo-word {
+      font-size: 19px;
+      font-weight: 500;
+      letter-spacing: 0.5px;
+      color: var(--text);
+    }
+    /* ramp 融入「i」：升壓筆畫 + 頂端脈衝點，與 icon 共用母題 */
+    .rampi { position: relative; display: inline-block; width: .30em; height: 1em; vertical-align: baseline; }
+    .rampi::before {
+      content: ""; position: absolute; left: 50%; transform: translateX(-50%);
+      bottom: .02em; width: .135em; height: .54em; border-radius: .07em;
+      background: linear-gradient(to top, var(--brand-1), var(--brand-2), var(--brand-3));
+    }
+    .rampi::after {
+      content: ""; position: absolute; left: 50%; transform: translateX(-50%);
+      bottom: .66em; width: .20em; height: .20em; border-radius: 50%;
+      background: var(--brand-3); box-shadow: 0 0 .26em rgba(255,158,44,.7);
+    }
+    /* live-only 脈衝：僅執行中於峰頂浮現並跳動 */
+    .logo-pulse { opacity: 0; transform-box: fill-box; transform-origin: center; }
+    .header.is-live .logo-pulse { opacity: 1; animation: logoPulse 1.3s ease-in-out infinite; }
+    @keyframes logoPulse {
+      0%, 100% { transform: scale(1);   opacity: .95; }
+      50%      { transform: scale(1.45); opacity: .45; }
+    }
+
+    /* Material Symbols (Google icon font) base */
+    .material-symbols-outlined {
+      font-family: 'Material Symbols Outlined';
+      font-weight: normal; font-style: normal;
+      line-height: 1; letter-spacing: normal; text-transform: none;
+      display: inline-block; white-space: nowrap; word-wrap: normal; direction: ltr;
+      font-feature-settings: 'liga';
+      -webkit-font-smoothing: antialiased;
     }
     .header-right {
       display: flex;
@@ -863,7 +891,8 @@
       border-color: var(--accent2);
       background: rgba(138,180,248,.05);
     }
-    .upload-icon { font-size: 28px; line-height: 1; }
+    .upload-icon { line-height: 1; color: var(--muted); }
+    .upload-icon .material-symbols-outlined { font-size: 36px; }
     .upload-label { font-size: 14px; font-weight: 500; color: var(--text); }
     .upload-hint  { font-size: 11px; color: var(--muted); }
     .upload-loading {
@@ -1441,27 +1470,44 @@
       min-height: 100vh;
       text-align: center;
     }
-    .home-heading {
-      font-size: 34px;
-      font-weight: 400;
-      letter-spacing: -0.5px;
+    .home-hero { margin-bottom: 40px; }
+    .home-logo-mark {
+      display: block; margin: 0 auto 18px;
+      filter: drop-shadow(0 0 12px rgba(255,45,117,.4)) drop-shadow(0 0 7px rgba(255,158,44,.35));
+    }
+    .home-title {
+      font-size: 40px;
+      font-weight: 500;
+      letter-spacing: -1px;
       color: var(--text);
-      margin-bottom: 48px;
+      margin-bottom: 8px;
+    }
+    .home-tagline {
+      font-size: 15px;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+    .home-prompt {
+      font-size: 15px;
+      font-weight: 500;
+      color: var(--muted);
+      letter-spacing: .02em;
+      margin-bottom: 20px;
     }
     .home-cards {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      gap: 24px;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 20px;
       width: 100%;
-      max-width: 1000px;
-      margin-bottom: 48px;
+      max-width: 940px;
+      margin-bottom: 36px;
     }
     .home-card {
       display: flex;
       flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      padding: 32px 24px;
+      align-items: flex-start;
+      text-align: left;
+      padding: 26px 24px;
       border: 1px solid transparent;
       border-radius: var(--radius-lg);
       background: var(--card);
@@ -1478,12 +1524,18 @@
     }
     .home-card--primary:hover { box-shadow: var(--shadow-3); }
     .home-card-icon {
-      font-size: 48px;
-      margin-bottom: 12px;
+      width: 52px; height: 52px;
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      margin-bottom: 18px;
     }
+    .home-card-icon .material-symbols-outlined { font-size: 26px; }
+    .home-card-icon.ic-violet  { background: rgba(123,47,247,.16); color: #b794f6; }
+    .home-card-icon.ic-magenta { background: rgba(255,45,117,.16); color: #ff7ba8; }
+    .home-card-icon.ic-amber   { background: rgba(255,158,44,.16); color: #ffc06b; }
     .home-card-title {
-      font-size: 18px;
-      font-weight: 600;
+      font-size: 17px;
+      font-weight: 500;
       color: var(--text);
       margin-bottom: 8px;
     }
@@ -1506,15 +1558,21 @@
       box-shadow: var(--shadow-1);
     }
     .home-discover-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
       font-size: 14px;
-      color: var(--accent2);
-      background: none;
+      font-weight: 500;
+      color: var(--accent);
+      background: rgba(138,180,248,0.10);
       border: none;
+      padding: 10px 20px;
+      border-radius: var(--radius-pill);
       cursor: pointer;
-      text-decoration: none;
-      transition: color 0.3s;
+      transition: background 0.2s var(--ease);
     }
-    .home-discover-link:hover { color: var(--accent); text-decoration: underline; }
+    .home-discover-link:hover { background: rgba(138,180,248,0.18); }
+    .home-discover-link .material-symbols-outlined { font-size: 20px; }
 
     .back-btn {
       display: inline-flex;
@@ -1538,8 +1596,13 @@
   <!-- ── Header (always visible) ───────────────────── -->
   <header class="header" :class="{ 'is-live': view === 'live' || view === 'discover-live' }">
     <div class="logo">
-      <div class="logo-dot"></div>
-      Ramplio
+      <svg class="logo-mark" width="24" height="24" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+        <path d="M6 27 L10.5 27 L14.5 18 L10 18 Z" fill="#7b2ff7"/>
+        <path d="M13 27 L17.5 27 L21.5 12 L17 12 Z" fill="#ff2d75"/>
+        <path d="M20 27 L24.5 27 L28.5 6 L24 6 Z" fill="#ff9e2c"/>
+        <circle class="logo-pulse" cx="26.25" cy="3" r="2.4" fill="#ff9e2c"/>
+      </svg>
+      <span class="logo-word">Rampl<span class="rampi"></span>o</span>
     </div>
     <nav class="flow-stepper" v-if="['setup','live','result'].includes(view)" aria-label="測試流程進度">
       <span class="flow-step" :class="{ active: view === 'setup', done: view === 'live' || view === 'result' }">① 設定</span>
@@ -1565,27 +1628,36 @@
 
   <!-- ── Home View ───────────────────────────────── -->
   <div v-if="view === 'home'" class="home-view">
-    <div class="home-heading">你想做什麼？</div>
+    <div class="home-hero">
+      <svg class="home-logo-mark" width="60" height="60" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+        <path d="M6 27 L10.5 27 L14.5 18 L10 18 Z" fill="#7b2ff7"/>
+        <path d="M13 27 L17.5 27 L21.5 12 L17 12 Z" fill="#ff2d75"/>
+        <path d="M20 27 L24.5 27 L28.5 6 L24 6 Z" fill="#ff9e2c"/>
+      </svg>
+      <h1 class="home-title">Rampl<span class="rampi"></span>o</h1>
+      <p class="home-tagline">開發者優先的壓力測試 — 三步測出網站撐不撐得住</p>
+    </div>
+    <div class="home-prompt">你想怎麼開始？</div>
     <div class="home-cards">
       <div class="home-card home-card--primary" @click="pickMode('guided')">
-        <div class="home-card-icon">🧙</div>
+        <div class="home-card-icon ic-violet"><span class="material-symbols-outlined">auto_awesome</span></div>
         <div class="home-card-title">帶我設定</div>
         <div class="home-card-desc">回答幾個問題，我幫你設定測試。不需要了解技術細節。</div>
         <div class="home-card-badge">推薦</div>
       </div>
       <div class="home-card" @click="pickMode('url')">
-        <div class="home-card-icon">🚀</div>
+        <div class="home-card-icon ic-magenta"><span class="material-symbols-outlined">bolt</span></div>
         <div class="home-card-title">快速測試</div>
         <div class="home-card-desc">直接輸入 URL，自訂並發數與測試時間。</div>
       </div>
       <div class="home-card" @click="pickMode('scenario')">
-        <div class="home-card-icon">📂</div>
+        <div class="home-card-icon ic-amber"><span class="material-symbols-outlined">upload_file</span></div>
         <div class="home-card-title">上傳場景</div>
         <div class="home-card-desc">上傳 HAR 或 YAML 情境，支援多步驟與登入流程。</div>
       </div>
     </div>
     <button class="home-discover-link" @click="pickMode('discover')">
-      ⚡ 我想找出服務的承載上限 →
+      <span class="material-symbols-outlined">trending_up</span> 我想找出服務的承載上限 →
     </button>
   </div>
 
@@ -1858,7 +1930,7 @@
               @dragleave="scenarioDragging = false"
               @drop.prevent="handleScenarioDrop"
             >
-              <div class="upload-icon">📂</div>
+              <div class="upload-icon"><span class="material-symbols-outlined">cloud_upload</span></div>
               <div class="upload-label">點擊或拖曳檔案</div>
               <div class="upload-hint">.har　或　.yaml / .yml</div>
             </div>
