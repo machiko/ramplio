@@ -126,7 +126,35 @@ func printInterpretation(w io.Writer, sum metrics.Summary) {
 
 	fmt.Fprintf(w, "\n  一句話總結：%s\n", in.OneLiner)
 
+	// Diagnosis: skip entirely when the only finding is the healthy note — the
+	// verdict above already conveys good news, no need for a separate block.
+	if hasActionableFindings(in.Diagnosis) {
+		section("診斷發現（為什麼會這樣、怎麼辦）")
+		for _, f := range in.Diagnosis {
+			if f.Severity == "good" {
+				continue
+			}
+			fmt.Fprintf(w, "\n  %s %s\n", f.Icon, f.Title)
+			fmt.Fprintf(w, "      %s\n", f.Cause)
+			if f.Evidence != "" {
+				fmt.Fprintf(w, "      %s\n", f.Evidence)
+			}
+			fmt.Fprintf(w, "      → 建議：%s\n", f.Action)
+		}
+	}
+
 	fmt.Fprintln(w, "\n"+divider)
+}
+
+// hasActionableFindings reports whether the diagnosis contains anything beyond
+// the single "healthy" (good) note.
+func hasActionableFindings(findings []Finding) bool {
+	for _, f := range findings {
+		if f.Severity != "good" {
+			return true
+		}
+	}
+	return false
 }
 
 func truncate(s string, max int) string {

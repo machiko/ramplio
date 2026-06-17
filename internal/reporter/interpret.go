@@ -24,6 +24,11 @@ type Interpretation struct {
 
 	Bottleneck string `json:"bottleneck,omitempty"`
 	OneLiner   string `json:"one_liner"`
+
+	// Diagnosis is the ranked plain-language root-cause reading (why it's slow/
+	// unstable and what to do). Populated by Interpret(sum); the scalar-only
+	// ReadingsFor path (dashboard live) leaves it nil.
+	Diagnosis []Finding `json:"diagnosis,omitempty"`
 }
 
 type SpeedReading struct {
@@ -66,7 +71,9 @@ func Interpret(sum metrics.Summary) Interpretation {
 		}
 		bottleneck = fmt.Sprintf("最花時間的步驟是「%s」（%s內完成），要加快先從這裡下手。", name, humanizeDuration(slowest))
 	}
-	return ReadingsFor(sum.P99, sum.ErrorRate(), sum.RPS(), sum.Total, sum.Errors, bottleneck)
+	in := ReadingsFor(sum.P99, sum.ErrorRate(), sum.RPS(), sum.Total, sum.Errors, bottleneck)
+	in.Diagnosis = Diagnose(sum)
+	return in
 }
 
 // ReadingsFor builds an Interpretation from raw scalar metrics. It is the shared

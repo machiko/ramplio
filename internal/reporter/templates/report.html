@@ -105,6 +105,22 @@
     .verdict-lines span { font-size: 0.875rem; color: #cbd5e1; }
     .verdict-lines span::before { font-weight: 600; color: #94a3b8; margin-right: 0.3rem; }
 
+    /* ── Diagnosis cards ──────────────────────────────────── */
+    .diag-section-title { font-size: 1rem; font-weight: 700; margin: 1.75rem 0 0.75rem; color: #cbd5e1; }
+    .diag {
+      border-radius: 10px; padding: 1rem 1.25rem; margin-bottom: 0.75rem;
+      border-left: 3px solid #475569; background: #111a2e;
+    }
+    .diag.critical { border-left-color: #f87171; }
+    .diag.warn     { border-left-color: #fbbf24; }
+    .diag.info     { border-left-color: #60a5fa; }
+    .diag.good     { border-left-color: #34d399; }
+    .diag-title    { font-weight: 600; font-size: 0.95rem; color: #e2e8f0; margin-bottom: 0.35rem; }
+    .diag-cause    { font-size: 0.85rem; color: #cbd5e1; margin-bottom: 0.25rem; }
+    .diag-evidence { font-size: 0.8rem; color: #94a3b8; margin-bottom: 0.25rem; font-variant-numeric: tabular-nums; }
+    .diag-action   { font-size: 0.85rem; color: #cbd5e1; }
+    .diag-action::before { content: "→ 建議："; color: #94a3b8; font-weight: 600; }
+
     /* ── Summary table ────────────────────────────────────── */
     .summary-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
     .summary-table td { padding: 0.5rem 0; border-bottom: 1px solid #1a2540; }
@@ -140,6 +156,19 @@
     </div>
   </div>
 </div>
+
+<!-- Diagnosis cards -->
+{{if .Verdict.Diagnosis}}
+<div class="diag-section-title">診斷發現（為什麼會這樣、怎麼辦）</div>
+{{range .Verdict.Diagnosis}}
+<div class="diag {{.Severity}}">
+  <div class="diag-title">{{.Icon}} {{.Title}}</div>
+  <div class="diag-cause">{{.Cause}}</div>
+  {{if .Evidence}}<div class="diag-evidence">{{.Evidence}}</div>{{end}}
+  <div class="diag-action">{{.Action}}</div>
+</div>
+{{end}}
+{{end}}
 
 <!-- KPI row -->
 <div class="kpi-grid">

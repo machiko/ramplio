@@ -87,6 +87,9 @@ func TestReadingsFor_MatchesInterpret(t *testing.T) {
 	sum := metrics.Summary{Total: 20046, Errors: 0, WallTime: 5 * time.Second, P99: 9 * time.Millisecond}
 	want := reporter.Interpret(sum)
 	got := reporter.ReadingsFor(sum.P99, sum.ErrorRate(), sum.RPS(), sum.Total, sum.Errors, "")
+	// ReadingsFor (the dashboard-live path) intentionally omits diagnosis; the
+	// readings themselves must still be identical.
+	want.Diagnosis = nil
 	assert.Equal(t, want, got)
 }
 

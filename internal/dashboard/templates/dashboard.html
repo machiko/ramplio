@@ -604,6 +604,26 @@
     }
     .verdict-next strong { color: var(--text); }
 
+    /* ── Diagnosis cards (測後白話診斷：為什麼 + 怎麼辦) ─── */
+    .diag-section { padding: 14px 24px 0; }
+    .diag-section-title { font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 10px; }
+    .diag-card {
+      padding: 12px 16px;
+      margin-bottom: 8px;
+      border-radius: 8px;
+      border-left: 3px solid var(--border);
+      background: var(--card);
+    }
+    .diag-card.critical { border-left-color: var(--red); }
+    .diag-card.warn     { border-left-color: var(--amber); }
+    .diag-card.info     { border-left-color: var(--accent2); }
+    .diag-card.good     { border-left-color: var(--green); }
+    .diag-card-title    { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
+    .diag-card-cause    { font-size: 12px; color: var(--muted); line-height: 1.6; }
+    .diag-card-evidence { font-size: 12px; color: var(--muted); line-height: 1.6; font-variant-numeric: tabular-nums; }
+    .diag-card-action   { font-size: 12px; color: var(--text); line-height: 1.6; margin-top: 4px; }
+    .diag-card-action strong { color: var(--muted); font-weight: 600; }
+
     /* ── Result View ─────────────────────────────────── */
     .result-view {
       flex: 1;
@@ -2092,6 +2112,17 @@
           <div v-if="finalVerdict.bottleneck" class="verdict-line" style="color:var(--muted)">{{ finalVerdict.bottleneck }}</div>
         </div>
         <div class="verdict-next"><strong>下一步：</strong>{{ finalVerdict.next }}</div>
+      </div>
+    </div>
+
+    <!-- 診斷發現：為什麼會這樣、怎麼辦（白話，與終端/報告同源） -->
+    <div v-if="finalResult?.verdict?.diagnosis?.length" class="diag-section">
+      <div class="diag-section-title">診斷發現（為什麼會這樣、怎麼辦）</div>
+      <div v-for="(f, i) in finalResult.verdict.diagnosis" :key="i" class="diag-card" :class="f.severity">
+        <div class="diag-card-title">{{ f.icon }} {{ f.title }}</div>
+        <div class="diag-card-cause">{{ f.cause }}</div>
+        <div v-if="f.evidence" class="diag-card-evidence">{{ f.evidence }}</div>
+        <div class="diag-card-action"><strong>→ 建議：</strong>{{ f.action }}</div>
       </div>
     </div>
 
