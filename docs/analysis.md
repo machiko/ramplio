@@ -8,9 +8,9 @@
 
 | 欄位 | 值 |
 |------|-----|
-| 分析時間 | 2026-06-16 |
-| 分析基準 commit | `f09a456` |
-| 完整 commit hash | `f09a456dd770ee9a1e61c998225b06cc19a330c4` |
+| 分析時間 | 2026-06-19 |
+| 分析基準 commit | `2fd08e2` |
+| 完整 commit hash | `2fd08e22e814857ae49133cd7ab29407f6d29387` |
 
 ---
 
@@ -36,12 +36,15 @@
 | `config/distributed.go` | **新增** DistributedConfig（Workers/ListenAddr/Secret/PollIntervalMs/AssignTimeoutSec）；Secret 與部分欄位定義但未被使用 |
 | `reporter/sink.go` | **新增** Sink 介面 + DetailedSink 選用介面（WriteDetailed 輸出 per-step/group 明細） |
 | `metrics/collector.go` | Channel 驅動聚集器；HDR 直方圖；per-step/group；緩衝區滿計數 dropped 並在 Stop() 輸出警告 |
-| `metrics/summary.go` | 聚集統計；`RPS() = Total/WallTime`；`MeanLatency` |
+| `metrics/errorkind.go` | **新增** 失敗分類：`ClassifyError(err,status)→ErrorKind`（DNS/連線被拒/中斷/逾時/TLS/4xx/5xx/斷言/其他）；以 `errors.As` 拆 url→net→syscall/x509，status>0+err≠nil 判定為斷言失敗；`DominantErrorKind` 取主因與占比；`DisplayOrder` 穩定排序 |
+| `metrics/summary.go` | 聚集統計；`RPS() = Total/WallTime`；`MeanLatency`；`ErrorBreakdown map[ErrorKind]int64`（record() 失敗時懶初始化分類累加） |
+| `metrics/export.go` | 分散式 HDR 合併；`HistogramExport.ErrorBreakdown` 跨節點加總（`Export`/`MergeExports`） |
 | `metrics/sample.go` | 單一請求測量資料結構 |
-| `reporter/terminal.go` | 靜態摘要（繁中）；per-step/group 表格；droppedSamples 警告；PrintInterpretation |
+| `reporter/terminal.go` | 靜態摘要（繁中）；per-step/group 表格；**失敗原因分類小表**（`ErrorBreakdownRows`）；droppedSamples 警告；PrintInterpretation |
 | `reporter/html.go` | go:embed HTML 報告 |
-| `reporter/json.go` | Summary ↔ JSON；Verdict = `Interpret(sum)`（共用白話解讀）|
+| `reporter/json.go` | Summary ↔ JSON；`error_breakdown` 失敗分類列；Verdict = `Interpret(sum)`（共用白話解讀）|
 | `reporter/interpret.go` | 單一來源白話解讀 `Interpret(sum)`：整體結論／反應速度／穩定度／承受能力／一句話總結；門檻統一（fail err≥5% 或 p99≥3s；warn err≥1% 或 p99≥1s）；終端／JSON／HTML 共用，Dashboard JS 鏡像同門檻與用語 |
+| `reporter/errorcause.go` | **新增** 失敗歸因白話：`errorCopyByKind` 單一來源（每類 Title/Cause/Action/Label）；`failureCauseFinding` 產最高優先 Finding（err≥1% 才出）；`reachabilityDominates` 抑制連線層失敗被誤判為「超出負荷」；`ErrorBreakdownRows` 表格列；`ExplainErrorKind`/`IsReachabilityFailure` 供 pre-flight 使用 |
 | `reporter/tui.go` | Bubbletea 即時終端儀表板 |
 | `reporter/prometheus.go` | `/metrics` 端點，500ms 更新 |
 | `reporter/junit.go` | JUnit XML（CI/CD 用） |
@@ -58,7 +61,8 @@
 | `importer/converter.go` | HAR → YAML 場景；自動偵測認證/captures/JWT |
 | `importer/detector.go` | HAR 啟發式偵測（pre-auth token、login entry）|
 | `importer/filter.go` | 靜態資產過濾（JS/CSS/圖片/字體）|
-| `cmd/ramplio/run.go` | `run` 命令：URL/RPS/場景/儀表板/**分散式**五模式；`--worker`（可重複）；`--ignore-errors`；`--dashboard-token` |
+| `cmd/ramplio/run.go` | `run` 命令：URL/RPS/場景/儀表板/**分散式**五模式；`--worker`（可重複）；`--ignore-errors`；`--dashboard-token`；**開跑前 pre-flight 預檢**（`--no-preflight` 略過）|
+| `cmd/ramplio/preflight.go` | **新增** 開跑前單發探測：`preflightTarget`（URL 模式直用；場景取第一步、含 `{{` 模板則跳過）；`runPreflight` 僅在連線層硬錯（DNS/連線被拒/TLS）時白話中止，逾時/4xx/5xx 不擋 |
 | `cmd/ramplio/worker.go` | **新增** `worker` 命令：啟動工作節點 HTTP server（`--addr`）；SIGINT/SIGTERM 優雅關閉 |
 | `cmd/ramplio/dashcontrol.go` | 儀表板 Controller 實作；Discover 狀態機；buildOverrideStages |
 | `cmd/ramplio/validate.go` | `validate` 命令：stages/steps/captures/vars/thresholds/circuit breaker 詳細輸出 |
@@ -88,7 +92,8 @@
 
 > 已解決（自 `72a7b52`）：~~分散式測試缺失~~、~~Sink per-step 明細~~、~~EvalCondition AND/OR~~。
 > 已解決（Phase 4）：~~分散式百分位合併錯誤~~（改用 HDR 直方圖序列化合併，`metrics.MergeExports`，含 step/group 明細）、~~repo 產物被追蹤~~（已移除並補 `.gitignore`）、~~Worker 端點無認證~~（shared secret + Bearer middleware）、~~分散式 Setup/Teardown stub~~（coordinator 集中執行 setup，captures 透過 `RampConfig.SeedCaptures` 廣播注入 worker）、~~worker 執行 context 隨 HTTP 請求取消導致 0 請求~~（改用 `context.WithoutCancel`）。
-> 已解決（Phase 5，本次）：~~分散式僅明文 HTTP / 無 TLS~~（worker `ListenAndServeTLS` + coordinator scheme-aware URL 與可注入 TLS client；CLI `--tls-cert/--tls-key/--tls-ca/--tls-skip-verify`）、~~PollIntervalMs/AssignTimeoutSec 未生效~~（coordinator `SetTiming` + CLI `--poll-interval/--assign-timeout`，config helper）。
+> 失敗白話化（2026-06-19）：新增失敗分類（`metrics.ErrorKind`/`ClassifyError`）、失敗歸因白話（`reporter/errorcause.go`，連線被拒/DNS/TLS/逾時/4xx/5xx/斷言各有人話+下一步）、修正連線層失敗被誤判為「超出負荷」、開跑前 pre-flight 預檢（連線層硬錯即時白話中止）。錯誤分類隨 `HistogramExport` 跨節點合併。
+> 已解決（Phase 5）：~~分散式僅明文 HTTP / 無 TLS~~（worker `ListenAndServeTLS` + coordinator scheme-aware URL 與可注入 TLS client；CLI `--tls-cert/--tls-key/--tls-ca/--tls-skip-verify`）、~~PollIntervalMs/AssignTimeoutSec 未生效~~（coordinator `SetTiming` + CLI `--poll-interval/--assign-timeout`，config helper）。
 
 ---
 

@@ -38,6 +38,12 @@ func PrintSummary(w io.Writer, sum metrics.Summary) {
 		line("成功 (2xx)：", fmt.Sprintf("%d (%.1f%%)", success, float64(success)/float64(sum.Total)*100))
 		line("失敗：", fmt.Sprintf("%d (%.1f%%)", sum.Errors, sum.ErrorRate()))
 	}
+	if rows := ErrorBreakdownRows(sum); len(rows) > 0 {
+		fmt.Fprintf(w, "\n  失敗原因分類\n")
+		for _, r := range rows {
+			fmt.Fprintf(w, "    %-12s %6d (%.0f%%)\n", r.Label, r.Count, r.SharePct)
+		}
+	}
 
 	if len(sum.Steps) > 0 {
 		section("各步驟明細")

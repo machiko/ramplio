@@ -47,6 +47,9 @@ type HistogramExport struct {
 	Hist    HistEnvelope  `json:"hist"`
 	Steps   []StepExport  `json:"steps,omitempty"`
 	Groups  []GroupExport `json:"groups,omitempty"`
+	// ErrorBreakdown carries per-cause failure counts so the coordinator can
+	// explain failures in plain language across the whole distributed run.
+	ErrorBreakdown map[ErrorKind]int64 `json:"error_breakdown,omitempty"`
 }
 
 // exportHist converts a live histogram into a serializable envelope.
@@ -90,6 +93,12 @@ func (c *Collector) Export() HistogramExport {
 		WallNs:  int64(time.Since(c.startedAt)),
 		Dropped: c.dropped.Load(),
 		Hist:    exportHist(c.hist),
+	}
+	if len(c.sum.ErrorBreakdown) > 0 {
+		exp.ErrorBreakdown = make(map[ErrorKind]int64, len(c.sum.ErrorBreakdown))
+		for k, v := range c.sum.ErrorBreakdown {
+			exp.ErrorBreakdown[k] = v
+		}
 	}
 	for _, name := range c.stepOrder {
 		s := c.stepSums[name]
@@ -136,6 +145,13 @@ func MergeExports(exports []HistogramExport) Summary {
 		sum.Errors += e.Errors
 		sum.BytesIn += e.BytesIn
 		sum.DroppedSamples += e.Dropped
+
+		for k, v := range e.ErrorBreakdown {
+			if sum.ErrorBreakdown == nil {
+				sum.ErrorBreakdown = make(map[ErrorKind]int64)
+			}
+			sum.ErrorBreakdown[k] += v
+		}
 
 		if e.MinNs > 0 && (sum.MinLatency == 0 || time.Duration(e.MinNs) < sum.MinLatency) {
 			sum.MinLatency = time.Duration(e.MinNs)

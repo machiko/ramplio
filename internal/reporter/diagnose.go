@@ -43,8 +43,14 @@ func Diagnose(sum metrics.Summary) []Finding {
 	p50ms := sum.P50.Milliseconds()
 	p99ms := sum.P99.Milliseconds()
 
-	// 1. 整體過載
-	if errRate >= failErrorRatePct || p99ms >= failP99Ms {
+	// 0. 失敗歸因（為什麼會失敗）— 最高優先，直接點名主因並給下一步。
+	if cause, ok := failureCauseFinding(sum); ok {
+		findings = append(findings, cause)
+	}
+
+	// 1. 整體過載 — 但若失敗其實是「連不上目標」（DNS/連線被拒/憑證），那不是
+	//    過載，避免誤導；此時改由上面的失敗歸因說明。
+	if (errRate >= failErrorRatePct || p99ms >= failP99Ms) && !reachabilityDominates(sum) {
 		findings = append(findings, Finding{
 			Severity: "critical",
 			Icon:     "✗",

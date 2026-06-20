@@ -20,7 +20,9 @@ type Report struct {
 	BytesIn     int64          `json:"bytes_in"`
 	Latency     LatencyMs      `json:"latency"`
 	Steps       []StepReport   `json:"steps,omitempty"`
-	Verdict     Interpretation `json:"verdict"`
+	// ErrorBreakdown lists failed requests grouped by plain-language cause.
+	ErrorBreakdown []ErrorBreakdownRow `json:"error_breakdown,omitempty"`
+	Verdict        Interpretation      `json:"verdict"`
 }
 
 type LatencyMs struct {
@@ -79,6 +81,7 @@ func SummaryToReport(sum metrics.Summary) Report {
 			P99Ms:     s.P99.Milliseconds(),
 		})
 	}
+	r.ErrorBreakdown = ErrorBreakdownRows(sum)
 	r.Verdict = Interpret(sum)
 	return r
 }

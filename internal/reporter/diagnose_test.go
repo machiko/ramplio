@@ -139,3 +139,72 @@ func TestReadingsFor_OmitsDiagnosis(t *testing.T) {
 	in := reporter.ReadingsFor(40*time.Millisecond, 0, 100, 1000, 0, "")
 	assert.Empty(t, in.Diagnosis)
 }
+
+func TestDiagnose_ConnRefusedNotOverload(t *testing.T) {
+	// 100% 連線被拒：應點名「連不上目標」，且不可誤判為「超出負荷」。
+	sum := metrics.Summary{
+		Total: 500, Errors: 500, WallTime: 5 * time.Second,
+		ErrorBreakdown: map[metrics.ErrorKind]int64{metrics.ErrKindConnRefused: 500},
+	}
+	findings := reporter.Diagnose(sum)
+
+	cause, ok := findingByTitle(findings, "連線被拒絕")
+	assert.True(t, ok, "應點名連線被拒")
+	assert.Equal(t, "critical", cause.Severity)
+	assert.Contains(t, cause.Action, "埠號")
+
+	_, overload := findingByTitle(findings, "超出負荷")
+	assert.False(t, overload, "連線被拒不應被誤判為過載")
+}
+
+func TestDiagnose_DNSFailure(t *testing.T) {
+	sum := metrics.Summary{
+		Total: 100, Errors: 100, WallTime: 2 * time.Second,
+		ErrorBreakdown: map[metrics.ErrorKind]int64{metrics.ErrKindDNS: 100},
+	}
+	f, ok := findingByTitle(reporter.Diagnose(sum), "網域找不到")
+	assert.True(t, ok, "應點名 DNS 解析失敗")
+	assert.Contains(t, f.Action, "網址拼字")
+}
+
+func TestDiagnose_5xxStaysOverload(t *testing.T) {
+	// 大量 5xx + 高延遲：仍應保留「超出負荷」結論（伺服器端被壓垮）。
+	sum := metrics.Summary{
+		Total: 1000, Errors: 600, WallTime: 10 * time.Second,
+		P50: 200 * time.Millisecond, P99: 4000 * time.Millisecond,
+		ErrorBreakdown: map[metrics.ErrorKind]int64{metrics.ErrKindHTTP5xx: 600},
+	}
+	findings := reporter.Diagnose(sum)
+	_, overload := findingByTitle(findings, "超出負荷")
+	assert.True(t, overload, "5xx 過載情境應保留過載結論")
+	_, cause := findingByTitle(findings, "伺服器端大量出錯")
+	assert.True(t, cause, "同時應點名 5xx")
+}
+
+func TestDiagnose_LowErrorRateNoCauseFinding(t *testing.T) {
+	// 0.5% 失敗：低於白話門檻，不應冒出失敗歸因。
+	sum := metrics.Summary{
+		Total: 1000, Errors: 5, WallTime: 5 * time.Second,
+		P50: 10 * time.Millisecond, P99: 50 * time.Millisecond,
+		ErrorBreakdown: map[metrics.ErrorKind]int64{metrics.ErrKindOther: 5},
+	}
+	findings := reporter.Diagnose(sum)
+	_, ok := findingByTitle(findings, "無法歸類")
+	assert.False(t, ok, "低失敗率不應觸發失敗歸因")
+}
+
+func TestErrorBreakdownRows(t *testing.T) {
+	sum := metrics.Summary{
+		Total: 100, Errors: 10,
+		ErrorBreakdown: map[metrics.ErrorKind]int64{
+			metrics.ErrKindConnRefused: 7,
+			metrics.ErrKindTimeout:     3,
+		},
+	}
+	rows := reporter.ErrorBreakdownRows(sum)
+	assert.Len(t, rows, 2)
+	// DisplayOrder: conn_refused 在 timeout 之前
+	assert.Equal(t, "連線被拒", rows[0].Label)
+	assert.Equal(t, int64(7), rows[0].Count)
+	assert.InDelta(t, 70.0, rows[0].SharePct, 0.1)
+}

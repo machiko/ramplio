@@ -23,6 +23,11 @@ type Summary struct {
 	// DroppedSamples is the number of samples discarded because the collector channel was full.
 	DroppedSamples int64 `json:"-"`
 
+	// ErrorBreakdown counts failed requests by cause (DNS, connection refused,
+	// timeout, TLS, HTTP 4xx/5xx, assertion, …). Populated lazily on the first
+	// failure; nil when there were no errors. Successes are never recorded here.
+	ErrorBreakdown map[ErrorKind]int64 `json:"-"`
+
 	sumLatency time.Duration
 }
 
@@ -33,6 +38,10 @@ func (s *Summary) record(sample Sample) {
 
 	if sample.isError() {
 		s.Errors++
+		if s.ErrorBreakdown == nil {
+			s.ErrorBreakdown = make(map[ErrorKind]int64)
+		}
+		s.ErrorBreakdown[ClassifyError(sample.Error, sample.StatusCode)]++
 	}
 	if s.Total == 1 || sample.Latency < s.MinLatency {
 		s.MinLatency = sample.Latency
