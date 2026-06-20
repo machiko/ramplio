@@ -53,6 +53,7 @@ func newRunCmd() *cobra.Command {
 		pollInterval    string
 		assignTimeout   string
 		noTUI           bool
+		noPreflight     bool
 	)
 
 	cmd := &cobra.Command{
@@ -114,6 +115,16 @@ func newRunCmd() *cobra.Command {
 			}
 			if scenarioFile != "" && url != "" {
 				return fmt.Errorf("--url and --scenario are mutually exclusive")
+			}
+
+			// Pre-flight: one quick probe so a typo'd URL or down target fails
+			// fast with a plain-language reason instead of after a full run.
+			if !noPreflight {
+				if pURL, pMethod, ok := preflightTarget(scenarioFile, url, method); ok {
+					if pferr := runPreflight(cmd.Context(), os.Stderr, httpCfg, pURL, pMethod); pferr != nil {
+						return pferr
+					}
+				}
 			}
 
 			var (
@@ -231,6 +242,7 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().StringVar(&pollInterval, "poll-interval", "", "Live-metrics polling interval for distributed runs (e.g. 500ms, 2s; default 1s)")
 	cmd.Flags().StringVar(&assignTimeout, "assign-timeout", "", "Timeout for broadcasting work to workers (e.g. 10s, 30s; default 10s)")
 	cmd.Flags().BoolVar(&noTUI, "no-tui", false, "Disable the live TUI and print plain progress lines (auto-enabled when output is not a terminal; for distributed runs)")
+	cmd.Flags().BoolVar(&noPreflight, "no-preflight", false, "Skip the quick reachability check before the test (run even if the target looks unreachable)")
 
 	return cmd
 }
