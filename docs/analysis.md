@@ -71,7 +71,8 @@
 | `cmd/ramplio/init.go` | `init` 引導精靈：cookie/JWT 認證；steady/spike/soak 流量模式 |
 | `cmd/ramplio/import.go` | `import` 命令：HAR → YAML |
 | `cmd/ramplio/report.go` | `report` 命令：JSON → HTML |
-| `cmd/ramplio/mock.go` | 本地 mock HTTP 伺服器 |
+| `cmd/ramplio/mock.go` | 本地 mock HTTP 伺服器；**確定性延遲注入**（`--latency` 固定 / `--latency-fast`+`--latency-slow`+`--slow-pct` 雙峰）；`latencyProfile.pickLatency` 純函式可單測，作為 ground-truth 驗證標的 |
+| `internal/engine/groundtruth_test.go` | **新增** ground-truth 自我驗證：對已知延遲分佈施壓，斷言量測百分位在容差內（固定延遲 + 雙峰分尾） |
 
 ---
 
@@ -121,6 +122,16 @@
 | Logic Controllers（If/Loop + AND/OR/NOT）| ✓ | - | - | ✓ |
 | 分散式測試 | ✓ | ✓ | ✓ | ✓（HDR 直方圖合併、shared secret 認證、集中 setup/teardown、TLS、可調 poll/timeout）|
 | Cookie / Data File | ✓ | ✓ | - | ✓ |
+
+---
+
+## 公信力（Credibility）路線
+
+> 目標：讓量測數據有公信力，不靠「跟 k6/JMeter 比一比」（會寄生在別人工具正確性上），改以數學 ground-truth 自證 + 修正方法論瑕疵。詳見 `docs/accuracy.md`。
+
+- **Phase 1 — Ground-truth 自我驗證（✅ 已完成）**：`mock.go` 確定性延遲注入（固定/雙峰）；`groundtruth_test.go` 對已知分佈施壓斷言百分位在容差內；`docs/accuracy.md` 方法論。
+- **Phase 2 — Coordinated Omission 修正（未做）**：RPS 模式 `runRate` 改 dispatcher/worker，`Sample.ScheduledAt` 起算修正延遲，HDR 並陳 service / 壓力下延遲。
+- **Phase 3 — 量測透明度（未做）**：httptrace 拆 DNS/TCP/TLS/TTFB/total；產生器自我健康度與「量測可信度」判語。
 
 ---
 
