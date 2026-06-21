@@ -10,11 +10,23 @@ type Summary struct {
 	BytesIn    int64         `json:"bytes_in"`
 	WallTime   time.Duration `json:"-"`
 
-	// HDR-computed percentiles, populated by Collector.Stop()
+	// HDR-computed percentiles, populated by Collector.Stop(). These are the raw
+	// service-time percentiles (time on the wire), identical in both VU and rate mode.
 	P50 time.Duration `json:"-"`
 	P90 time.Duration `json:"-"`
 	P95 time.Duration `json:"-"`
 	P99 time.Duration `json:"-"`
+
+	// Coordinated-omission-corrected percentiles, measured from each request's
+	// scheduled dispatch time rather than its actual send time. Populated only in
+	// rate (open) mode; HasCorrected is false in VU mode. Under overload these
+	// exceed the raw percentiles by the queueing delay the user really waits —
+	// the honest latency that closed-loop generators systematically under-report.
+	CorrectedP50 time.Duration `json:"-"`
+	CorrectedP90 time.Duration `json:"-"`
+	CorrectedP95 time.Duration `json:"-"`
+	CorrectedP99 time.Duration `json:"-"`
+	HasCorrected bool          `json:"-"`
 
 	// Per-step breakdown; nil when no step names were recorded (single URL mode).
 	Steps []StepSummary `json:"-"`

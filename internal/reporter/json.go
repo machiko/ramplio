@@ -11,15 +11,19 @@ import (
 // Report is the serializable form of a test run summary.
 // All latency values are in milliseconds for readability.
 type Report struct {
-	GeneratedAt time.Time      `json:"generated_at"`
-	Total       int64          `json:"total"`
-	Errors      int64          `json:"errors"`
-	ErrorRate   float64        `json:"error_rate_pct"`
-	WallTimeSec float64        `json:"wall_time_s"`
-	RPS         float64        `json:"rps"`
-	BytesIn     int64          `json:"bytes_in"`
-	Latency     LatencyMs      `json:"latency"`
-	Steps       []StepReport   `json:"steps,omitempty"`
+	GeneratedAt time.Time `json:"generated_at"`
+	Total       int64     `json:"total"`
+	Errors      int64     `json:"errors"`
+	ErrorRate   float64   `json:"error_rate_pct"`
+	WallTimeSec float64   `json:"wall_time_s"`
+	RPS         float64   `json:"rps"`
+	BytesIn     int64     `json:"bytes_in"`
+	Latency     LatencyMs `json:"latency"`
+	// CorrectedLatency is the coordinated-omission-corrected latency (rate mode
+	// only): what the user actually waits, counted from each request's scheduled
+	// dispatch time. Nil in VU mode, where there is no schedule to omit against.
+	CorrectedLatency *CorrectedLatencyMs `json:"corrected_latency,omitempty"`
+	Steps            []StepReport        `json:"steps,omitempty"`
 	// ErrorBreakdown lists failed requests grouped by plain-language cause.
 	ErrorBreakdown []ErrorBreakdownRow `json:"error_breakdown,omitempty"`
 	Verdict        Interpretation      `json:"verdict"`
@@ -33,6 +37,14 @@ type LatencyMs struct {
 	P95Ms  int64 `json:"p95_ms"`
 	P99Ms  int64 `json:"p99_ms"`
 	MaxMs  int64 `json:"max_ms"`
+}
+
+// CorrectedLatencyMs holds coordinated-omission-corrected percentiles in ms.
+type CorrectedLatencyMs struct {
+	P50Ms int64 `json:"p50_ms"`
+	P90Ms int64 `json:"p90_ms"`
+	P95Ms int64 `json:"p95_ms"`
+	P99Ms int64 `json:"p99_ms"`
 }
 
 // StepReport holds per-step metrics in milliseconds for reporting.
@@ -65,6 +77,14 @@ func SummaryToReport(sum metrics.Summary) Report {
 			P99Ms:  sum.P99.Milliseconds(),
 			MaxMs:  sum.MaxLatency.Milliseconds(),
 		},
+	}
+	if sum.HasCorrected {
+		r.CorrectedLatency = &CorrectedLatencyMs{
+			P50Ms: sum.CorrectedP50.Milliseconds(),
+			P90Ms: sum.CorrectedP90.Milliseconds(),
+			P95Ms: sum.CorrectedP95.Milliseconds(),
+			P99Ms: sum.CorrectedP99.Milliseconds(),
+		}
 	}
 	for _, s := range sum.Steps {
 		errRate := float64(0)

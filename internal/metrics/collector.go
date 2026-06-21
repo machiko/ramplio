@@ -31,9 +31,9 @@ type GroupSummary struct {
 
 const (
 	bufMultiplier = 10
-	histMinNs     = 1                // 1 nanosecond
-	histMaxNs     = 60_000_000_000   // 60 seconds in nanoseconds
-	histSigFigs   = 3                // 0.1% precision
+	histMinNs     = 1              // 1 nanosecond
+	histMaxNs     = 60_000_000_000 // 60 seconds in nanoseconds
+	histSigFigs   = 3              // 0.1% precision
 )
 
 type Collector struct {
@@ -43,6 +43,7 @@ type Collector struct {
 	mu        sync.RWMutex
 	sum       Summary
 	hist      *hdrhistogram.Histogram
+	corrHist  *hdrhistogram.Histogram // coordinated-omission-corrected latency (rate mode only)
 	once      sync.Once
 	startedAt time.Time
 	dropped   atomic.Int64 // samples discarded due to full channel
@@ -65,6 +66,7 @@ func NewCollector(maxVUs int) *Collector {
 		quit:       make(chan struct{}),
 		stopped:    make(chan struct{}),
 		hist:       hdrhistogram.New(histMinNs, histMaxNs, histSigFigs),
+		corrHist:   hdrhistogram.New(histMinNs, histMaxNs, histSigFigs),
 		startedAt:  time.Now(),
 		stepHists:  make(map[string]*hdrhistogram.Histogram),
 		stepSums:   make(map[string]Summary),
@@ -98,6 +100,13 @@ func (c *Collector) Stop() Summary {
 		c.sum.P90 = nsToD(c.hist.ValueAtQuantile(90))
 		c.sum.P95 = nsToD(c.hist.ValueAtQuantile(95))
 		c.sum.P99 = nsToD(c.hist.ValueAtQuantile(99))
+	}
+	if c.corrHist.TotalCount() > 0 {
+		c.sum.HasCorrected = true
+		c.sum.CorrectedP50 = nsToD(c.corrHist.ValueAtQuantile(50))
+		c.sum.CorrectedP90 = nsToD(c.corrHist.ValueAtQuantile(90))
+		c.sum.CorrectedP95 = nsToD(c.corrHist.ValueAtQuantile(95))
+		c.sum.CorrectedP99 = nsToD(c.corrHist.ValueAtQuantile(99))
 	}
 	if len(c.stepOrder) > 0 {
 		steps := make([]StepSummary, 0, len(c.stepOrder))
@@ -183,6 +192,19 @@ func (c *Collector) recordSample(s Sample) {
 	c.sum.record(s)
 	if ns := int64(s.Latency); ns > 0 {
 		_ = c.hist.RecordValue(ns)
+	}
+	// Coordinated-omission correction: when a scheduled dispatch time is present
+	// (rate mode), the latency the user really sees is from when the request was
+	// due, not when a worker happened to send it. Floor at service latency to
+	// guard against clock skew making the corrected value smaller.
+	if !s.ScheduledAt.IsZero() {
+		corrected := s.At.Sub(s.ScheduledAt)
+		if corrected < s.Latency {
+			corrected = s.Latency
+		}
+		if ns := int64(corrected); ns > 0 {
+			_ = c.corrHist.RecordValue(ns)
+		}
 	}
 	if s.StepName != "" {
 		if _, ok := c.stepHists[s.StepName]; !ok {

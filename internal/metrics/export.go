@@ -37,16 +37,19 @@ type GroupExport struct {
 // state. Workers send this to the coordinator, which merges multiple exports
 // into one statistically correct Summary via MergeExports.
 type HistogramExport struct {
-	Total   int64         `json:"total"`
-	Errors  int64         `json:"errors"`
-	BytesIn int64         `json:"bytes_in"`
-	MinNs   int64         `json:"min_ns"`
-	MaxNs   int64         `json:"max_ns"`
-	WallNs  int64         `json:"wall_ns"`
-	Dropped int64         `json:"dropped"`
-	Hist    HistEnvelope  `json:"hist"`
-	Steps   []StepExport  `json:"steps,omitempty"`
-	Groups  []GroupExport `json:"groups,omitempty"`
+	Total   int64        `json:"total"`
+	Errors  int64        `json:"errors"`
+	BytesIn int64        `json:"bytes_in"`
+	MinNs   int64        `json:"min_ns"`
+	MaxNs   int64        `json:"max_ns"`
+	WallNs  int64        `json:"wall_ns"`
+	Dropped int64        `json:"dropped"`
+	Hist    HistEnvelope `json:"hist"`
+	// CorrHist is the coordinated-omission-corrected latency histogram (rate mode).
+	// Empty in VU mode; merged across workers like Hist.
+	CorrHist HistEnvelope  `json:"corr_hist,omitempty"`
+	Steps    []StepExport  `json:"steps,omitempty"`
+	Groups   []GroupExport `json:"groups,omitempty"`
 	// ErrorBreakdown carries per-cause failure counts so the coordinator can
 	// explain failures in plain language across the whole distributed run.
 	ErrorBreakdown map[ErrorKind]int64 `json:"error_breakdown,omitempty"`
@@ -94,6 +97,9 @@ func (c *Collector) Export() HistogramExport {
 		Dropped: c.dropped.Load(),
 		Hist:    exportHist(c.hist),
 	}
+	if c.corrHist.TotalCount() > 0 {
+		exp.CorrHist = exportHist(c.corrHist)
+	}
 	if len(c.sum.ErrorBreakdown) > 0 {
 		exp.ErrorBreakdown = make(map[ErrorKind]int64, len(c.sum.ErrorBreakdown))
 		for k, v := range c.sum.ErrorBreakdown {
@@ -131,6 +137,7 @@ func MergeExports(exports []HistogramExport) Summary {
 	}
 
 	merged := hdrhistogram.New(histMinNs, histMaxNs, histSigFigs)
+	mergedCorr := hdrhistogram.New(histMinNs, histMaxNs, histSigFigs)
 
 	stepHists := make(map[string]*hdrhistogram.Histogram)
 	stepSums := make(map[string]*StepSummary)
@@ -168,6 +175,9 @@ func MergeExports(exports []HistogramExport) Summary {
 		if h := e.Hist.toHist(); h != nil {
 			merged.Merge(h)
 		}
+		if h := e.CorrHist.toHist(); h != nil {
+			mergedCorr.Merge(h)
+		}
 
 		for _, st := range e.Steps {
 			if stepSums[st.Name] == nil {
@@ -201,6 +211,13 @@ func MergeExports(exports []HistogramExport) Summary {
 		sum.P90 = nsToD(merged.ValueAtQuantile(90))
 		sum.P95 = nsToD(merged.ValueAtQuantile(95))
 		sum.P99 = nsToD(merged.ValueAtQuantile(99))
+	}
+	if mergedCorr.TotalCount() > 0 {
+		sum.HasCorrected = true
+		sum.CorrectedP50 = nsToD(mergedCorr.ValueAtQuantile(50))
+		sum.CorrectedP90 = nsToD(mergedCorr.ValueAtQuantile(90))
+		sum.CorrectedP95 = nsToD(mergedCorr.ValueAtQuantile(95))
+		sum.CorrectedP99 = nsToD(mergedCorr.ValueAtQuantile(99))
 	}
 
 	if len(stepOrder) > 0 {

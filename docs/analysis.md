@@ -18,7 +18,7 @@
 
 | 模組 | 說明 |
 |------|------|
-| `engine/ramp.go` | 多階段負載引擎：VU 模式（線性插值）+ Ramping RPS（token bucket）；Setup/Teardown lifecycle；Circuit Breaker（滑動時間窗口 ring buffer）；Step.If/Loop/Group/Pause/Retry；dataSource（sequential/random）；預編譯 regex capture cache |
+| `engine/ramp.go` | 多階段負載引擎：VU 模式（線性插值）+ Ramping RPS（**單一 dispatcher + worker 池**，dispatcher 以 Reserve+capped sleep 排定每請求「應送時間戳」注入 buffered jobs channel，避免 rate 0 卡死並按 ramp 追隨速率）；Setup/Teardown lifecycle；Circuit Breaker（滑動時間窗口 ring buffer）；Step.If/Loop/Group/Pause/Retry；dataSource（sequential/random）；預編譯 regex capture cache |
 | `scenarios/scenario.go` | YAML 場景資料結構：Stage、Step（Protocol/Auth/Capture/Assertions/Retry）、Thresholds（per-step）、CircuitBreakerConfig（WindowSeconds）、VarsFrom、ScenarioHTTP |
 | `scenarios/parser.go` | YAML 解析與驗證（`Parse`/`ParseFile`）；VU/RPS 混用阻擋 |
 | `scenarios/template.go` | `RenderString`/`RenderHeaders`/`EvalCondition`；支援 uuid/timestamp/env/vars/capture/data token；EvalCondition parse 失敗輸出 stderr 警告（不靜默） |
@@ -35,7 +35,7 @@
 | `distributed/api.go` | **新增** 分散式 DTO：AssignRequest / PartialSummary / LiveMetricsResponse / StatusResponse |
 | `config/distributed.go` | **新增** DistributedConfig（Workers/ListenAddr/Secret/PollIntervalMs/AssignTimeoutSec）；Secret 與部分欄位定義但未被使用 |
 | `reporter/sink.go` | **新增** Sink 介面 + DetailedSink 選用介面（WriteDetailed 輸出 per-step/group 明細） |
-| `metrics/collector.go` | Channel 驅動聚集器；HDR 直方圖；per-step/group；緩衝區滿計數 dropped 並在 Stop() 輸出警告 |
+| `metrics/collector.go` | Channel 驅動聚集器；HDR 直方圖（service + **corrHist 協調遺漏修正**：`At−ScheduledAt` floor 於 service latency）；per-step/group；緩衝區滿計數 dropped 並在 Stop() 輸出警告 |
 | `metrics/errorkind.go` | **新增** 失敗分類：`ClassifyError(err,status)→ErrorKind`（DNS/連線被拒/中斷/逾時/TLS/4xx/5xx/斷言/其他）；以 `errors.As` 拆 url→net→syscall/x509，status>0+err≠nil 判定為斷言失敗；`DominantErrorKind` 取主因與占比；`DisplayOrder` 穩定排序 |
 | `metrics/summary.go` | 聚集統計；`RPS() = Total/WallTime`；`MeanLatency`；`ErrorBreakdown map[ErrorKind]int64`（record() 失敗時懶初始化分類累加） |
 | `metrics/export.go` | 分散式 HDR 合併；`HistogramExport.ErrorBreakdown` 跨節點加總（`Export`/`MergeExports`） |
@@ -43,7 +43,7 @@
 | `reporter/terminal.go` | 靜態摘要（繁中）；per-step/group 表格；**失敗原因分類小表**（`ErrorBreakdownRows`）；droppedSamples 警告；PrintInterpretation |
 | `reporter/html.go` | go:embed HTML 報告 |
 | `reporter/json.go` | Summary ↔ JSON；`error_breakdown` 失敗分類列；Verdict = `Interpret(sum)`（共用白話解讀）|
-| `reporter/interpret.go` | 單一來源白話解讀 `Interpret(sum)`：整體結論／反應速度／穩定度／承受能力／一句話總結；門檻統一（fail err≥5% 或 p99≥3s；warn err≥1% 或 p99≥1s）；終端／JSON／HTML 共用，Dashboard JS 鏡像同門檻與用語 |
+| `reporter/interpret.go` | 單一來源白話解讀 `Interpret(sum)`：整體結論／反應速度／穩定度／承受能力／一句話總結；門檻統一（fail err≥5% 或 p99≥3s；warn err≥1% 或 p99≥1s）；**rate 模式整體結論改採 corrected p99（`verdictP99`）**，誠實反映使用者實感；終端／JSON／HTML 共用，Dashboard JS 鏡像同門檻與用語 |
 | `reporter/errorcause.go` | **新增** 失敗歸因白話：`errorCopyByKind` 單一來源（每類 Title/Cause/Action/Label）；`failureCauseFinding` 產最高優先 Finding（err≥1% 才出）；`reachabilityDominates` 抑制連線層失敗被誤判為「超出負荷」；`ErrorBreakdownRows` 表格列；`ExplainErrorKind`/`IsReachabilityFailure` 供 pre-flight 使用 |
 | `reporter/tui.go` | Bubbletea 即時終端儀表板 |
 | `reporter/prometheus.go` | `/metrics` 端點，500ms 更新 |
@@ -130,7 +130,7 @@
 > 目標：讓量測數據有公信力，不靠「跟 k6/JMeter 比一比」（會寄生在別人工具正確性上），改以數學 ground-truth 自證 + 修正方法論瑕疵。詳見 `docs/accuracy.md`。
 
 - **Phase 1 — Ground-truth 自我驗證（✅ 已完成）**：`mock.go` 確定性延遲注入（固定/雙峰）；`groundtruth_test.go` 對已知分佈施壓斷言百分位在容差內；`docs/accuracy.md` 方法論。
-- **Phase 2 — Coordinated Omission 修正（未做）**：RPS 模式 `runRate` 改 dispatcher/worker，`Sample.ScheduledAt` 起算修正延遲，HDR 並陳 service / 壓力下延遲。
+- **Phase 2 — Coordinated Omission 修正（✅ 已完成）**：`runRate` 改單一 dispatcher（Reserve+capped sleep，避免 rate 0 卡死）+ worker 池消費排定時間戳；`Sample.ScheduledAt` 起算 `corrected = At−ScheduledAt`（floor 於 service）；collector 第二條 `corrHist`；`Summary.CorrectedP*`/`HasCorrected`；`export.go` 跨節點合併 corrected；reporter 整體結論改採 corrected p99（`verdictP99`）、終端「壓力下實際延遲」區塊、JSON `corrected_latency`、diagnose 新增「請求速率超過系統能消化的速度」歸因。VU 模式不套用。
 - **Phase 3 — 量測透明度（未做）**：httptrace 拆 DNS/TCP/TLS/TTFB/total；產生器自我健康度與「量測可信度」判語。
 
 ---

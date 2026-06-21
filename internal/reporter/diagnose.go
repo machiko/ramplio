@@ -27,6 +27,8 @@ const (
 	tailFloorMs         = 500 // 且 p99 >= 500ms 才有意義，避免快測試誤報
 	stepErrorMultiplier = 2.0 // 某步驟錯誤率 >= 2× 整體
 	dominanceRatio      = 1.5 // 最慢步驟/群組 p99 >= 1.5× 次慢
+	coOmissionRatio     = 2.0 // 修正後 p99 >= 2× 服務 p99 → 送達速率超過消化速度
+	coOmissionFloorMs   = 200 // 且差距 >= 200ms 才提報，避免噪音
 )
 
 // severityRank orders findings for display: most urgent first.
@@ -46,6 +48,19 @@ func Diagnose(sum metrics.Summary) []Finding {
 	// 0. 失敗歸因（為什麼會失敗）— 最高優先，直接點名主因並給下一步。
 	if cause, ok := failureCauseFinding(sum); ok {
 		findings = append(findings, cause)
+	}
+
+	// 0b. 協調遺漏：送達速率超過系統消化速度（rate 模式）。伺服器處理本身不慢，
+	//     但請求排隊，使用者實際等待遠高於服務時間——這是 closed-loop 工具會漏掉的。
+	if coOmissionSignificant(sum) {
+		findings = append(findings, Finding{
+			Severity: "critical",
+			Icon:     "✗",
+			Title:    "請求速率超過系統能消化的速度",
+			Cause:    "伺服器每次處理其實不慢，但請求送達的速度比它消化的速度快，多出來的請求只能排隊，使用者實際等待時間因此遠高於伺服器處理時間。",
+			Action:   "降低目標 RPS，或擴充後端處理能力；目前這個速率系統已經追不上。",
+			Evidence: fmt.Sprintf("伺服器每次處理只要 %s，但壓力下使用者實際要等 %s。", humanizeDuration(sum.P99), humanizeDuration(sum.CorrectedP99)),
+		})
 	}
 
 	// 1. 整體過載 — 但若失敗其實是「連不上目標」（DNS/連線被拒/憑證），那不是
@@ -156,6 +171,18 @@ func Diagnose(sum metrics.Summary) []Finding {
 		return severityRank[findings[i].Severity] < severityRank[findings[j].Severity]
 	})
 	return findings
+}
+
+// coOmissionSignificant reports whether the corrected (rate-mode) p99 exceeds the
+// service p99 by enough to flag that requests are queueing — the generator's
+// target rate is outrunning what the system can process.
+func coOmissionSignificant(sum metrics.Summary) bool {
+	if !sum.HasCorrected {
+		return false
+	}
+	gap := sum.CorrectedP99 - sum.P99
+	return gap.Milliseconds() >= coOmissionFloorMs &&
+		float64(sum.CorrectedP99) >= coOmissionRatio*float64(sum.P99)
 }
 
 // twoSlowestSteps returns the slowest and second-slowest steps by p99.

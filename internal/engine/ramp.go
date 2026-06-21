@@ -45,8 +45,8 @@ type RampStep struct {
 type RampConfig struct {
 	Stages         []scenarios.Stage
 	Steps          []RampStep
-	SetupSteps     []RampStep // run once before stages; captures shared with all VUs
-	TeardownSteps  []RampStep // run once after stages regardless of outcome
+	SetupSteps     []RampStep          // run once before stages; captures shared with all VUs
+	TeardownSteps  []RampStep          // run once after stages regardless of outcome
 	Vars           map[string]string   // scenario-level vars available for template rendering
 	DataRows       []map[string]string // rows from vars_from data file; nil = no data file
 	DataMode       string              // "sequential" (default) or "random"
@@ -386,16 +386,35 @@ func (e *RampEngine) runRate(ctx context.Context) metrics.Summary {
 	workerCtx, workerCancel := context.WithCancel(ctx)
 	defer workerCancel()
 
-	lim := rate.NewLimiter(0, workerCount)
+	// burst=1: the limiter releases tokens at the exact configured cadence. A
+	// larger burst would let tokens pile up while workers are busy and then fire
+	// back-to-back, masking the queueing delay coordinated-omission correction
+	// must capture.
+	lim := rate.NewLimiter(0, 1)
+
+	// jobs carries scheduled dispatch timestamps from the single dispatcher to
+	// the workers. Its buffer is the backlog depth: when workers fall behind, a
+	// timestamp ages in the queue and that age is exactly the omission to correct.
+	jobs := make(chan time.Time, workerCount)
 
 	var wg sync.WaitGroup
 	for range workerCount {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			e.runRateWorker(workerCtx, lim)
+			e.runRateWorker(workerCtx, jobs)
 		}()
 	}
+
+	// The dispatcher paces requests at the current rate independent of worker
+	// availability, so requests the generator can't serve in time are measured
+	// as late rather than silently delayed.
+	dispCtx, dispCancel := context.WithCancel(ctx)
+	dispDone := make(chan struct{})
+	go func() {
+		defer close(dispDone)
+		e.dispatch(dispCtx, lim, jobs)
+	}()
 
 	prevTarget := 0
 	for stageIdx, stage := range e.cfg.Stages {
@@ -430,6 +449,8 @@ func (e *RampEngine) runRate(ctx context.Context) metrics.Summary {
 		prevTarget = stage.TargetRPS
 	}
 
+	dispCancel()
+	<-dispDone
 	workerCancel()
 	wg.Wait()
 
@@ -438,12 +459,75 @@ func (e *RampEngine) runRate(ctx context.Context) metrics.Summary {
 	return sum
 }
 
-func (e *RampEngine) runRateWorker(ctx context.Context, lim *rate.Limiter) {
+// dispatch is the single producer for the jobs channel. It paces requests at the
+// limiter's current rate and stamps each with the time it was due to be sent.
+// When all workers are busy and the backlog is full the send blocks — natural
+// open-model backpressure — and the time a timestamp waits before a worker picks
+// it up becomes the coordinated-omission correction applied in the collector.
+//
+// It uses Reserve + a capped sleep rather than lim.Wait so it re-reads the rate
+// at least every dispatchReeval: a blocked Wait holds a reservation computed
+// against the old rate and would not observe the ramp's SetLimit changes (and at
+// rate 0 would block forever). When the current rate is ~0 (ramping from/to 0)
+// the reservation delay is effectively infinite, so we cancel and poll instead
+// of dispatching.
+func (e *RampEngine) dispatch(ctx context.Context, lim *rate.Limiter, jobs chan<- time.Time) {
+	const dispatchReeval = rampTickInterval
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		if e.isCircuitTripped() {
+			return
+		}
+
+		now := time.Now()
+		r := lim.ReserveN(now, 1)
+		delay := r.DelayFrom(now)
+		if !r.OK() || delay > dispatchReeval {
+			// Rate too low to dispatch right now; don't hold a long reservation,
+			// re-evaluate after one tick so rate changes are picked up.
+			r.Cancel()
+			if !sleepCtx(ctx, dispatchReeval) {
+				return
+			}
+			continue
+		}
+		if delay > 0 && !sleepCtx(ctx, delay) {
+			r.Cancel()
+			return
+		}
+
+		scheduledAt := now.Add(delay)
+		select {
+		case jobs <- scheduledAt:
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+// sleepCtx sleeps for d or until ctx is done. Returns false if ctx ended first.
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+func (e *RampEngine) runRateWorker(ctx context.Context, jobs <-chan time.Time) {
 	varCtx := e.newVarContext()
 	stepIdx := 0
 	for {
-		if err := lim.Wait(ctx); err != nil {
+		var scheduledAt time.Time
+		select {
+		case <-ctx.Done():
 			return
+		case scheduledAt = <-jobs:
 		}
 		if e.isCircuitTripped() {
 			return
@@ -466,7 +550,7 @@ func (e *RampEngine) runRateWorker(ctx context.Context, lim *rate.Limiter) {
 		for r := 0; r < repeat; r++ {
 			req, err := renderRequest(step, varCtx)
 			if err != nil {
-				e.collector.Add(metrics.Sample{Error: err, At: time.Now(), StepName: step.Name, Group: step.Group})
+				e.collector.Add(metrics.Sample{Error: err, At: time.Now(), ScheduledAt: scheduledAt, StepName: step.Name, Group: step.Group})
 				e.incFails()
 				continue
 			}
@@ -487,21 +571,22 @@ func (e *RampEngine) runRateWorker(ctx context.Context, lim *rate.Limiter) {
 			}
 
 			e.collector.Add(metrics.Sample{
-				Latency:    result.Latency,
-				StatusCode: result.StatusCode,
-				BytesRead:  result.BytesRead,
-				Error:      result.Error,
-				At:         time.Now(),
-				StepName:   step.Name,
-				Group:      step.Group,
+				Latency:     result.Latency,
+				StatusCode:  result.StatusCode,
+				BytesRead:   result.BytesRead,
+				Error:       result.Error,
+				At:          time.Now(),
+				ScheduledAt: scheduledAt,
+				StepName:    step.Name,
+				Group:       step.Group,
 			})
 
 			if result.Error != nil {
 				e.incFails()
 			} else {
 				if e.cbWindow != nil {
-						e.cbWindow.reset()
-					}
+					e.cbWindow.reset()
+				}
 			}
 		}
 		e.activeVUs.Add(-1)
@@ -771,4 +856,3 @@ func basicAuthHeader(username, password string) string {
 	creds := username + ":" + password
 	return "Basic " + base64.StdEncoding.EncodeToString([]byte(creds))
 }
-

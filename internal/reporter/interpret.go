@@ -71,9 +71,22 @@ func Interpret(sum metrics.Summary) Interpretation {
 		}
 		bottleneck = fmt.Sprintf("最花時間的步驟是「%s」（%s內完成），要加快先從這裡下手。", name, humanizeDuration(slowest))
 	}
-	in := ReadingsFor(sum.P99, sum.ErrorRate(), sum.RPS(), sum.Total, sum.Errors, bottleneck)
+	// In rate (open) mode the honest latency the user experiences is the
+	// coordinated-omission-corrected p99 — when the generator can't keep up,
+	// service time alone understates the real wait. Use it for the verdict so the
+	// headline reflects reality, not a flattering closed-loop number.
+	in := ReadingsFor(verdictP99(sum), sum.ErrorRate(), sum.RPS(), sum.Total, sum.Errors, bottleneck)
 	in.Diagnosis = Diagnose(sum)
 	return in
+}
+
+// verdictP99 returns the latency the verdict should judge: the corrected p99 when
+// present (rate mode), otherwise the raw service p99 (VU mode).
+func verdictP99(sum metrics.Summary) time.Duration {
+	if sum.HasCorrected {
+		return sum.CorrectedP99
+	}
+	return sum.P99
 }
 
 // ReadingsFor builds an Interpretation from raw scalar metrics. It is the shared

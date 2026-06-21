@@ -79,7 +79,38 @@ ramplio run --url http://localhost:8080 --rps 200 --duration 30s
 
 ---
 
+## Coordinated Omission 修正（rate 模式）
+
+### 問題
+
+closed-loop 壓測工具（送出一個請求 → 等回應 → 再送下一個）有個著名的系統性偏差：當系統變慢，工具「自動」放慢送出速度，於是**最該被記錄的慢請求根本沒被送出**，量到的延遲遠低於使用者實際經歷。Gil Tene（HdrHistogram 作者）稱之為 Coordinated Omission。
+
+### 修正方式
+
+Ramplio 的 rate（open）模式以單一 **dispatcher** 按目標速率排定每個請求的「應送時間」，與 worker 是否有空無關。worker 真正送出時，量測分兩條並陳：
+
+| 數字 | 從何時起算 | 意義 |
+|------|-----------|------|
+| **服務延遲（service）** | worker 實際送出 | 伺服器處理一個請求要多久 |
+| **壓力下延遲（corrected）** | 該請求「排定要送」的時間 | 使用者實際從點擊到看到回應要等多久 |
+
+當系統跟不上請求速率，請求在 dispatcher 的佇列中排隊，`corrected = 完成時間 − 應送時間` 會把這段排隊等待算進去——這正是 closed-loop 工具會漏掉的。報告的**整體結論採用 corrected p99**，因為那才是使用者真正的體驗。
+
+> VU（closed-loop）模式沒有「排定時間」這個概念，因此不套用修正，報告也不顯示 corrected 數字——誠實標明適用範圍。
+>
+> 注意：當產生器有充足餘裕（worker 池遠大於同時在途請求數），corrected ≈ service，不會無中生有地灌水。修正只在系統逼近或超過可承受速率時才顯現差距。
+
+### 驗證
+
+- `internal/metrics/coordinated_omission_test.go`：直接驗證修正數學（排隊 180ms → corrected p99 反映完整等待、service p99 只反映處理時間），並驗證分散式合併保留修正。
+- `internal/engine/coordinated_omission_test.go`：驗證 rate 模式串接 ScheduledAt；有餘裕時 corrected 不灌水；VU 模式不產生 corrected。
+
+```bash
+ramplio mock-server --latency 50ms &
+# 目標 500 RPS，但伺服器每次 50ms：觀察 corrected p99 ≫ service p99
+ramplio run --url http://localhost:8080 --rps 500 --duration 30s
+```
+
 ## 後續支柱
 
-- **Coordinated Omission 修正**（Phase 2）：RPS 模式下，量測從排定發送時間起算，系統被壓垮時不再低報延遲。
 - **量測透明度**（Phase 3）：latency 拆解為 DNS / 連線 / TLS / TTFB / total；產生器自我健康度判語，工具自身可能成為瓶頸時主動警告。

@@ -4,11 +4,16 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/ramplio/ramplio/internal/metrics"
 )
 
 const divider = "────────────────────────────────────────"
+
+// coOmissionGapFloor is the minimum gap between corrected and service p99 before
+// we call out coordinated omission in plain language — avoids noise on tiny gaps.
+const coOmissionGapFloor = 50 * time.Millisecond
 
 func PrintSummary(w io.Writer, sum metrics.Summary) {
 	line := func(label, value string) {
@@ -24,13 +29,31 @@ func PrintSummary(w io.Writer, sum metrics.Summary) {
 	line("每秒請求：", fmt.Sprintf("%.1f", sum.RPS()))
 
 	section("延遲分佈")
-	line("最短：", formatDuration(sum.MinLatency))
-	line("平均：", formatDuration(sum.MeanLatency()))
-	line("p50：", formatDuration(sum.P50))
-	line("p90：", formatDuration(sum.P90))
-	line("p95：", formatDuration(sum.P95))
-	line("p99：", formatDuration(sum.P99))
-	line("最長：", formatDuration(sum.MaxLatency))
+	if sum.HasCorrected {
+		line("p50（伺服器處理）：", formatDuration(sum.P50))
+		line("p99（伺服器處理）：", formatDuration(sum.P99))
+	} else {
+		line("最短：", formatDuration(sum.MinLatency))
+		line("平均：", formatDuration(sum.MeanLatency()))
+		line("p50：", formatDuration(sum.P50))
+		line("p90：", formatDuration(sum.P90))
+		line("p95：", formatDuration(sum.P95))
+		line("p99：", formatDuration(sum.P99))
+		line("最長：", formatDuration(sum.MaxLatency))
+	}
+
+	// Coordinated-omission correction (rate mode): the latency the user actually
+	// waits, counted from when each request was due rather than when it was sent.
+	if sum.HasCorrected {
+		section("壓力下實際延遲（含排隊等待）")
+		line("p50（使用者實感）：", formatDuration(sum.CorrectedP50))
+		line("p99（使用者實感）：", formatDuration(sum.CorrectedP99))
+		if sum.CorrectedP99 >= 2*sum.P99 && sum.CorrectedP99-sum.P99 >= coOmissionGapFloor {
+			fmt.Fprintf(w, "\n  ℹ 伺服器每次處理只要 %s，但壓力下使用者實際要等 %s——\n",
+				formatDuration(sum.P99), formatDuration(sum.CorrectedP99))
+			fmt.Fprintf(w, "    代表請求送達速率已超過系統消化速度，請求在排隊。\n")
+		}
+	}
 
 	section("回應狀態")
 	success := sum.Total - sum.Errors
