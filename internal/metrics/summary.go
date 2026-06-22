@@ -42,6 +42,10 @@ type Summary struct {
 	GeneratorPeakGoroutines int           `json:"-"`
 	GeneratorGCPause        time.Duration `json:"-"` // cumulative stop-the-world GC pause during the run
 	GeneratorGCCount        int64         `json:"-"`
+	// GeneratorWorkerCapHit is true when rate mode grew its worker pool to the
+	// ceiling: under load the generator itself may be the bottleneck, so any
+	// queueing delay can't be attributed solely to the target. Set by the engine.
+	GeneratorWorkerCapHit bool `json:"-"`
 
 	// ErrorBreakdown counts failed requests by cause (DNS, connection refused,
 	// timeout, TLS, HTTP 4xx/5xx, assertion, …). Populated lazily on the first

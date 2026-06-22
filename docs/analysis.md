@@ -84,8 +84,6 @@
 |--------|------|------|
 | MED | `dashboard/controller.go` 與 `dashcontrol.go` 職責重疊 | 兩者 |
 | LOW | 單機 `runScenario` 仍依賴 TUI，非 TTY 下亦會提早結束（分散式已修，單機未做）| cmd/ramplio/run.go |
-| MED | `runRate()` worker 數 = maxRPS×5（上限 5000），高 RPS 記憶體壓力 | engine/ramp.go |
-| MED | Assertion 失敗不觸發 retry（assertion 在 executor 後才評估）| engine/ramp.go |
 | MED | WebSocket 每次請求開新連線（無持久連線）| protocols/ws.go |
 | LOW | HTML 報告無互動圖表 | reporter/html.go |
 | LOW | Setup 步驟執行結果不計入指標 | engine/ramp.go |
@@ -96,6 +94,7 @@
 > 已解決（自 `72a7b52`）：~~分散式測試缺失~~、~~Sink per-step 明細~~、~~EvalCondition AND/OR~~。
 > 已解決（Phase 4）：~~分散式百分位合併錯誤~~（改用 HDR 直方圖序列化合併，`metrics.MergeExports`，含 step/group 明細）、~~repo 產物被追蹤~~（已移除並補 `.gitignore`）、~~Worker 端點無認證~~（shared secret + Bearer middleware）、~~分散式 Setup/Teardown stub~~（coordinator 集中執行 setup，captures 透過 `RampConfig.SeedCaptures` 廣播注入 worker）、~~worker 執行 context 隨 HTTP 請求取消導致 0 請求~~（改用 `context.WithoutCancel`）。
 > 失敗白話化（2026-06-19）：新增失敗分類（`metrics.ErrorKind`/`ClassifyError`）、失敗歸因白話（`reporter/errorcause.go`，連線被拒/DNS/TLS/逾時/4xx/5xx/斷言各有人話+下一步）、修正連線層失敗被誤判為「超出負荷」、開跑前 pre-flight 預檢（連線層硬錯即時白話中止）。錯誤分類隨 `HistogramExport` 跨節點合併。
+> 鞏固設計+透明度（P2，2026-06-22）：~~runRate worker = maxRPS×5 記憶體壓力~~（改 **grow-on-demand**：`ratePool` idle/total/capHit，dispatcher 送前 `maybeGrow`，低延遲目標只生 ~需求量，達 cap 才阻塞——完整保留 CO 背壓語義；CO 回歸測試全綠）、~~assertion 失敗不觸發 retry 疑似漏洞~~（**釐清為刻意設計**：assertion 失敗代表真實缺陷，retry 會掩蓋並虛低錯誤率，比照 k6/Gatling 不 retry；補 `assertion_retry_test.go` 回歸守 + ramp.go 意圖註解）。新增透明度：`Summary.GeneratorWorkerCapHit` → rate 達 worker 上限時，「量測可信度」判語標示「產生器自身可能是瓶頸」，避免假性 overload 被誤歸因於目標。
 > 已解決（Phase 5）：~~分散式僅明文 HTTP / 無 TLS~~（worker `ListenAndServeTLS` + coordinator scheme-aware URL 與可注入 TLS client；CLI `--tls-cert/--tls-key/--tls-ca/--tls-skip-verify`）、~~PollIntervalMs/AssignTimeoutSec 未生效~~（coordinator `SetTiming` + CLI `--poll-interval/--assign-timeout`，config helper）。
 
 ---
