@@ -173,7 +173,28 @@ ramplio run --scenario my.yaml --dashboard
 
 ### Ground-truth 自我驗證
 
-內建 `mock-server` 可注入**確定性的延遲分佈**，讓你親手重現驗證：量到的百分位只可能 ≥ 注入值（多了本機往返），絕不可能低於——若低於就代表量測有 bug。
+量到的百分位只可能 ≥ 注入值（多了本機往返），絕不可能低於——若低於就代表量測有 bug。這是純粹的數學，不靠跟其他工具比對。
+
+**最簡單：一行自證。** `ramplio verify` 自動起一個注入已知延遲的內建目標、施壓、比對、給白話判語：
+
+```bash
+ramplio verify
+```
+
+```
+  量測自證 — 對已知延遲分佈施壓，反推 Ramplio 量得準不準
+  注入分佈：固定 50ms    施壓：10 VU × 3s    容差：±20ms
+
+  量測結果（注入值 → 量到值）
+    p50            50ms → 51ms    ✓
+    p99            50ms → 54ms    ✓
+
+  ✓ 量測準確：所有百分位都落在注入值 +0~20ms 內。
+```
+
+失準時以 exit code `1` 退出，可放進 CI 當作「這版 Ramplio 沒把量測改壞」的回歸閘門。
+
+**想自訂分佈？** 用內建 `mock-server` 注入確定性延遲，再手動施壓比對：
 
 ```bash
 # 固定延遲：量到的所有百分位都應 ≈ 50ms
@@ -669,6 +690,22 @@ Flags:
       --latency-fast string  雙峰：快帶延遲（多數請求）
       --latency-slow string  雙峰：慢帶延遲（尾端）
       --slow-pct int         雙峰：多少 % 的請求走慢帶（0–100）
+```
+
+```
+ramplio verify [flags]
+
+一鍵自證：對注入已知延遲的內建目標施壓，比對量到的百分位與注入值，
+給白話判語。準確 exit 0、失準 exit 1（見 量測公信力）。
+
+Flags:
+      --latency string       固定注入延遲（預設 50ms；與雙峰互斥）
+      --latency-fast string  雙峰：快帶延遲（多數請求）
+      --latency-slow string  雙峰：慢帶延遲（尾端）
+      --slow-pct int         雙峰：多少 % 的請求走慢帶（預設 10）
+      --tolerance string     可接受的量測誤差（預設 "20ms"）
+      --duration string      施壓時長（預設 "3s"）
+      --vus int              並發虛擬使用者數（預設 10）
 ```
 
 ### 儲存與重新載入結果

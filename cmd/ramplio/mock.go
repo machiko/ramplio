@@ -52,6 +52,58 @@ func (p latencyProfile) describe() string {
 	return ""
 }
 
+// newMockHandler builds the mock server's HTTP routes with the given latency
+// profile. reqCount is shared so the caller can report the total served. Both
+// `mock-server` and `verify` use this so the injected-latency target is defined
+// in exactly one place — the ground truth lives here.
+func newMockHandler(profile latencyProfile, reqCount *atomic.Int64) http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		n := reqCount.Add(1)
+		if d := profile.pickLatency(n); d > 0 {
+			time.Sleep(d)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": "ok",
+			"n":      n,
+		})
+	})
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+	// /login — returns a mock token for capture testing
+	mux.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
+		if d := profile.pickLatency(reqCount.Add(1)); d > 0 {
+			time.Sleep(d)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": map[string]any{"token": "mock-token-abc123"},
+		})
+	})
+	// /profile — requires Authorization header, returns 401 if missing
+	mux.HandleFunc("/profile", func(w http.ResponseWriter, r *http.Request) {
+		if d := profile.pickLatency(reqCount.Add(1)); d > 0 {
+			time.Sleep(d)
+		}
+		if r.Header.Get("Authorization") == "" {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+		reqCount.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"user": "test-user",
+		})
+	})
+	return mux
+}
+
 func newMockServerCmd() *cobra.Command {
 	var (
 		port        int
@@ -103,54 +155,9 @@ Example workflow:
 
 			var reqCount atomic.Int64
 
-			mux := http.NewServeMux()
-			mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-				n := reqCount.Add(1)
-				if d := profile.pickLatency(n); d > 0 {
-					time.Sleep(d)
-				}
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				_ = json.NewEncoder(w).Encode(map[string]any{
-					"status": "ok",
-					"n":      n,
-				})
-			})
-			mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusOK)
-				_, _ = w.Write([]byte("ok"))
-			})
-			// /login — returns a mock token for capture testing
-			mux.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
-				if d := profile.pickLatency(reqCount.Add(1)); d > 0 {
-					time.Sleep(d)
-				}
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				_ = json.NewEncoder(w).Encode(map[string]any{
-					"data": map[string]any{"token": "mock-token-abc123"},
-				})
-			})
-			// /profile — requires Authorization header, returns 401 if missing
-			mux.HandleFunc("/profile", func(w http.ResponseWriter, r *http.Request) {
-				if d := profile.pickLatency(reqCount.Add(1)); d > 0 {
-					time.Sleep(d)
-				}
-				if r.Header.Get("Authorization") == "" {
-					http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
-					return
-				}
-				reqCount.Add(1)
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusOK)
-				_ = json.NewEncoder(w).Encode(map[string]any{
-					"user": "test-user",
-				})
-			})
-
 			srv := &http.Server{
 				Addr:    fmt.Sprintf(":%d", port),
-				Handler: mux,
+				Handler: newMockHandler(profile, &reqCount),
 			}
 
 			ctx, cancel := context.WithCancel(context.Background())

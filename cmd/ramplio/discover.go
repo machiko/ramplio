@@ -183,8 +183,8 @@ func writeDiscoverReport(w io.Writer, result discover.DiscoverResult, tolerance 
 	}
 
 	row("")
-	row("這個數字怎麼信？工具量測準確度可用")
-	row("ramplio mock-server 注入已知延遲自行驗證。")
+	row("這個數字怎麼信？想驗證工具本身量得準不準，")
+	row("跑一行 ramplio verify 即可一鍵自證。")
 
 	fmt.Fprintln(w, bot)
 }

@@ -45,7 +45,14 @@ go test ./internal/engine/ -run TestGroundTruth -v
 
 ### 自己動手驗證
 
-`mock-server` 可注入確定性延遲，讓你重現同樣的驗證：
+**最簡單：跑 `ramplio verify`。** 它把上面的測試變成一個指令——程式內起一個注入已知延遲的目標、施壓、比對量到的百分位與注入值、給白話判語，準確時 exit 0、失準時 exit 1（可放進 CI 當量測回歸閘門）：
+
+```bash
+ramplio verify                                                   # 預設固定 50ms
+ramplio verify --latency-fast 10ms --latency-slow 200ms --slow-pct 10   # 雙峰
+```
+
+**想自訂分佈、或自己控制施壓參數？** 用 `mock-server` 手動重現同樣的驗證：
 
 ```bash
 # 固定延遲：量到的所有百分位都應 ≈ 50ms

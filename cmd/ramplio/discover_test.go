@@ -38,7 +38,7 @@ func TestWriteDiscoverReport_Default(t *testing.T) {
 		"每秒約 300 個請求",
 		"這代表什麼",
 		"穩定處理 200 個請求",
-		"mock-server", // ground-truth trust badge
+		"ramplio verify", // ground-truth trust badge → one-command self-proof
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("report missing %q\n--- got ---\n%s", want, out)
