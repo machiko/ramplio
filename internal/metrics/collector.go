@@ -1,12 +1,18 @@
 package metrics
 
 import (
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	hdrhistogram "github.com/HdrHistogram/hdrhistogram-go"
 )
+
+// goroutineSampleInterval is how often the aggregator records the live goroutine
+// count to track the generator's peak concurrency — frequent enough to catch a
+// spike, sparse enough to add no measurable load.
+const goroutineSampleInterval = 250 * time.Millisecond
 
 // StepSummary holds live metrics for a single named scenario step.
 type StepSummary struct {
@@ -47,6 +53,10 @@ type Collector struct {
 	once      sync.Once
 	startedAt time.Time
 	dropped   atomic.Int64 // samples discarded due to full channel
+	// Generator self-health baselines, sampled by the aggregator goroutine only.
+	gcPauseBaseNs  uint64
+	gcCountBase    uint32
+	peakGoroutines int
 	// Per-step tracking; only populated when samples carry a non-empty StepName.
 	stepHists map[string]*hdrhistogram.Histogram
 	stepSums  map[string]Summary
@@ -73,6 +83,12 @@ func NewCollector(maxVUs int) *Collector {
 		groupHists: make(map[string]*hdrhistogram.Histogram),
 		groupSums:  make(map[string]Summary),
 	}
+	// Baseline GC pause so Stop() can report how much the generator paused during
+	// the run — a self-health signal for measurement confidence.
+	var ms runtime.MemStats
+	runtime.ReadMemStats(&ms)
+	c.gcPauseBaseNs = ms.PauseTotalNs
+	c.gcCountBase = ms.NumGC
 	go c.aggregate()
 	return c
 }
@@ -140,6 +156,16 @@ func (c *Collector) Stop() Summary {
 		c.sum.Groups = groups
 	}
 	c.sum.DroppedSamples = c.dropped.Load()
+
+	// Generator self-health: how much the generator itself paused for GC and its
+	// peak goroutine count during the run. Read after the aggregator has exited
+	// (we are past <-c.stopped), so peakGoroutines is safe to read here.
+	var ms runtime.MemStats
+	runtime.ReadMemStats(&ms)
+	c.sum.GeneratorGCPause = time.Duration(ms.PauseTotalNs - c.gcPauseBaseNs)
+	c.sum.GeneratorGCCount = int64(ms.NumGC - c.gcCountBase)
+	c.sum.GeneratorPeakGoroutines = c.peakGoroutines
+
 	return c.sum
 }
 
@@ -169,10 +195,18 @@ func (c *Collector) LivePercentiles() (p50, p90, p95, p99 time.Duration) {
 
 func (c *Collector) aggregate() {
 	defer close(c.stopped)
+	mon := time.NewTicker(goroutineSampleInterval)
+	defer mon.Stop()
 	for {
 		select {
 		case s := <-c.ch:
 			c.recordSample(s)
+		case <-mon.C:
+			// Only the aggregator writes peakGoroutines; Stop() reads it after this
+			// goroutine has returned (via the stopped channel), so no lock is needed.
+			if g := runtime.NumGoroutine(); g > c.peakGoroutines {
+				c.peakGoroutines = g
+			}
 		case <-c.quit:
 			for {
 				select {

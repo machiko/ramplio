@@ -29,6 +29,7 @@
 | `protocols/retry.go` | RetryingExecutor：count/onCodes/backoff 固定延遲 |
 | `protocols/dns_cache.go` | DNS TTL 快取；FIFO 淘汰（maxEntries=1024）|
 | `protocols/executor.go` | Executor 介面；Request/Result（含 RawSetCookies） |
+| `protocols/trace.go` | **新增** `ExecuteTraced`：httptrace 拆單發請求 DNS/TCP/TLS/TTFB/total + Reused 旗標；僅供診斷（pre-flight），hot path Execute 不受影響 |
 | `scenarios/eval_condition.go` | **新增** 條件運算式 Lexer/Parser/AST：支援 AND/OR/NOT、括號、`== != < <= > >=`；運算子優先序 NOT>AND>OR；`EvalCondition` 解析失敗時印警告並回傳 true（不跳過步驟） |
 | `distributed/coordinator.go` | **新增** 協調者：health check → VU 分配（整數最大餘數法）→ broadcast `/assign` → 輪詢 `/live`（1s）聚合 → 收集 `/result` → `mergePartials` 合併 |
 | `distributed/worker.go` | **新增** 工作節點：`/assign /stop /live /result /health` HTTP 端點；`scaleScenario` 依分配 VU 等比縮放 stage target；單節點跑 RampEngine |
@@ -44,6 +45,7 @@
 | `reporter/html.go` | go:embed HTML 報告 |
 | `reporter/json.go` | Summary ↔ JSON；`error_breakdown` 失敗分類列；Verdict = `Interpret(sum)`（共用白話解讀）|
 | `reporter/interpret.go` | 單一來源白話解讀 `Interpret(sum)`：整體結論／反應速度／穩定度／承受能力／一句話總結；門檻統一（fail err≥5% 或 p99≥3s；warn err≥1% 或 p99≥1s）；**rate 模式整體結論改採 corrected p99（`verdictP99`）**，誠實反映使用者實感；終端／JSON／HTML 共用，Dashboard JS 鏡像同門檻與用語 |
+| `reporter/confidence.go` | **新增** `MeasurementConfidence`：依產生器自我健康度（丟樣本比例 / GC 佔測試時長）給高／中等／偏低三級可信度判語；供終端、JSON、診斷共用 |
 | `reporter/errorcause.go` | **新增** 失敗歸因白話：`errorCopyByKind` 單一來源（每類 Title/Cause/Action/Label）；`failureCauseFinding` 產最高優先 Finding（err≥1% 才出）；`reachabilityDominates` 抑制連線層失敗被誤判為「超出負荷」；`ErrorBreakdownRows` 表格列；`ExplainErrorKind`/`IsReachabilityFailure` 供 pre-flight 使用 |
 | `reporter/tui.go` | Bubbletea 即時終端儀表板 |
 | `reporter/prometheus.go` | `/metrics` 端點，500ms 更新 |
@@ -62,7 +64,7 @@
 | `importer/detector.go` | HAR 啟發式偵測（pre-auth token、login entry）|
 | `importer/filter.go` | 靜態資產過濾（JS/CSS/圖片/字體）|
 | `cmd/ramplio/run.go` | `run` 命令：URL/RPS/場景/儀表板/**分散式**五模式；`--worker`（可重複）；`--ignore-errors`；`--dashboard-token`；**開跑前 pre-flight 預檢**（`--no-preflight` 略過）|
-| `cmd/ramplio/preflight.go` | **新增** 開跑前單發探測：`preflightTarget`（URL 模式直用；場景取第一步、含 `{{` 模板則跳過）；`runPreflight` 僅在連線層硬錯（DNS/連線被拒/TLS）時白話中止，逾時/4xx/5xx 不擋 |
+| `cmd/ramplio/preflight.go` | 開跑前單發探測：`preflightTarget`（URL 模式直用；場景取第一步、含 `{{` 模板則跳過）；`runPreflight` 僅在連線層硬錯（DNS/連線被拒/TLS）時白話中止，逾時/4xx/5xx 不擋；**連得上時印「連線分解」**（DNS/連線/TLS/TTFB，用 `ExecuteTraced`）|
 | `cmd/ramplio/worker.go` | **新增** `worker` 命令：啟動工作節點 HTTP server（`--addr`）；SIGINT/SIGTERM 優雅關閉 |
 | `cmd/ramplio/dashcontrol.go` | 儀表板 Controller 實作；Discover 狀態機；buildOverrideStages |
 | `cmd/ramplio/validate.go` | `validate` 命令：stages/steps/captures/vars/thresholds/circuit breaker 詳細輸出 |
@@ -131,7 +133,7 @@
 
 - **Phase 1 — Ground-truth 自我驗證（✅ 已完成）**：`mock.go` 確定性延遲注入（固定/雙峰）；`groundtruth_test.go` 對已知分佈施壓斷言百分位在容差內；`docs/accuracy.md` 方法論。
 - **Phase 2 — Coordinated Omission 修正（✅ 已完成）**：`runRate` 改單一 dispatcher（Reserve+capped sleep，避免 rate 0 卡死）+ worker 池消費排定時間戳；`Sample.ScheduledAt` 起算 `corrected = At−ScheduledAt`（floor 於 service）；collector 第二條 `corrHist`；`Summary.CorrectedP*`/`HasCorrected`；`export.go` 跨節點合併 corrected；reporter 整體結論改採 corrected p99（`verdictP99`）、終端「壓力下實際延遲」區塊、JSON `corrected_latency`、diagnose 新增「請求速率超過系統能消化的速度」歸因。VU 模式不套用。
-- **Phase 3 — 量測透明度（未做）**：httptrace 拆 DNS/TCP/TLS/TTFB/total；產生器自我健康度與「量測可信度」判語。
+- **Phase 3 — 量測透明度（✅ 已完成）**：`protocols/trace.go` `ExecuteTraced` 用 httptrace 拆 DNS/TCP/TLS/TTFB/total（僅診斷用，hot path 不付成本），pre-flight 連得上時印「連線分解」；collector 取樣尖峰 goroutine + 跑前後 GC 暫停差值 → `Summary.Generator*`；`reporter/confidence.go` `MeasurementConfidence` 三級判語（丟樣本比例 / GC 佔比），終端「量測可信度」區塊、JSON `measurement_confidence`、診斷新增「量測可能被產生器自身的 GC 干擾」。
 
 ---
 

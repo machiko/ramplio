@@ -156,6 +156,18 @@ func Diagnose(sum metrics.Summary) []Finding {
 		})
 	}
 
+	// 6b. 產生器自身 GC 干擾 — 工具本身停頓會灌水到量測延遲，數字偏樂觀/失真。
+	if generatorGCPausePct(sum) >= gcPauseWarnPct {
+		findings = append(findings, Finding{
+			Severity: "warn",
+			Icon:     "⚠",
+			Title:    "量測可能被產生器自身的 GC 干擾",
+			Cause:    "壓測工具自己在測試期間頻繁回收記憶體（GC）並短暫停頓，這段停頓會被算進量到的延遲，讓數字失真。",
+			Action:   "在記憶體更充裕的機器上重測，或分散到多台節點降低單機負擔，數據會更乾淨。",
+			Evidence: gcPauseEvidence(sum),
+		})
+	}
+
 	// 7. 健康（無命中）
 	if len(findings) == 0 {
 		findings = append(findings, Finding{

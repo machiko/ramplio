@@ -65,6 +65,22 @@ func TestCollector_CorrectedFlooredAtService(t *testing.T) {
 	assert.InDelta(t, (30 * time.Millisecond).Seconds(), sum.CorrectedP99.Seconds(), 0.002)
 }
 
+// TestCollector_CapturesGeneratorHealth confirms the collector records its own
+// peak goroutine count, so the report can judge whether the generator itself was
+// healthy enough to trust the measurement.
+func TestCollector_CapturesGeneratorHealth(t *testing.T) {
+	c := NewCollector(100)
+	// Let the aggregator's monitor tick at least once.
+	time.Sleep(goroutineSampleInterval + 50*time.Millisecond)
+	for range 10 {
+		c.Add(Sample{Latency: 5 * time.Millisecond, StatusCode: 200, At: time.Now()})
+	}
+	sum := c.Stop()
+
+	assert.Positive(t, sum.GeneratorPeakGoroutines, "peak goroutine count should be recorded")
+	assert.GreaterOrEqual(t, sum.GeneratorGCPause, time.Duration(0))
+}
+
 // TestMergeExports_MergesCorrectedHistograms ensures the correction survives the
 // distributed merge: corrected percentiles are recomputed from merged corrected
 // histograms, not averaged.

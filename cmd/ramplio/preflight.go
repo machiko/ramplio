@@ -60,10 +60,13 @@ func runPreflight(ctx context.Context, w io.Writer, cfg protocols.HTTPConfig, pr
 	pctx, cancel := context.WithTimeout(ctx, preflightTimeout)
 	defer cancel()
 
-	res := exec.Execute(pctx, protocols.Request{Method: probeMethod, URL: probeURL})
+	res, trace := exec.ExecuteTraced(pctx, protocols.Request{Method: probeMethod, URL: probeURL})
 	kind := metrics.ClassifyError(res.Error, res.StatusCode)
 
 	if !reporter.IsReachabilityFailure(kind) {
+		// Reachable: surface where the single probe's time went, so the user can
+		// see what the tool measures (DNS / 連線 / TLS / 首位元組) before the run.
+		printPreflightBreakdown(w, probeURL, res, trace)
 		return nil
 	}
 
@@ -77,4 +80,31 @@ func runPreflight(ctx context.Context, w io.Writer, cfg protocols.HTTPConfig, pr
 	fmt.Fprintf(w, "  → 建議：%s\n", action)
 	fmt.Fprintln(w, "  （確定要照跑可加 --no-preflight 略過這項檢查）")
 	return fmt.Errorf("預檢失敗：目標無法連線（%s）", kind)
+}
+
+// printPreflightBreakdown shows the single probe's latency split into connection
+// phases — pure measurement transparency, computed from one diagnostic request
+// (never the load hot path).
+func printPreflightBreakdown(w io.Writer, probeURL string, res protocols.Result, tr protocols.Trace) {
+	status := "無回應"
+	if res.StatusCode > 0 {
+		status = fmt.Sprintf("HTTP %d", res.StatusCode)
+	}
+	fmt.Fprintf(w, "\n✓ 預檢通過：%s（%s，總共 %s）\n", probeURL, status, fmtMs(tr.Total))
+	if tr.Reused {
+		fmt.Fprintln(w, "  連線分解：沿用既有連線（免去 DNS／連線／TLS）")
+		fmt.Fprintf(w, "    首位元組（TTFB）：%s\n", fmtMs(tr.TTFB))
+		return
+	}
+	fmt.Fprintln(w, "  連線分解（這一發請求的時間花在哪）：")
+	fmt.Fprintf(w, "    DNS 解析：%s    連線：%s    TLS：%s    首位元組：%s\n",
+		fmtMs(tr.DNS), fmtMs(tr.Connect), fmtMs(tr.TLS), fmtMs(tr.TTFB))
+}
+
+// fmtMs renders a duration in whole milliseconds, or "—" when not measured (0).
+func fmtMs(d time.Duration) string {
+	if d <= 0 {
+		return "—"
+	}
+	return fmt.Sprintf("%dms", d.Milliseconds())
 }

@@ -35,6 +35,14 @@ type Summary struct {
 	// DroppedSamples is the number of samples discarded because the collector channel was full.
 	DroppedSamples int64 `json:"-"`
 
+	// Generator self-health, for measurement-confidence reporting. These describe
+	// the load generator itself, not the target: if the generator GC-paused or ran
+	// short of goroutine headroom, its own latency numbers may be distorted and the
+	// result should be trusted less. Populated by Collector.Stop().
+	GeneratorPeakGoroutines int           `json:"-"`
+	GeneratorGCPause        time.Duration `json:"-"` // cumulative stop-the-world GC pause during the run
+	GeneratorGCCount        int64         `json:"-"`
+
 	// ErrorBreakdown counts failed requests by cause (DNS, connection refused,
 	// timeout, TLS, HTTP 4xx/5xx, assertion, …). Populated lazily on the first
 	// failure; nil when there were no errors. Successes are never recorded here.

@@ -27,6 +27,8 @@ type Report struct {
 	// ErrorBreakdown lists failed requests grouped by plain-language cause.
 	ErrorBreakdown []ErrorBreakdownRow `json:"error_breakdown,omitempty"`
 	Verdict        Interpretation      `json:"verdict"`
+	// Confidence states how much to trust the numbers based on generator self-health.
+	Confidence ConfidenceReading `json:"measurement_confidence"`
 }
 
 type LatencyMs struct {
@@ -103,6 +105,7 @@ func SummaryToReport(sum metrics.Summary) Report {
 	}
 	r.ErrorBreakdown = ErrorBreakdownRows(sum)
 	r.Verdict = Interpret(sum)
+	r.Confidence = MeasurementConfidence(sum)
 	return r
 }
 

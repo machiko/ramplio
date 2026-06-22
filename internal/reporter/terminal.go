@@ -122,8 +122,24 @@ func PrintSummary(w io.Writer, sum metrics.Summary) {
 		fmt.Fprintf(w, "\n⚠  警告：%d 個樣本因緩衝區滿被丟棄，指標可能不完整。\n", sum.DroppedSamples)
 	}
 
+	printMeasurementTransparency(w, sum)
+
 	fmt.Fprintln(w, "\n"+divider)
 	printInterpretation(w, sum)
+}
+
+// printMeasurementTransparency states how much to trust the numbers and shows
+// what the generator itself did — so the result is auditable, not a black box.
+func printMeasurementTransparency(w io.Writer, sum metrics.Summary) {
+	conf := MeasurementConfidence(sum)
+	title := "量測可信度"
+	fmt.Fprintf(w, "\n%s\n%s\n", title, strings.Repeat("─", len(title)))
+	fmt.Fprintf(w, "  %s %s\n", conf.Icon, conf.Note)
+	fmt.Fprintf(w, "      產生器尖峰 %d goroutine", sum.GeneratorPeakGoroutines)
+	if sum.GeneratorGCCount > 0 {
+		fmt.Fprintf(w, "，GC %d 次／暫停共 %s", sum.GeneratorGCCount, formatDuration(sum.GeneratorGCPause))
+	}
+	fmt.Fprintln(w)
 }
 
 // printInterpretation renders the shared plain-language interpretation below
