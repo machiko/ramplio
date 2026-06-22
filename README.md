@@ -5,6 +5,7 @@
 ## 快速導航
 
 - 📖 **[核心概念](#核心概念)** — 理解 VU、RPS 和關鍵指標
+- 🔬 **[量測公信力](#量測公信力)** — 數字憑什麼可信、如何自己驗證
 - 🎯 **[基本用法](#基本用法)** — 30 秒啟動第一次測試
 - ⚙️ **[進階功能](#進階功能)** — 分散式測試、自動探測、條件邏輯
 - 🔐 **[認證與數據](#認證與數據)** — 登入測試、數據注入
@@ -20,6 +21,10 @@
 - **Per-step Metrics** — TUI 與 Dashboard 即時顯示每個步驟的 p50/p99/錯誤率，精確定位瓶頸步驟
 - **單行指令或 YAML 驅動** — 直接指定 URL，或描述複雜的多階段測試情境
 - **精確的百分位數** — 使用 HDR 直方圖計算 p50/p90/p95/p99，無近似誤差
+- **可驗證的公信力** — `mock-server` 注入已知延遲分佈做 ground-truth 自我驗證；量測準不準是數學問題，不靠「跟 k6／JMeter 比一比」背書（見 [量測公信力](#量測公信力)）
+- **Coordinated Omission 修正** — rate 模式並陳「服務延遲」與「壓力下實際延遲」，不會像 closed-loop 工具低報慢請求
+- **開跑前 pre-flight 預檢** — 正式施壓前先單發探測目標可達性，連得上就印出連線分解（DNS／連線／TLS／首位元組），連不上直接給白話原因與建議
+- **量測可信度判語** — 報告末尾自評產生器健康度（丟棄樣本比例、GC 暫停、尖峰 goroutine），直接告訴你這次數字能不能信
 - **即時 TUI** — 終端機內的即時儀表板，顯示階段進度、RPS、延遲與各步驟指標
 - **即時網頁儀表板** — 由執行檔本身提供的 Vue 3 + Chart.js SPA，零額外設定
 - **Prometheus 整合** — 將指標匯出至 Grafana 或任何相容 Prometheus 的監控系統
@@ -144,6 +149,59 @@ ramplio run --scenario my.yaml --dashboard
 → 平均迴圈耗時 ~100ms
 → 設 VU=100，pause 或 request 總耗時控制在 100ms
 ```
+
+---
+
+## 量測公信力
+
+壓測工具的價值建立在一個前提上：**它報出來的數字是可信的**。Ramplio 不要你「相信我們」，而是讓量測準確度變成可驗證的數學問題。完整說明見 **[docs/accuracy.md](docs/accuracy.md)**。
+
+### 三根支柱
+
+| 支柱 | 本質 |
+|------|------|
+| **方法論正確性** | 量測在「該送的時間」起算，消除 Coordinated Omission |
+| **Ground-truth 自我驗證** | 對已知延遲分佈施壓，量到的百分位必須吻合 |
+| **量測透明度** | 看得見量了什麼、工具自身有沒有當瓶頸 |
+
+> 為什麼不靠「跟 k6／JMeter 比一比」？對照知名工具只是最弱的佐證——你的公信力會寄生在別人工具的正確性上，若兩者用同樣方式量錯（例如都有 Coordinated Omission），對照起來「一致」卻一致地錯。
+
+### Ground-truth 自我驗證
+
+內建 `mock-server` 可注入**確定性的延遲分佈**，讓你親手重現驗證：量到的百分位只可能 ≥ 注入值（多了本機往返），絕不可能低於——若低於就代表量測有 bug。
+
+```bash
+# 固定延遲：量到的所有百分位都應 ≈ 50ms
+ramplio mock-server --latency 50ms &
+ramplio run --url http://localhost:8080 --rps 200 --duration 20s
+
+# 雙峰分佈：10% 慢（200ms）、其餘快（10ms）
+# 量到的 p50 應 ≈ 10ms，p95/p99 應 ≈ 200ms（證明 HDR 能分離尾端延遲）
+ramplio mock-server --latency-fast 10ms --latency-slow 200ms --slow-pct 10 &
+ramplio run --url http://localhost:8080 --rps 200 --duration 30s
+```
+
+### Coordinated Omission 修正（rate 模式）
+
+closed-loop 工具在系統變慢時會「自動」放慢送出速度，於是最該被記錄的慢請求根本沒送出，量到的延遲遠低於使用者實際經歷。Ramplio 的 rate（`--rps`）模式以 dispatcher 按目標速率排定每個請求的「應送時間」，並分兩條並陳：
+
+| 數字 | 從何時起算 | 意義 |
+|------|-----------|------|
+| **服務延遲** | worker 實際送出 | 伺服器處理一個請求要多久 |
+| **壓力下延遲** | 該請求「排定要送」的時間 | 使用者從點擊到看到回應實際要等多久 |
+
+報告的**整體結論採用壓力下 p99**，因為那才是使用者真正的體驗。產生器有餘裕時兩者相等，不會無中生有地灌水；VU 模式沒有「排定時間」概念，因此不套用修正也不顯示，誠實標明適用範圍。
+
+```bash
+ramplio mock-server --latency 50ms &
+# 目標 500 RPS，但伺服器每次 50ms：觀察壓力下 p99 ≫ 服務 p99
+ramplio run --url http://localhost:8080 --rps 500 --duration 30s
+```
+
+### 量測透明度
+
+- **連線分解（pre-flight）**：開跑前單發預檢若連得上，用 `httptrace` 拆出 DNS／TCP 連線／TLS 握手／首位元組（TTFB）。此 trace 只加在診斷請求上，壓測 hot path 不付出任何成本，因此不干擾正式量測。
+- **量測可信度判語**：報告末尾自評產生器健康度——丟棄樣本比例（channel 滿載）、GC 暫停佔比、尖峰 goroutine 數——判語分 高／中等／偏低 三級，偏低時建議降載或分散到多節點重測。
 
 ---
 
@@ -560,13 +618,15 @@ ramplio run [flags]
 Flags:
   -u, --url string            目標 URL（與 --scenario 互斥）
   -s, --scenario string       YAML 情境檔案路徑
-      --vus int               虛擬使用者數量（預設 1）
+      --vus int               虛擬使用者數量（預設 1，與 --rps 互斥）
+      --rps int               目標每秒請求數——rate 模式（與 --vus 互斥）
   -d, --duration string       測試時長（預設 "30s"）
       --method string         HTTP 方法（預設 "GET"）
   -H, --header stringArray    HTTP 標頭，可重複使用
       --body string           請求 body
   -o, --output string         結果檔案（JSON 或 JUnit XML）
       --timeout string        單次請求逾時
+      --no-preflight          略過開跑前的可達性預檢
       --dns-cache             快取 DNS 查詢
       --dashboard             開啟即時網頁儀表板
       --dashboard-port int    儀表板 port（預設 9999）
@@ -591,6 +651,19 @@ Flags:
   -o, --output string     輸出檔案（預設 stdout）
       --no-filter         不過濾靜態資源
   -d, --duration string   測試時長（例如 "5m"）
+```
+
+```
+ramplio mock-server [flags]
+
+注入確定性延遲的本機測試標的，用於 ground-truth 量測驗證（見 量測公信力）。
+
+Flags:
+      --port int             監聽 port（預設 8080）
+      --latency string       固定的每請求模擬延遲（例如 5ms、10ms）
+      --latency-fast string  雙峰：快帶延遲（多數請求）
+      --latency-slow string  雙峰：慢帶延遲（尾端）
+      --slow-pct int         雙峰：多少 % 的請求走慢帶（0–100）
 ```
 
 ### 儲存與重新載入結果
@@ -640,6 +713,7 @@ ramplio/
 | 文件 | 說明 |
 |------|------|
 | [docs/scenario-schema.md](docs/scenario-schema.md) | 完整 YAML schema |
+| [docs/accuracy.md](docs/accuracy.md) | 量測準確度與公信力：三根支柱、ground-truth 驗證、Coordinated Omission 修正 |
 | [docs/roadmap.md](docs/roadmap.md) | Milestone 計畫 |
 | [CHANGELOG.md](CHANGELOG.md) | 版本異動記錄 |
 
