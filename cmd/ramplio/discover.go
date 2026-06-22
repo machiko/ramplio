@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"strings"
@@ -24,11 +25,10 @@ func newDiscoverCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "discover",
-		Short: "Find your site's maximum throughput automatically",
-		Long: `Automatically probes your site at increasing request rates to discover
-its capacity limit. No load-testing knowledge required.
+		Short: "給網址，自動找出你的服務能撐多少人",
+		Long: `對目標以遞增的請求速率自動探測，找出容量上限。不需要任何壓測知識。
 
-Run this when you want to answer: "How much traffic can my site handle?"`,
+當你想回答「我的服務撐得住多少流量？」時，就跑這個。`,
 		Example: `  ramplio discover --url https://example.com
   ramplio discover --url https://example.com --tolerance 1s
   ramplio discover --url https://example.com --max-rps 300 --probe-duration 30s`,
@@ -62,11 +62,11 @@ Run this when you want to answer: "How much traffic can my site handle?"`,
 			probeCount := len(discover.ProbeSequence(maxRPS))
 			estMinutes := float64(int(pd.Seconds())*probeCount) / 60.0
 
-			fmt.Printf("  Target:    %s\n", url)
-			fmt.Printf("  Tolerance: p99 < %s, error rate < 1%%\n", tolerance)
-			fmt.Printf("  Probes:    up to %d levels (est. %.0f–%.0f min)\n\n",
+			fmt.Printf("  目標：    %s\n", url)
+			fmt.Printf("  容許值：  p99 < %s、錯誤率 < 1%%\n", tolerance)
+			fmt.Printf("  探測點：  最多 %d 個等級（預估 %.0f–%.0f 分鐘）\n\n",
 				probeCount, estMinutes*0.5, estMinutes)
-			fmt.Print("  Probing throughput capacity...\n\n")
+			fmt.Print("  正在探測吞吐容量…\n\n")
 
 			prober := discover.New(cfg)
 			result := prober.Run(ctx, nil, func(pr discover.ProbeResult) {
@@ -89,6 +89,10 @@ Run this when you want to answer: "How much traffic can my site handle?"`,
 }
 
 func printDiscoverProbe(pr discover.ProbeResult) {
+	writeDiscoverProbe(os.Stdout, pr)
+}
+
+func writeDiscoverProbe(w io.Writer, pr discover.ProbeResult) {
 	icon := "✓"
 	switch pr.Status {
 	case discover.ProbeWarn:
@@ -105,55 +109,82 @@ func printDiscoverProbe(pr discover.ProbeResult) {
 		p99str = fmt.Sprintf("%dms", ms)
 	}
 
-	fmt.Printf("  %5d rps  %s  p99=%-8s  errors=%.1f%%\n",
+	fmt.Fprintf(w, "  每秒 %5d 個  %s  p99=%-8s  錯誤=%.1f%%\n",
 		pr.RPS, icon, p99str, pr.ErrorRate)
 }
 
 const reportWidth = 46
 
+// displayWidth approximates the terminal column width of s: ASCII runes count as
+// 1, everything else (CJK, full-width punctuation) as 2. The report box aligns on
+// this rather than len() (bytes) or rune count so the right border stays straight
+// when Chinese text is mixed in.
+func displayWidth(s string) int {
+	width := 0
+	for _, r := range s {
+		if r < 128 {
+			width++
+		} else {
+			width += 2
+		}
+	}
+	return width
+}
+
 func printDiscoverReport(result discover.DiscoverResult, tolerance time.Duration) {
+	writeDiscoverReport(os.Stdout, result, tolerance)
+}
+
+func writeDiscoverReport(w io.Writer, result discover.DiscoverResult, tolerance time.Duration) {
 	top := "  ┌" + strings.Repeat("─", reportWidth) + "┐"
 	bot := "  └" + strings.Repeat("─", reportWidth) + "┘"
 	sep := "  ├" + strings.Repeat("─", reportWidth) + "┤"
 	row := func(s string) {
-		fmt.Printf("  │  %-*s│\n", reportWidth-2, s)
+		pad := reportWidth - 2 - displayWidth(s)
+		if pad < 0 {
+			pad = 0
+		}
+		fmt.Fprintf(w, "  │  %s%s│\n", s, strings.Repeat(" ", pad))
 	}
 
-	fmt.Println(top)
-	row("Capacity Report")
-	fmt.Println(sep)
+	fmt.Fprintln(w, top)
+	row("容量報告")
+	fmt.Fprintln(w, sep)
 
 	if result.SafeLimit > 0 {
-		row(fmt.Sprintf("Safe limit:     ~%d req/sec", result.SafeLimit))
+		row(fmt.Sprintf("安全上限：    每秒約 %d 個請求", result.SafeLimit))
 	} else {
-		row("Safe limit:     < 5 req/sec")
+		row("安全上限：    每秒不到 5 個請求")
 	}
 
 	if result.BreakingPoint > 0 {
-		row(fmt.Sprintf("Breaking point: ~%d req/sec", result.BreakingPoint))
+		row(fmt.Sprintf("臨界點：      每秒約 %d 個請求", result.BreakingPoint))
 	} else if result.Exhausted {
-		row("Breaking point: not reached")
+		row("臨界點：      測試範圍內未觸及")
 	} else {
-		row("Breaking point: test cancelled")
+		row("臨界點：      測試已中斷")
 	}
 
-	fmt.Println(sep)
-	row("What this means:")
+	fmt.Fprintln(w, sep)
+	row("這代表什麼：")
 	row("")
 
 	switch {
 	case result.SafeLimit == 0:
-		row("Your site is struggling at very low traffic.")
-		row("Check server health before load testing.")
+		row("你的服務在很低的流量下就吃力了。")
+		row("建議先檢查伺服器健康狀態，再做壓測。")
 	case result.Exhausted:
-		row(fmt.Sprintf("Your site handled all %d tested levels.", len(result.Probes)))
-		row(fmt.Sprintf("Maximum safe throughput exceeds %d req/sec.", result.SafeLimit))
-		row("Run again with --max-rps to probe higher.")
+		row(fmt.Sprintf("你的服務通過了全部 %d 個測試等級。", len(result.Probes)))
+		row(fmt.Sprintf("最大安全吞吐量超過每秒 %d 個請求。", result.SafeLimit))
+		row("想探更高可加 --max-rps 再跑一次。")
 	default:
-		row(fmt.Sprintf("Your site handles about %d requests per", result.SafeLimit))
-		row(fmt.Sprintf("second comfortably. Above that, response"))
-		row(fmt.Sprintf("times climb beyond %s.", tolerance))
+		row(fmt.Sprintf("你的服務每秒約能穩定處理 %d 個請求。", result.SafeLimit))
+		row(fmt.Sprintf("超過後回應時間會拉長到 %s 以上。", tolerance))
 	}
 
-	fmt.Println(bot)
+	row("")
+	row("這個數字怎麼信？工具量測準確度可用")
+	row("ramplio mock-server 注入已知延遲自行驗證。")
+
+	fmt.Fprintln(w, bot)
 }

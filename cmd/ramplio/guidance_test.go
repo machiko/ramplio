@@ -40,11 +40,13 @@ func TestPrintWelcome(t *testing.T) {
 	printWelcome(&buf)
 	out := buf.String()
 
-	// The front door must surface all three primary paths and the help pointer.
+	// The front door leads with capacity discovery (the product's sharp
+	// positioning), keeps dashboard and direct run as secondary paths, and
+	// surfaces the help pointer for advanced features.
 	for _, want := range []string{
-		"Ramplio",
+		"撐得住多少人",
+		"ramplio discover --url https://example.com",
 		"ramplio run --dashboard",
-		"ramplio init",
 		"ramplio run --url https://example.com",
 		"ramplio --help",
 	} {

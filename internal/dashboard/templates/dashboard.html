@@ -1635,29 +1635,29 @@
         <path d="M20 27 L24.5 27 L28.5 6 L24 6 Z" fill="#ff9e2c"/>
       </svg>
       <h1 class="home-title">Rampl<span class="rampi"></span>o</h1>
-      <p class="home-tagline">開發者優先的壓力測試 — 三步測出網站撐不撐得住</p>
+      <p class="home-tagline">給網址，回答你的服務能撐多少人</p>
     </div>
     <div class="home-prompt">你想怎麼開始？</div>
     <div class="home-cards">
-      <div class="home-card home-card--primary" @click="pickMode('guided')">
-        <div class="home-card-icon ic-violet"><span class="material-symbols-outlined">auto_awesome</span></div>
-        <div class="home-card-title">帶我設定</div>
-        <div class="home-card-desc">回答幾個問題，我幫你設定測試。不需要了解技術細節。</div>
+      <div class="home-card home-card--primary" @click="pickMode('discover')">
+        <div class="home-card-icon ic-violet"><span class="material-symbols-outlined">trending_up</span></div>
+        <div class="home-card-title">探測容量上限</div>
+        <div class="home-card-desc">給網址，自動找出能撐多少人。不需要懂技術細節。</div>
         <div class="home-card-badge">推薦</div>
       </div>
+      <div class="home-card" @click="pickMode('guided')">
+        <div class="home-card-icon ic-magenta"><span class="material-symbols-outlined">auto_awesome</span></div>
+        <div class="home-card-title">帶我設定</div>
+        <div class="home-card-desc">回答幾個問題，我幫你設定測試。不需要了解技術細節。</div>
+      </div>
       <div class="home-card" @click="pickMode('url')">
-        <div class="home-card-icon ic-magenta"><span class="material-symbols-outlined">bolt</span></div>
+        <div class="home-card-icon ic-amber"><span class="material-symbols-outlined">bolt</span></div>
         <div class="home-card-title">快速測試</div>
         <div class="home-card-desc">直接輸入 URL，自訂並發數與測試時間。</div>
       </div>
-      <div class="home-card" @click="pickMode('scenario')">
-        <div class="home-card-icon ic-amber"><span class="material-symbols-outlined">upload_file</span></div>
-        <div class="home-card-title">上傳場景</div>
-        <div class="home-card-desc">上傳 HAR 或 YAML 情境，支援多步驟與登入流程。</div>
-      </div>
     </div>
-    <button class="home-discover-link" @click="pickMode('discover')">
-      <span class="material-symbols-outlined">trending_up</span> 我想找出服務的承載上限 →
+    <button class="home-discover-link" @click="pickMode('scenario')">
+      <span class="material-symbols-outlined">upload_file</span> 進階：上傳 HAR 或 YAML 情境（多步驟、登入流程）→
     </button>
   </div>
 

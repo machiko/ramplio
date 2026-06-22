@@ -32,16 +32,16 @@ func printNextSteps(w io.Writer, heading string, steps ...nextStep) {
 func printWelcome(w io.Writer) {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, guidanceRule)
-	fmt.Fprintln(w, "  Ramplio — 開發者優先的 HTTP 壓力測試工具")
-	fmt.Fprintln(w, "  對網站或 API 施加可調負載，即時量測效能並產生白話報告")
+	fmt.Fprintln(w, "  Ramplio — 你的服務撐得住多少人？")
+	fmt.Fprintln(w, "  給網址，自動探測容量上限並給白話答案；數字你能自己驗證")
 	fmt.Fprintln(w, guidanceRule)
-	printNextSteps(w, "\n  三條最常用的路徑：",
-		nextStep{"① 開視覺面板（最推薦，全程點選操作）", "ramplio run --dashboard"},
-		nextStep{"② 引導式建立測試情境（問答產生 YAML）", "ramplio init"},
-		nextStep{"③ 快速測一個網址一次", "ramplio run --url https://example.com"},
+	printNextSteps(w, "\n  從這裡開始：",
+		nextStep{"① 探測容量上限（最推薦，一行回答撐多少人）", "ramplio discover --url https://example.com"},
+		nextStep{"② 開視覺面板（全程點選操作）", "ramplio run --dashboard"},
+		nextStep{"③ 直接壓測一個網址", "ramplio run --url https://example.com"},
 	)
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "  看完整指令清單：ramplio --help")
+	fmt.Fprintln(w, "  進階：YAML 多階段情境、登入流程、分散式 → ramplio --help")
 	fmt.Fprintln(w, guidanceRule)
 	fmt.Fprintln(w)
 }
