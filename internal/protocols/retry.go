@@ -8,10 +8,10 @@ import (
 // RetryingExecutor wraps an inner Executor and retries failed requests
 // according to the provided configuration.
 type RetryingExecutor struct {
-	inner     Executor
-	maxCount  int
-	onCodes   map[int]bool // empty = retry on any error
-	backoff   time.Duration
+	inner    Executor
+	maxCount int
+	onCodes  map[int]bool // empty = retry on any error
+	backoff  time.Duration
 }
 
 // NewRetryingExecutor creates a RetryingExecutor around inner.

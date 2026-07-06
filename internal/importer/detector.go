@@ -121,11 +121,11 @@ func findLoginEntry(entries []harEntry) int {
 
 func extractTokenPath(body string) string {
 	for gjsonPath, jsonPath := range map[string]string{
-		"token":              "$.token",
-		"access_token":       "$.access_token",
-		"jwt":                "$.jwt",
-		"data.token":         "$.data.token",
-		"data.access_token":  "$.data.access_token",
+		"token":             "$.token",
+		"access_token":      "$.access_token",
+		"jwt":               "$.jwt",
+		"data.token":        "$.data.token",
+		"data.access_token": "$.data.access_token",
 	} {
 		if gjson.Get(body, gjsonPath).Exists() {
 			return jsonPath

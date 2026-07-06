@@ -28,11 +28,11 @@ func TestPrintSummary_ContainsKeyFields(t *testing.T) {
 	reporter.PrintSummary(&buf, makeSummary())
 	out := buf.String()
 
-	assert.Contains(t, out, "100")      // total requests
-	assert.Contains(t, out, "10.0")     // req/sec
-	assert.Contains(t, out, "10ms")     // min latency
-	assert.Contains(t, out, "500ms")    // max latency
-	assert.Contains(t, out, "2.0%")     // error rate
+	assert.Contains(t, out, "100")   // total requests
+	assert.Contains(t, out, "10.0")  // req/sec
+	assert.Contains(t, out, "10ms")  // min latency
+	assert.Contains(t, out, "500ms") // max latency
+	assert.Contains(t, out, "2.0%")  // error rate
 	assert.True(t, strings.Contains(out, "測試結果"))
 	assert.True(t, strings.Contains(out, "延遲分佈"))
 	assert.True(t, strings.Contains(out, "回應狀態"))
@@ -56,10 +56,10 @@ func TestInterpretation_HealthyRun(t *testing.T) {
 	assert.Contains(t, out, "測試結果說明")
 	assert.Contains(t, out, "整體結論：✓")
 	assert.Contains(t, out, "非常快")
-	assert.Contains(t, out, "9 毫秒")        // humanized duration, not "9ms"
-	assert.Contains(t, out, "完美")          // 0 errors
-	assert.Contains(t, out, "20,046")        // thousands separator
-	assert.Contains(t, out, "又快又穩")       // one-line summary
+	assert.Contains(t, out, "9 毫秒")   // humanized duration, not "9ms"
+	assert.Contains(t, out, "完美")     // 0 errors
+	assert.Contains(t, out, "20,046") // thousands separator
+	assert.Contains(t, out, "又快又穩")   // one-line summary
 	assert.Contains(t, out, "還有餘裕")
 }
 
@@ -71,11 +71,11 @@ func TestInterpretation_SlowAndUnstableRun(t *testing.T) {
 	})
 	out := buf.String()
 
-	assert.Contains(t, out, "整體結論：✗")     // 10% error rate → fail
-	assert.Contains(t, out, "偏慢")           // p99 2s
-	assert.Contains(t, out, "2.0 秒")         // humanized duration
-	assert.Contains(t, out, "不穩定")          // 10% failures
-	assert.Contains(t, out, "又慢又不穩")       // one-line summary
+	assert.Contains(t, out, "整體結論：✗") // 10% error rate → fail
+	assert.Contains(t, out, "偏慢")     // p99 2s
+	assert.Contains(t, out, "2.0 秒")  // humanized duration
+	assert.Contains(t, out, "不穩定")    // 10% failures
+	assert.Contains(t, out, "又慢又不穩")  // one-line summary
 }
 
 func TestInterpretation_FastButUnstable(t *testing.T) {
@@ -86,9 +86,9 @@ func TestInterpretation_FastButUnstable(t *testing.T) {
 	})
 	out := buf.String()
 
-	assert.Contains(t, out, "整體結論：⚠")            // 3% errors → warning
-	assert.Contains(t, out, "非常快")                 // fast
-	assert.Contains(t, out, "先解決穩定度問題")          // one-line: fast but unstable
+	assert.Contains(t, out, "整體結論：⚠")   // 3% errors → warning
+	assert.Contains(t, out, "非常快")      // fast
+	assert.Contains(t, out, "先解決穩定度問題") // one-line: fast but unstable
 }
 
 func TestHumanizeInt_ThousandsSeparator(t *testing.T) {

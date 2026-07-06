@@ -408,9 +408,9 @@ func TestParser_WithVariables(t *testing.T) {
 // TestParser_ErrorHandling 測試錯誤處理
 func TestParser_ErrorHandling(t *testing.T) {
 	tests := []struct {
-		input   string
-		hasErr  bool
-		errMsg  string
+		input  string
+		hasErr bool
+		errMsg string
 	}{
 		{
 			input:  "status ==",

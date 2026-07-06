@@ -269,7 +269,7 @@ func TestDistributedCoordinatorLiveSnapshot(t *testing.T) {
 	snap := c.LiveSnapshot()
 	assert.Equal(t, int64(950), snap.Total)
 	assert.Equal(t, int64(8), snap.Errors)
-	assert.Greater(t, snap.RPS, 180.0) // Should be around 190 RPS (950/5)
+	assert.Greater(t, snap.RPS, 180.0)  // Should be around 190 RPS (950/5)
 	assert.Equal(t, 50, snap.ActiveVUs) // 25 + 25
 }
 

@@ -13,10 +13,10 @@ import (
 // Config controls the capacity discovery run.
 type Config struct {
 	URL           string
-	Method        string           // default "GET"
-	Tolerance     time.Duration    // p99 threshold for a passing probe; default 2s
-	MaxRPS        int              // stop probing above this rate; default 500
-	ProbeDuration time.Duration    // how long each probe runs; default 15s
+	Method        string        // default "GET"
+	Tolerance     time.Duration // p99 threshold for a passing probe; default 2s
+	MaxRPS        int           // stop probing above this rate; default 500
+	ProbeDuration time.Duration // how long each probe runs; default 15s
 	HTTPConfig    protocols.HTTPConfig
 }
 
@@ -41,8 +41,8 @@ type ProbeResult struct {
 // DiscoverResult is the final capacity report.
 type DiscoverResult struct {
 	Probes        []ProbeResult
-	SafeLimit     int // highest PASS RPS (0 = even the first probe failed)
-	BreakingPoint int // first FAIL RPS (0 = never failed within MaxRPS)
+	SafeLimit     int  // highest PASS RPS (0 = even the first probe failed)
+	BreakingPoint int  // first FAIL RPS (0 = never failed within MaxRPS)
 	Exhausted     bool // true when all probes passed without hitting MaxRPS limit's fail
 }
 

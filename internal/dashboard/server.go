@@ -39,34 +39,34 @@ type GroupMetric struct {
 
 // wsMessage is the JSON payload pushed to every connected dashboard client.
 type wsMessage struct {
-	RPS            float64        `json:"rps"`
-	Total          int64          `json:"total"`
-	Errors         int64          `json:"errors"`
-	ErrorPct       float64        `json:"error_pct"`
-	MeanMs         int64          `json:"mean_ms"`
-	P50Ms          int64          `json:"p50_ms"`
-	P90Ms          int64          `json:"p90_ms"`
-	P95Ms          int64          `json:"p95_ms"`
-	P99Ms          int64          `json:"p99_ms"`
-	ActiveVUs      int            `json:"active_vus"`
-	StageCurrent   int            `json:"stage_current"`
-	StageTotal     int            `json:"stage_total"`
-	StagePct       float64        `json:"stage_pct"`
-	ElapsedS       float64        `json:"elapsed_s"`
-	State         State          `json:"state"`
+	RPS          float64 `json:"rps"`
+	Total        int64   `json:"total"`
+	Errors       int64   `json:"errors"`
+	ErrorPct     float64 `json:"error_pct"`
+	MeanMs       int64   `json:"mean_ms"`
+	P50Ms        int64   `json:"p50_ms"`
+	P90Ms        int64   `json:"p90_ms"`
+	P95Ms        int64   `json:"p95_ms"`
+	P99Ms        int64   `json:"p99_ms"`
+	ActiveVUs    int     `json:"active_vus"`
+	StageCurrent int     `json:"stage_current"`
+	StageTotal   int     `json:"stage_total"`
+	StagePct     float64 `json:"stage_pct"`
+	ElapsedS     float64 `json:"elapsed_s"`
+	State        State   `json:"state"`
 	// Verdict is the live plain-language reading of the current snapshot, using
 	// the same shared source as the CLI so the live view speaks identical wording.
-	Verdict       *reporter.Interpretation `json:"verdict,omitempty"`
-	Result        *RunResult     `json:"result,omitempty"`
-	ScenarioInfo  *ScenarioMeta  `json:"scenario_info,omitempty"`
-	GuidedProfile  *GuidedProfile     `json:"guided_profile,omitempty"` // non-nil during a guided test
-	StepMetrics    []StepMetric       `json:"step_metrics,omitempty"`
-	GroupMetrics   []GroupMetric      `json:"group_metrics,omitempty"`
-	DiscoverMode    bool                 `json:"discover_mode,omitempty"`
-	DiscoverProbes  []DiscoverProbeSnap  `json:"discover_probes,omitempty"`
-	DiscoverResult  *DiscoverResultSnap  `json:"discover_result,omitempty"`
-	DiscoverCurrent *DiscoverCurrentSnap `json:"discover_current,omitempty"`
-	DiscoverProbeSeq []int              `json:"discover_probe_seq,omitempty"`
+	Verdict          *reporter.Interpretation `json:"verdict,omitempty"`
+	Result           *RunResult               `json:"result,omitempty"`
+	ScenarioInfo     *ScenarioMeta            `json:"scenario_info,omitempty"`
+	GuidedProfile    *GuidedProfile           `json:"guided_profile,omitempty"` // non-nil during a guided test
+	StepMetrics      []StepMetric             `json:"step_metrics,omitempty"`
+	GroupMetrics     []GroupMetric            `json:"group_metrics,omitempty"`
+	DiscoverMode     bool                     `json:"discover_mode,omitempty"`
+	DiscoverProbes   []DiscoverProbeSnap      `json:"discover_probes,omitempty"`
+	DiscoverResult   *DiscoverResultSnap      `json:"discover_result,omitempty"`
+	DiscoverCurrent  *DiscoverCurrentSnap     `json:"discover_current,omitempty"`
+	DiscoverProbeSeq []int                    `json:"discover_probe_seq,omitempty"`
 }
 
 // Server serves the embedded dashboard HTML and streams live metrics over WebSocket.

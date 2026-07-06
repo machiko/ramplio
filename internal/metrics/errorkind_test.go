@@ -65,10 +65,10 @@ func TestSummaryErrorBreakdown(t *testing.T) {
 	now := time.Now()
 
 	samples := []Sample{
-		{StatusCode: 200, At: now},                                                    // ok
-		{StatusCode: 503, At: now},                                                     // 5xx
-		{StatusCode: 503, At: now},                                                     // 5xx
-		{StatusCode: 0, Error: &url.Error{Err: &net.DNSError{Err: "no such host"}}},    // dns
+		{StatusCode: 200, At: now}, // ok
+		{StatusCode: 503, At: now}, // 5xx
+		{StatusCode: 503, At: now}, // 5xx
+		{StatusCode: 0, Error: &url.Error{Err: &net.DNSError{Err: "no such host"}}},      // dns
 		{StatusCode: 200, Error: fmt.Errorf("assertion failed: body mismatch"), At: now}, // assertion
 	}
 	for _, sm := range samples {

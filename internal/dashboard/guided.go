@@ -11,7 +11,7 @@ import (
 // GuidedProfile holds PM-facing business inputs from the guided wizard.
 type GuidedProfile struct {
 	URL             string `json:"url"`
-	Method          string `json:"method"`           // defaults to "GET"
+	Method          string `json:"method"` // defaults to "GET"
 	ConcurrentUsers int    `json:"concurrent_users"`
 	TargetLatencyMs int    `json:"target_latency_ms"` // e.g. 1000, 3000, 5000
 	TrafficShape    string `json:"traffic_shape"`     // "steady" | "spike" | "soak"
@@ -29,7 +29,7 @@ type RampPlan struct {
 
 // GuidedVerdict is the PM-readable interpretation of a completed test.
 type GuidedVerdict struct {
-	Level          string         `json:"level"`            // "pass" | "warn" | "fail"
+	Level          string         `json:"level"` // "pass" | "warn" | "fail"
 	Headline       string         `json:"headline"`
 	Detail         string         `json:"detail"`
 	NextStep       string         `json:"next_step"`

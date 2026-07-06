@@ -8,15 +8,15 @@ import (
 )
 
 type Scenario struct {
-	Name           string            `yaml:"name"`
-	Stages         []Stage           `yaml:"stages"`
-	Steps          []Step            `yaml:"steps"`
-	Setup          []Step            `yaml:"setup,omitempty"`
-	Teardown       []Step            `yaml:"teardown,omitempty"`
-	Vars           map[string]string `yaml:"vars,omitempty"`
-	VarsFrom       *VarsFrom         `yaml:"vars_from,omitempty"`
-	Thresholds     *Thresholds       `yaml:"thresholds,omitempty"`
-	HTTP           *ScenarioHTTP     `yaml:"http,omitempty"`
+	Name           string                `yaml:"name"`
+	Stages         []Stage               `yaml:"stages"`
+	Steps          []Step                `yaml:"steps"`
+	Setup          []Step                `yaml:"setup,omitempty"`
+	Teardown       []Step                `yaml:"teardown,omitempty"`
+	Vars           map[string]string     `yaml:"vars,omitempty"`
+	VarsFrom       *VarsFrom             `yaml:"vars_from,omitempty"`
+	Thresholds     *Thresholds           `yaml:"thresholds,omitempty"`
+	HTTP           *ScenarioHTTP         `yaml:"http,omitempty"`
 	CircuitBreaker *CircuitBreakerConfig `yaml:"circuit_breaker,omitempty"`
 }
 
@@ -93,11 +93,11 @@ type Stage struct {
 }
 
 type Step struct {
-	Name     string            `yaml:"name"`
-	Method   string            `yaml:"method"`
-	URL      string            `yaml:"url"`
-	Headers  map[string]string `yaml:"headers,omitempty"`
-	Body     string            `yaml:"body,omitempty"`
+	Name    string            `yaml:"name"`
+	Method  string            `yaml:"method"`
+	URL     string            `yaml:"url"`
+	Headers map[string]string `yaml:"headers,omitempty"`
+	Body    string            `yaml:"body,omitempty"`
 	// Pause specifies think time after this step (e.g. "500ms", "1s").
 	// Parsed from PauseRaw by the scenario parser.
 	PauseRaw   string        `yaml:"pause,omitempty"`
@@ -174,7 +174,7 @@ type Thresholds struct {
 
 // RetryConfig controls per-step retry behaviour.
 type RetryConfig struct {
-	Count     int   `yaml:"count"`               // max retry attempts after first failure
+	Count     int   `yaml:"count"`                // max retry attempts after first failure
 	On        []int `yaml:"on,omitempty"`         // HTTP status codes that trigger a retry (empty = any error)
 	BackoffMs int   `yaml:"backoff_ms,omitempty"` // fixed delay between retries
 }

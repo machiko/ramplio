@@ -32,16 +32,16 @@ type RunRequest struct {
 
 // RunResult holds aggregate metrics after a test completes.
 type RunResult struct {
-	Total         int64          `json:"total"`
-	Errors        int64          `json:"errors"`
-	P50Ms         int64          `json:"p50_ms"`
-	P90Ms         int64          `json:"p90_ms"`
-	P95Ms         int64          `json:"p95_ms"`
-	P99Ms         int64          `json:"p99_ms"`
-	ErrorPct      float64        `json:"error_pct"`
-	MeanMs        int64          `json:"mean_ms"`
-	RPS           float64        `json:"rps"`
-	WallSec       float64        `json:"wall_sec"`
+	Total    int64   `json:"total"`
+	Errors   int64   `json:"errors"`
+	P50Ms    int64   `json:"p50_ms"`
+	P90Ms    int64   `json:"p90_ms"`
+	P95Ms    int64   `json:"p95_ms"`
+	P99Ms    int64   `json:"p99_ms"`
+	ErrorPct float64 `json:"error_pct"`
+	MeanMs   int64   `json:"mean_ms"`
+	RPS      float64 `json:"rps"`
+	WallSec  float64 `json:"wall_sec"`
 	// Verdict is the shared plain-language reading (same source as the terminal,
 	// JSON and HTML outputs) so the browser speaks identical wording to the CLI.
 	Verdict       reporter.Interpretation `json:"verdict"`
@@ -62,7 +62,7 @@ type ScenarioMeta struct {
 // DiscoverRequest describes a capacity discovery run started from the web UI.
 type DiscoverRequest struct {
 	URL           string `json:"url"`
-	Tolerance     string `json:"tolerance"`     // e.g. "2s", "500ms"; defaults to "2s"
+	Tolerance     string `json:"tolerance"`      // e.g. "2s", "500ms"; defaults to "2s"
 	MaxRPS        int    `json:"max_rps"`        // default 500
 	ProbeDuration string `json:"probe_duration"` // e.g. "15s"; default "15s"
 }

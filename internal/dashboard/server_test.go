@@ -28,11 +28,11 @@ type mockController struct {
 	startErr    error
 }
 
-func (m *mockController) Snapshot() reporter.LiveSnapshot              { return m.snap }
+func (m *mockController) Snapshot() reporter.LiveSnapshot               { return m.snap }
 func (m *mockController) State() dashboard.State                        { return m.state }
 func (m *mockController) Result() *dashboard.RunResult                  { return m.result }
 func (m *mockController) ScenarioInfo() *dashboard.ScenarioMeta         { return nil }
-func (m *mockController) LoadScenario(_ []byte, _ string) error                   { return nil }
+func (m *mockController) LoadScenario(_ []byte, _ string) error         { return nil }
 func (m *mockController) ActiveGuidedProfile() *dashboard.GuidedProfile { return nil }
 func (m *mockController) Stop()                                         { m.stopCalled = true }
 func (m *mockController) WriteReport(w io.Writer) error {

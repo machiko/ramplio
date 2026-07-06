@@ -65,8 +65,8 @@ func TestEvalAssertions_BodyJSON(t *testing.T) {
 
 	require.NoError(t, EvalAssertions(&Assertions{
 		BodyJSON: map[string]string{
-			"$.data.token":      "abc123",
-			"$.items[0].name":  "foo",
+			"$.data.token":    "abc123",
+			"$.items[0].name": "foo",
 		},
 	}, result))
 
