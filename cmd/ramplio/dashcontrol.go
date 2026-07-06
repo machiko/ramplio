@@ -25,13 +25,13 @@ import (
 // dashController implements dashboard.Controller, managing the load test lifecycle
 // for tests triggered from the web UI or pre-started from CLI flags.
 type dashController struct {
-	mu             sync.RWMutex
-	state          dashboard.State
-	result         *dashboard.RunResult
-	cancel         context.CancelFunc
-	snapCache      reporter.LiveSnapshot
-	httpCfg        protocols.HTTPConfig
-	scenarioMeta   *dashboard.ScenarioMeta
+	mu                   sync.RWMutex
+	state                dashboard.State
+	result               *dashboard.RunResult
+	cancel               context.CancelFunc
+	snapCache            reporter.LiveSnapshot
+	httpCfg              protocols.HTTPConfig
+	scenarioMeta         *dashboard.ScenarioMeta
 	pendingSteps         []engine.RampStep
 	pendingSetupSteps    []engine.RampStep
 	pendingTeardownSteps []engine.RampStep
@@ -39,9 +39,9 @@ type dashController struct {
 	pendingVars          map[string]string
 	pendingDataRows      []map[string]string
 	pendingDataMode      string
-	lastProfile    *dashboard.GuidedProfile // non-nil while a guided test is running
-	lastSummary    metrics.Summary
-	lastSummarySet bool
+	lastProfile          *dashboard.GuidedProfile // non-nil while a guided test is running
+	lastSummary          metrics.Summary
+	lastSummarySet       bool
 
 	discoverActive     bool
 	discoverProbes     []dashboard.DiscoverProbeSnap

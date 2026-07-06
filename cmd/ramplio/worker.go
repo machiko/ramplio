@@ -7,8 +7,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/spf13/cobra"
 	"github.com/ramplio/ramplio/internal/distributed"
+	"github.com/spf13/cobra"
 )
 
 func newWorkerCmd() *cobra.Command {

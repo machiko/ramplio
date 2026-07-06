@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/spf13/cobra"
 	"github.com/ramplio/ramplio/internal/reporter"
+	"github.com/spf13/cobra"
 )
 
 func newReportCmd() *cobra.Command {
