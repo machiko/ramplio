@@ -45,3 +45,26 @@ changelog:
       - "^docs:"
       - "^test:"
       - "^chore:"
+
+# Homebrew tap:發布時自動更新 ramplio/homebrew-tap 的 cask
+# (v2.10 起 brews 棄用,formula 遷移為 homebrew_casks;安裝指令不變:brew install ramplio/tap/ramplio)
+# 前置條件(人工):建立 github.com/ramplio/homebrew-tap repo,
+# 並在本 repo secrets 設定 HOMEBREW_TAP_GITHUB_TOKEN(對 tap repo 有 contents:write 的 PAT)
+homebrew_casks:
+  - name: ramplio
+    repository:
+      owner: ramplio
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Casks
+    homepage: https://github.com/ramplio/ramplio
+    description: "回答你的服務撐得住多少人 — HTTP 容量探測與壓力測試工具"
+    # 預發布版本(-rc、-beta)不推 tap,正式版才更新
+    skip_upload: auto
+    # binary 未簽章,安裝時移除 quarantine 屬性避免 Gatekeeper 阻擋
+    hooks:
+      post:
+        install: |
+          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/ramplio"]
+          end
