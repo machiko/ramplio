@@ -13,8 +13,8 @@ func newValidateCmd() *cobra.Command {
 	var scenarioFile string
 
 	cmd := &cobra.Command{
-		Use:   "validate",
-		Short: "Validate a scenario file without running it",
+		Use:     "validate",
+		Short:   "Validate a scenario file without running it",
 		Example: `  ramplio validate --scenario testdata/smoke.yaml`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			sc, err := scenarios.ParseFile(scenarioFile)

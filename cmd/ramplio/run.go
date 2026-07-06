@@ -16,7 +16,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/spf13/cobra"
 	"github.com/ramplio/ramplio/internal/dashboard"
 	"github.com/ramplio/ramplio/internal/distributed"
 	"github.com/ramplio/ramplio/internal/engine"
@@ -24,36 +23,37 @@ import (
 	"github.com/ramplio/ramplio/internal/protocols"
 	"github.com/ramplio/ramplio/internal/reporter"
 	"github.com/ramplio/ramplio/internal/scenarios"
+	"github.com/spf13/cobra"
 )
 
 func newRunCmd() *cobra.Command {
 	var (
-		url             string
-		method          string
-		vus             int
-		rps             int
-		duration        string
-		headers         []string
-		body            string
-		scenarioFile    string
-		outputFile      string
-		reportFile      string
-		sinkDSNs        []string
-		dashboardOn     bool
-		dashboardPort   int
-		dashboardToken  string
-		dnsCache        bool
-		prometheusAddr  string
-		requestTimeout  string
-		ignoreErrors    bool
-		workers         []string
-		workerSecret    string
-		tlsCA           string
-		tlsSkipVerify   bool
-		pollInterval    string
-		assignTimeout   string
-		noTUI           bool
-		noPreflight     bool
+		url            string
+		method         string
+		vus            int
+		rps            int
+		duration       string
+		headers        []string
+		body           string
+		scenarioFile   string
+		outputFile     string
+		reportFile     string
+		sinkDSNs       []string
+		dashboardOn    bool
+		dashboardPort  int
+		dashboardToken string
+		dnsCache       bool
+		prometheusAddr string
+		requestTimeout string
+		ignoreErrors   bool
+		workers        []string
+		workerSecret   string
+		tlsCA          string
+		tlsSkipVerify  bool
+		pollInterval   string
+		assignTimeout  string
+		noTUI          bool
+		noPreflight    bool
 	)
 
 	cmd := &cobra.Command{
@@ -565,8 +565,8 @@ func runURL(url, method string, vus int, duration string, headers []string, body
 
 	col := metrics.NewCollector(vus)
 	eng := engine.NewRamp(engine.RampConfig{
-		Stages: []scenarios.Stage{{Duration: dur, Target: vus}},
-		Steps:  []engine.RampStep{{Name: req.Method + " " + req.URL, Request: req}},
+		Stages:   []scenarios.Stage{{Duration: dur, Target: vus}},
+		Steps:    []engine.RampStep{{Name: req.Method + " " + req.URL, Request: req}},
 		Executor: protocols.NewHTTPExecutor(httpCfg),
 	}, col)
 
