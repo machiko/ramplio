@@ -3,6 +3,9 @@ BUILD_DIR  := ./bin
 CMD        := ./cmd/ramplio
 GO         := go
 GOFLAGS    :=
+# 版本號:優先用 git tag(含 dirty 標記),無 tag 環境退回 dev;可用 make build VERSION=x.y.z 覆寫
+VERSION    ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS    := -ldflags "-X main.version=$(VERSION)"
 
 .PHONY: all build test race lint clean run dashboard stop-dashboard help
 
@@ -11,7 +14,7 @@ all: build
 ## build: compile the binary to ./bin/ramplio
 build:
 	@mkdir -p $(BUILD_DIR)
-	$(GO) build $(GOFLAGS) -o $(BUILD_DIR)/$(BINARY) $(CMD)
+	$(GO) build $(GOFLAGS) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY) $(CMD)
 
 ## test: run all tests
 test:
