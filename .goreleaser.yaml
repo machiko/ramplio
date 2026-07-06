@@ -59,8 +59,9 @@ homebrew_casks:
     directory: Casks
     homepage: https://github.com/ramplio/ramplio
     description: "回答你的服務撐得住多少人 — HTTP 容量探測與壓力測試工具"
-    # 預發布版本(-rc、-beta)不推 tap,正式版才更新
-    skip_upload: auto
+    # 暫時停用:tap repo 與 HOMEBREW_TAP_GITHUB_TOKEN secret 尚未建立,
+    # 就緒後改回 auto(auto = 預發布不推 tap、正式版才更新)
+    skip_upload: true
     # binary 未簽章,安裝時移除 quarantine 屬性避免 Gatekeeper 阻擋
     hooks:
       post:

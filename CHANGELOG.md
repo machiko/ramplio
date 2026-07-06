@@ -5,7 +5,7 @@ Ramplio 的所有重要變更都記錄於此。
 
 ---
 
-## [v2.1.0] — 分散式測試 + 智慧 Dashboard (Unreleased)
+## [v2.1.0] — 分散式測試 + 智慧 Dashboard (2026-07-06)
 
 ### 新增
 - **發布打包管線**: GoReleaser 跨平台建置（macOS arm64/amd64、Linux amd64/arm64、Windows amd64）、tag 觸發的 GitHub Actions 發布 workflow、PR/main push 的 CI 品質閘門（build + race test + golangci-lint）、Homebrew tap 自動更新。版本號改由 ldflags 注入（`make build` 自動帶 git tag）。
