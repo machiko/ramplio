@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ramplio/ramplio/internal/metrics"
+	"github.com/machiko/ramplio/internal/metrics"
 )
 
 const divider = "────────────────────────────────────────"

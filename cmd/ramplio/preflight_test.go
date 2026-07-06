@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ramplio/ramplio/internal/protocols"
+	"github.com/machiko/ramplio/internal/protocols"
 )
 
 func TestPreflightTarget(t *testing.T) {

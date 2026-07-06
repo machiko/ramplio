@@ -46,18 +46,18 @@ changelog:
       - "^test:"
       - "^chore:"
 
-# Homebrew tap:發布時自動更新 ramplio/homebrew-tap 的 cask
-# (v2.10 起 brews 棄用,formula 遷移為 homebrew_casks;安裝指令不變:brew install ramplio/tap/ramplio)
-# 前置條件(人工):建立 github.com/ramplio/homebrew-tap repo,
+# Homebrew tap:發布時自動更新 machiko/homebrew-tap 的 cask
+# (v2.10 起 brews 棄用,formula 遷移為 homebrew_casks;安裝指令不變:brew install machiko/tap/ramplio)
+# 前置條件(人工):建立 github.com/machiko/homebrew-tap repo,
 # 並在本 repo secrets 設定 HOMEBREW_TAP_GITHUB_TOKEN(對 tap repo 有 contents:write 的 PAT)
 homebrew_casks:
   - name: ramplio
     repository:
-      owner: ramplio
+      owner: machiko
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     directory: Casks
-    homepage: https://github.com/ramplio/ramplio
+    homepage: https://github.com/machiko/ramplio
     description: "回答你的服務撐得住多少人 — HTTP 容量探測與壓力測試工具"
     # 暫時停用:tap repo 與 HOMEBREW_TAP_GITHUB_TOKEN secret 尚未建立,
     # 就緒後改回 auto(auto = 預發布不推 tap、正式版才更新)

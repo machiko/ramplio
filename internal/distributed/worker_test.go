@@ -8,7 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/ramplio/ramplio/internal/scenarios"
+	"github.com/machiko/ramplio/internal/scenarios"
 	"github.com/stretchr/testify/assert"
 )
 

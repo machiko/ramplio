@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ramplio/ramplio/internal/reporter"
+	"github.com/machiko/ramplio/internal/reporter"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

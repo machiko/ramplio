@@ -1,4 +1,4 @@
-module github.com/ramplio/ramplio
+module github.com/machiko/ramplio
 
 go 1.25.0
 

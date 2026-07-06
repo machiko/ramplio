@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/ramplio/ramplio/internal/metrics"
+	"github.com/machiko/ramplio/internal/metrics"
 )
 
 // CsvSink appends one summary row per test run to a CSV file.

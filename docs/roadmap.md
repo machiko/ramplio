@@ -23,7 +23,7 @@
 
 | 項目 | 說明 |
 |------|------|
-| `go.mod` | `go mod init github.com/ramplio/ramplio` |
+| `go.mod` | `go mod init github.com/machiko/ramplio` |
 | 目錄骨架 | `cmd/`、`internal/`、`docs/`、`testdata/` |
 | `.golangci.yml` | golangci-lint 設定，含 errcheck、staticcheck、govet |
 | `.github/workflows/ci.yml` | lint + test + race detector |

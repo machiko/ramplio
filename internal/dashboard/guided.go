@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ramplio/ramplio/internal/scenarios"
+	"github.com/machiko/ramplio/internal/scenarios"
 )
 
 // GuidedProfile holds PM-facing business inputs from the guided wizard.

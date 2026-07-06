@@ -5,7 +5,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/ramplio/ramplio/internal/metrics"
+	"github.com/machiko/ramplio/internal/metrics"
 )
 
 // Report is the serializable form of a test run summary.

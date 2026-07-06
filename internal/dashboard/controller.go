@@ -3,7 +3,7 @@ package dashboard
 import (
 	"io"
 
-	"github.com/ramplio/ramplio/internal/reporter"
+	"github.com/machiko/ramplio/internal/reporter"
 )
 
 // State is the lifecycle state of a dashboard-controlled load test.

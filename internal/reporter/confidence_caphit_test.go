@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ramplio/ramplio/internal/metrics"
-	"github.com/ramplio/ramplio/internal/reporter"
+	"github.com/machiko/ramplio/internal/metrics"
+	"github.com/machiko/ramplio/internal/reporter"
 )
 
 // TestMeasurementConfidence_CapHitDowngradesClean: an otherwise clean run that

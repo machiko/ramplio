@@ -3,13 +3,13 @@
 ## Installation
 
 ```bash
-go install github.com/ramplio/ramplio/cmd/ramplio@latest
+go install github.com/machiko/ramplio/cmd/ramplio@latest
 ```
 
 Or build from source:
 
 ```bash
-git clone https://github.com/ramplio/ramplio.git
+git clone https://github.com/machiko/ramplio.git
 cd ramplio
 make build         # outputs ./ramplio binary
 ```

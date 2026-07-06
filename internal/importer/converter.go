@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ramplio/ramplio/internal/scenarios"
+	"github.com/machiko/ramplio/internal/scenarios"
 	"gopkg.in/yaml.v3"
 )
 

@@ -3,7 +3,7 @@ package scenarios
 import (
 	"testing"
 
-	"github.com/ramplio/ramplio/internal/protocols"
+	"github.com/machiko/ramplio/internal/protocols"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

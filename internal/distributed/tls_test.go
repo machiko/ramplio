@@ -21,8 +21,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ramplio/ramplio/internal/protocols"
-	"github.com/ramplio/ramplio/internal/scenarios"
+	"github.com/machiko/ramplio/internal/protocols"
+	"github.com/machiko/ramplio/internal/scenarios"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

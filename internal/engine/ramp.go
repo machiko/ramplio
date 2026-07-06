@@ -12,9 +12,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ramplio/ramplio/internal/metrics"
-	"github.com/ramplio/ramplio/internal/protocols"
-	"github.com/ramplio/ramplio/internal/scenarios"
+	"github.com/machiko/ramplio/internal/metrics"
+	"github.com/machiko/ramplio/internal/protocols"
+	"github.com/machiko/ramplio/internal/scenarios"
 	"github.com/tidwall/gjson"
 	"golang.org/x/time/rate"
 )

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ramplio/ramplio/internal/metrics"
+	"github.com/machiko/ramplio/internal/metrics"
 )
 
 // LokiSink pushes results to a Grafana Loki instance via its push API.

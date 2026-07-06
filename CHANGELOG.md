@@ -155,7 +155,7 @@ Ramplio 的所有重要變更都記錄於此。
 ## [v0.0.1] — 引導版
 
 ### 新增
-- Go 模組 (`github.com/ramplio/ramplio`)。
+- Go 模組 (`github.com/machiko/ramplio`)。
 - 完整目錄結構: `cmd/`、`internal/`、`docs/`、`testdata/`。
 - `golangci-lint` 配置 (`.golangci.yml`)。
 - GitHub Actions CI 流程 (lint + test + race detector)。

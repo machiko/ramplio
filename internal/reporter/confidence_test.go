@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ramplio/ramplio/internal/metrics"
-	"github.com/ramplio/ramplio/internal/reporter"
+	"github.com/machiko/ramplio/internal/metrics"
+	"github.com/machiko/ramplio/internal/reporter"
 	"github.com/stretchr/testify/assert"
 )
 

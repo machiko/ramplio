@@ -251,7 +251,7 @@ func TestPrintWelcome(t *testing.T) {
   - 由於 `printDiscoverReport` 目前直接 `fmt.Printf` 到 stdout，**先做最小可測重構**：抽出 `func writeDiscoverReport(w io.Writer, result discover.DiscoverResult, tolerance time.Duration)`，`printDiscoverReport` 改為呼叫它並傳 `os.Stdout`（鏡像 guidance.go 的 `io.Writer` 模式）。探測列同理可選擇抽 `writeDiscoverProbe(w, pr)`。
   - 測試：建構三種 `discover.DiscoverResult`（default 有 SafeLimit、Exhausted、SafeLimit==0），各自 `writeDiscoverReport(&buf, ...)`，斷言含 `"容量報告"`、`"安全上限"`、`"這代表什麼"`、`"mock-server"`；並斷言 **不含** `"Capacity Report"`、`"Safe limit"`、`"What this means"`。
 - **MIRROR**: TEST_STRUCTURE（`bytes.Buffer` + `strings.Contains`）。
-- **IMPORTS**: `bytes`、`strings`、`testing`、`time`、`github.com/ramplio/ramplio/internal/discover`。
+- **IMPORTS**: `bytes`、`strings`、`testing`、`time`、`github.com/machiko/ramplio/internal/discover`。
 - **GOTCHA**: 抽 `io.Writer` 版本時，`row` 閉包要改吃 `w`，別留一份還寫 stdout。
 - **VALIDATE**: `go test ./cmd/ramplio/...` 全通過。
 

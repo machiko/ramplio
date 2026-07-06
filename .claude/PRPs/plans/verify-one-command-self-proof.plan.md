@@ -183,7 +183,7 @@ if !strings.Contains(buf.String(), want) { t.Errorf(...) }
   - `func evaluateBimodal(fast, slow, tol time.Duration, sum metrics.Summary) verifyOutcome`：依 GROUND_TRUTH_ASSERTION 雙峰規則——`p50 ∈ [fast, fast+tol]`、`p99 ∈ [slow, slow+tol]`（p90/p95 在雙峰下不穩定，**不納入**判定，只在表格顯示）。
   - `func writeVerifyReport(w io.Writer, header verifyHeader, out verifyOutcome)`：印 UX 範例的標頭、量測結果表（縮排對齊，數值用 `fmt.Sprintf("%dms", d.Milliseconds())`）、Headline、Reason。
 - **MIRROR**: GROUND_TRUTH_ASSERTION（容差與方向性完全照搬）。
-- **IMPORTS**: `io`、`time`、`github.com/ramplio/ramplio/internal/metrics`。
+- **IMPORTS**: `io`、`time`、`github.com/machiko/ramplio/internal/metrics`。
 - **GOTCHA**: 方向性是重點——**measured < injected 是 bug（最嚴重）**，要與「超出容差」分開措辭；別合併成單一「不在範圍內」。
 - **VALIDATE**: Task 5 的純函式測試通過。
 

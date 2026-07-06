@@ -7,7 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/ramplio/ramplio/internal/distributed"
+	"github.com/machiko/ramplio/internal/distributed"
 	"github.com/spf13/cobra"
 )
 

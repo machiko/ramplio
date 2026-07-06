@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ramplio/ramplio/internal/discover"
+	"github.com/machiko/ramplio/internal/discover"
 )
 
 // englishLeftovers are phrases from the old English report that must NOT appear
