@@ -1,0 +1,47 @@
+# GoReleaser 設定 — tag push 時由 .github/workflows/release.yml 觸發
+# 本地驗證:go run github.com/goreleaser/goreleaser/v2@latest check
+# 本地試建:go run github.com/goreleaser/goreleaser/v2@latest release --snapshot --clean
+version: 2
+
+project_name: ramplio
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - main: ./cmd/ramplio
+    binary: ramplio
+    env:
+      - CGO_ENABLED=0
+    # 與 Makefile 同一條版本注入路徑(main.version)
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
