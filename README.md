@@ -41,16 +41,26 @@ ramplio discover --url https://example.com   # 30 秒回答：你的服務撐得
 
 ## 安裝
 
+**Homebrew(macOS,推薦):**
+
+```bash
+brew install ramplio/tap/ramplio
+```
+
+**直接下載:** 從 [GitHub Releases](https://github.com/ramplio/ramplio/releases) 下載對應平台的 binary(macOS arm64/amd64、Linux amd64/arm64、Windows amd64),解壓即用,無任何相依套件。
+
+**Go 開發者:**
+
 ```bash
 go install github.com/ramplio/ramplio/cmd/ramplio@latest
 ```
 
-或從原始碼建置：
+**從原始碼建置:**
 
 ```bash
 git clone https://github.com/ramplio/ramplio.git
 cd ramplio
-make install         # 編譯並安裝至 ~/.local/bin/ramplio
+make install         # 編譯並安裝至 ~/.local/bin/ramplio(版本號自動帶入 git tag)
 ```
 
 ---

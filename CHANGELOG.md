@@ -8,6 +8,7 @@ Ramplio 的所有重要變更都記錄於此。
 ## [v2.1.0] — 分散式測試 + 智慧 Dashboard (Unreleased)
 
 ### 新增
+- **發布打包管線**: GoReleaser 跨平台建置（macOS arm64/amd64、Linux amd64/arm64、Windows amd64）、tag 觸發的 GitHub Actions 發布 workflow、PR/main push 的 CI 品質閘門（build + race test + golangci-lint）、Homebrew tap 自動更新。版本號改由 ldflags 注入（`make build` 自動帶 git tag）。
 - **分散式測試基礎架構 (Phase 3)**: Coordinator-Worker 模式突破單進程 TCP 連線限制，支援 4 個 Worker 分散負載、健康檢查、VU 自動分配、結果合併。
 - **`ramplio worker` 子命令**: 獨立 Worker 進程，監聽指定 port，接收場景並執行本地引擎。
 - **`--worker` 旗標**: 在 `ramplio run` 中指定 Worker 位址（可重複），自動成為 Coordinator。
