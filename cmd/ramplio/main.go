@@ -15,7 +15,7 @@ var rootCmd = &cobra.Command{
 	Use:     "ramplio",
 	Short:   "回答你的服務撐得住多少人 — 容量探測與壓力測試工具",
 	Long:    "Ramplio 給網址就能自動探測 HTTP 服務的容量上限，輸出白話容量報告；量測準確度可用內建 mock-server 注入已知延遲自行驗證。也支援 YAML 多階段情境、登入流程與分散式壓測。",
-	Version: version,
+	Version: buildVersion(),
 	// With no subcommand, show a friendly front door pointing at the three
 	// primary paths instead of dumping the full command help. --help and
 	// --version are handled by cobra before Run and are unaffected.

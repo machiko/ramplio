@@ -8,7 +8,7 @@ func TestRootCmdVersionWiredToInjectableVar(t *testing.T) {
 	if version == "" {
 		t.Fatal("version 變數不可為空字串,未注入時應有預設值")
 	}
-	if rootCmd.Version != version {
-		t.Fatalf("rootCmd.Version = %q,應等於 version 變數 %q", rootCmd.Version, version)
+	if rootCmd.Version != buildVersion() {
+		t.Fatalf("rootCmd.Version = %q,應等於 buildVersion() %q(ldflags 優先、build info 回退)", rootCmd.Version, buildVersion())
 	}
 }
