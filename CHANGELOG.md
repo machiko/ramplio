@@ -5,6 +5,13 @@ Ramplio 的所有重要變更都記錄於此。
 
 ---
 
+## [v2.1.2] — go install 修復 (2026-07-06)
+
+### 修正
+- **Module path 加上 `/v2` 字尾**(`github.com/machiko/ramplio/v2`): 依 Go modules Semantic Import Versioning 規則,v2+ 版本的 module path 必須帶主版本字尾,否則 `go install` 拒絕解析。本版起 `go install github.com/machiko/ramplio/v2/cmd/ramplio@latest` 可正常安裝,解除 v2.1.1 的已知限制。下游 import 需同步改為 `github.com/machiko/ramplio/v2/...`。
+
+---
+
 ## [v2.1.1] — Module Path 統一 (2026-07-06)
 
 ### 已變更

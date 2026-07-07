@@ -5,7 +5,7 @@ import (
 	"io"
 	"text/template"
 
-	"github.com/machiko/ramplio/internal/metrics"
+	"github.com/machiko/ramplio/v2/internal/metrics"
 )
 
 //go:embed templates/report.html

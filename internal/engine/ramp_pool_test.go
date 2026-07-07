@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/machiko/ramplio/internal/metrics"
-	"github.com/machiko/ramplio/internal/protocols"
-	"github.com/machiko/ramplio/internal/scenarios"
+	"github.com/machiko/ramplio/v2/internal/metrics"
+	"github.com/machiko/ramplio/v2/internal/protocols"
+	"github.com/machiko/ramplio/v2/internal/scenarios"
 )
 
 // TestRatePool_MaybeGrowRespectsCapAndIdle verifies the grow-on-demand logic in

@@ -3,7 +3,7 @@
 ## Installation
 
 ```bash
-go install github.com/machiko/ramplio/cmd/ramplio@latest
+go install github.com/machiko/ramplio/v2/cmd/ramplio@latest
 ```
 
 Or build from source:

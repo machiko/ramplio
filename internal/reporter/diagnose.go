@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/machiko/ramplio/internal/metrics"
+	"github.com/machiko/ramplio/v2/internal/metrics"
 )
 
 // Finding is a single plain-language diagnostic insight aimed at non-technical

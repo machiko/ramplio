@@ -10,12 +10,12 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/machiko/ramplio/internal/dashboard"
-	"github.com/machiko/ramplio/internal/engine"
-	"github.com/machiko/ramplio/internal/metrics"
-	"github.com/machiko/ramplio/internal/protocols"
-	"github.com/machiko/ramplio/internal/reporter"
-	"github.com/machiko/ramplio/internal/scenarios"
+	"github.com/machiko/ramplio/v2/internal/dashboard"
+	"github.com/machiko/ramplio/v2/internal/engine"
+	"github.com/machiko/ramplio/v2/internal/metrics"
+	"github.com/machiko/ramplio/v2/internal/protocols"
+	"github.com/machiko/ramplio/v2/internal/reporter"
+	"github.com/machiko/ramplio/v2/internal/scenarios"
 )
 
 // benchDuration is the wall-clock time each benchmark "operation" runs the engine.

@@ -52,7 +52,7 @@ brew install machiko/tap/ramplio
 **Go 開發者:**
 
 ```bash
-go install github.com/machiko/ramplio/cmd/ramplio@latest
+go install github.com/machiko/ramplio/v2/cmd/ramplio@latest
 ```
 
 **從原始碼建置:**

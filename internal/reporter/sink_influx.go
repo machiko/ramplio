@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/machiko/ramplio/internal/metrics"
+	"github.com/machiko/ramplio/v2/internal/metrics"
 )
 
 // InfluxSink pushes results to an InfluxDB v2 instance using the line protocol.

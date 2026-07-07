@@ -12,10 +12,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/machiko/ramplio/internal/engine"
-	"github.com/machiko/ramplio/internal/metrics"
-	"github.com/machiko/ramplio/internal/protocols"
-	"github.com/machiko/ramplio/internal/scenarios"
+	"github.com/machiko/ramplio/v2/internal/engine"
+	"github.com/machiko/ramplio/v2/internal/metrics"
+	"github.com/machiko/ramplio/v2/internal/protocols"
+	"github.com/machiko/ramplio/v2/internal/scenarios"
 )
 
 // WorkerState represents the current state of a worker.

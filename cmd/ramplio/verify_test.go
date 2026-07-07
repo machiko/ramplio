@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/machiko/ramplio/internal/metrics"
+	"github.com/machiko/ramplio/v2/internal/metrics"
 )
 
 func ms(n int) time.Duration { return time.Duration(n) * time.Millisecond }

@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/machiko/ramplio/internal/protocols"
+	"github.com/machiko/ramplio/v2/internal/protocols"
 	"github.com/tidwall/gjson"
 )
 

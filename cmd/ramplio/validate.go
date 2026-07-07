@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/machiko/ramplio/internal/scenarios"
+	"github.com/machiko/ramplio/v2/internal/scenarios"
 	"github.com/spf13/cobra"
 )
 

@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/machiko/ramplio/internal/dashboard"
-	"github.com/machiko/ramplio/internal/reporter"
+	"github.com/machiko/ramplio/v2/internal/dashboard"
+	"github.com/machiko/ramplio/v2/internal/reporter"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

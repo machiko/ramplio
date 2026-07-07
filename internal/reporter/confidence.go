@@ -3,7 +3,7 @@ package reporter
 import (
 	"fmt"
 
-	"github.com/machiko/ramplio/internal/metrics"
+	"github.com/machiko/ramplio/v2/internal/metrics"
 )
 
 // ConfidenceReading is a plain-language judgement of how much to trust the
