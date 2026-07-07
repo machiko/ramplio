@@ -5,6 +5,16 @@ Ramplio 的所有重要變更都記錄於此。
 
 ---
 
+## [v2.1.1] — Module Path 統一 (2026-07-06)
+
+### 已變更
+- **Module path 統一為 `github.com/machiko/ramplio`**(74 檔): 原路徑 `github.com/ramplio/ramplio` 與實際 repo 不符。統一 go.mod、全部 import、README 安裝指引與 GoReleaser 設定。GitHub Releases 的 binary 下載不受影響。
+
+### 已知限制
+- **`go install` 尚無法安裝 v2.x**: Go modules 規則要求 v2+ 的 module path 帶 `/v2` 字尾,目前 go.mod 未加,`go install ...@v2.1.1` 會被拒(實測確認)。請改用 GitHub Releases 下載或原始碼建置;`/v2` 遷移已列入追蹤。
+
+---
+
 ## [v2.1.0] — 分散式測試 + 智慧 Dashboard (2026-07-06)
 
 ### 新增
