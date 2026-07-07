@@ -1,6 +1,8 @@
 # 開發生命週期與歷程
 
 > Ramplio 從零到生產就緒的完整發展路徑。每個 Milestone 都是一個可獨立運行的版本，具備明確的交付項目與 Definition of Done。
+>
+> **文件定位**：本文件是 v0 → v1.0.0 階段的歷史開發計畫，Milestone 0–6 已全數完成。v1.0.0 之後的版本演進（v2.0.0 起）以 [CHANGELOG.md](../CHANGELOG.md) 為準，本文件僅在文末時間軸保留一行式摘要。
 
 ---
 
@@ -11,7 +13,7 @@
 - **TDD 優先**：每個功能先寫測試（RED），再實作（GREEN），再整理（REFACTOR）
 - **Race Detector 必過**：`go test -race ./...` 在每個 Milestone 結束前全數通過
 - **每個 Milestone 可獨立執行**：CLI 在當下 Milestone 範圍內必須可用
-- **Semantic Versioning**：`v0.x.0` 為 pre-release，`v1.0.0` 為第一個穩定版
+- **Semantic Versioning**：規劃當時以 `v0.x.0` 為 pre-release，`v1.0.0` 為第一個穩定版（現已演進至 v2.x，見文末時間軸）
 
 ---
 
@@ -251,6 +253,10 @@ v0.3.0  Rich Reporting     ── 精確量測 + CI 整合
 v0.4.0  Terminal Dashboard ── 即時 TUI 監控
 v0.5.0  Web Dashboard      ── 瀏覽器即時監控
 v1.0.0  Hardening          ── 生產就緒
+─────── 以下為本計畫完成後的演進(細節見 CHANGELOG.md)───────
+v2.0.0  企業級功能         ── Cookie/HAR/JUnit/discover 等企業功能
+v2.1.0  分散式測試         ── Coordinator-Worker + 發布管線
+v2.1.1  Module Path 統一   ── github.com/machiko/ramplio
 ```
 
 ---
