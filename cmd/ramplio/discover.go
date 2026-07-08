@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/machiko/ramplio/v2/internal/baseline"
 	"github.com/machiko/ramplio/v2/internal/discover"
 	"github.com/machiko/ramplio/v2/internal/protocols"
 	"github.com/spf13/cobra"
@@ -21,6 +22,7 @@ func newDiscoverCmd() *cobra.Command {
 		tolerance     string
 		maxRPS        int
 		probeDuration string
+		baselineFile  string
 	)
 
 	cmd := &cobra.Command{
@@ -75,6 +77,17 @@ func newDiscoverCmd() *cobra.Command {
 
 			fmt.Println()
 			printDiscoverReport(result, tol)
+
+			// 存檔失敗只警告不中斷(比照 run 的 outputFile 慣例,理由見 run.go)
+			if baselineFile != "" {
+				b := baseline.FromDiscover(result, url)
+				b.GitCommit = currentGitCommit()
+				if saveErr := baseline.Save(baselineFile, b); saveErr != nil {
+					fmt.Fprintf(os.Stderr, "warning: could not save baseline: %v\n", saveErr)
+				} else {
+					fmt.Printf("Baseline 已存至 %s(之後用 ramplio compare 比較)\n", baselineFile)
+				}
+			}
 			return nil
 		},
 	}
@@ -84,6 +97,7 @@ func newDiscoverCmd() *cobra.Command {
 	cmd.Flags().StringVar(&tolerance, "tolerance", "2s", "Acceptable p99 response time (e.g. 1s, 500ms, 2s)")
 	cmd.Flags().IntVar(&maxRPS, "max-rps", 500, "Stop probing above this request rate")
 	cmd.Flags().StringVar(&probeDuration, "probe-duration", "15s", "Duration of each probe (e.g. 10s, 30s)")
+	cmd.Flags().StringVar(&baselineFile, "save-baseline", "", "把容量結果存成 baseline 快照(供 ramplio compare 守門)")
 
 	return cmd
 }

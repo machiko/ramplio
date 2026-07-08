@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/machiko/ramplio/v2/internal/baseline"
 	"github.com/machiko/ramplio/v2/internal/dashboard"
 	"github.com/machiko/ramplio/v2/internal/distributed"
 	"github.com/machiko/ramplio/v2/internal/engine"
@@ -37,6 +38,7 @@ func newRunCmd() *cobra.Command {
 		body           string
 		scenarioFile   string
 		outputFile     string
+		baselineFile   string
 		reportFile     string
 		sinkDSNs       []string
 		dashboardOn    bool
@@ -184,6 +186,18 @@ func newRunCmd() *cobra.Command {
 				}
 			}
 
+			// 存檔失敗只警告不中斷:寫檔問題(權限/磁碟)與「壓測是否達標」無關,
+			// 不可污染 exit code 或吞掉後面的報告與 threshold 判定(比照 outputFile 慣例)。
+			if baselineFile != "" {
+				b := baseline.FromSummary(sum, scenarioName)
+				b.GitCommit = currentGitCommit()
+				if saveErr := baseline.Save(baselineFile, b); saveErr != nil {
+					fmt.Fprintf(os.Stderr, "warning: could not save baseline: %v\n", saveErr)
+				} else {
+					fmt.Printf("Baseline 已存至 %s(之後用 ramplio compare 比較)\n", baselineFile)
+				}
+			}
+
 			if reportFile != "" {
 				if f, createErr := os.Create(reportFile); createErr != nil {
 					fmt.Fprintf(os.Stderr, "warning: could not create report file: %v\n", createErr)
@@ -221,6 +235,7 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().StringVar(&method, "method", "GET", "HTTP method")
 	cmd.Flags().IntVar(&vus, "vus", 1, "Number of virtual users (mutually exclusive with --rps)")
 	cmd.Flags().IntVar(&rps, "rps", 0, "Target requests per second — rate mode (mutually exclusive with --vus)")
+	cmd.Flags().StringVar(&baselineFile, "save-baseline", "", "把本次結果存成 baseline 快照(供 ramplio compare 守門)")
 	cmd.Flags().StringVarP(&duration, "duration", "d", "30s", "Test duration (e.g. 30s, 1m)")
 	cmd.Flags().StringArrayVarP(&headers, "header", "H", nil, "HTTP header (repeatable)")
 	cmd.Flags().StringVar(&body, "body", "", "Request body")
