@@ -186,16 +186,10 @@ func newRunCmd() *cobra.Command {
 				}
 			}
 
-			// 存檔失敗只警告不中斷:寫檔問題(權限/磁碟)與「壓測是否達標」無關,
-			// 不可污染 exit code 或吞掉後面的報告與 threshold 判定(比照 outputFile 慣例)。
 			if baselineFile != "" {
 				b := baseline.FromSummary(sum, scenarioName)
 				b.GitCommit = currentGitCommit()
-				if saveErr := baseline.Save(baselineFile, b); saveErr != nil {
-					fmt.Fprintf(os.Stderr, "warning: could not save baseline: %v\n", saveErr)
-				} else {
-					fmt.Printf("Baseline 已存至 %s(之後用 ramplio compare 比較)\n", baselineFile)
-				}
+				writeBaselineFile(os.Stdout, os.Stderr, baselineFile, b)
 			}
 
 			if reportFile != "" {

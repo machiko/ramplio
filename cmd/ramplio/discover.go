@@ -78,15 +78,10 @@ func newDiscoverCmd() *cobra.Command {
 			fmt.Println()
 			printDiscoverReport(result, tol)
 
-			// 存檔失敗只警告不中斷(比照 run 的 outputFile 慣例,理由見 run.go)
 			if baselineFile != "" {
 				b := baseline.FromDiscover(result, url)
 				b.GitCommit = currentGitCommit()
-				if saveErr := baseline.Save(baselineFile, b); saveErr != nil {
-					fmt.Fprintf(os.Stderr, "warning: could not save baseline: %v\n", saveErr)
-				} else {
-					fmt.Printf("Baseline 已存至 %s(之後用 ramplio compare 比較)\n", baselineFile)
-				}
+				writeBaselineFile(os.Stdout, os.Stderr, baselineFile, b)
 			}
 			return nil
 		},
