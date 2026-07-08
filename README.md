@@ -630,6 +630,20 @@ ramplio run --scenario smoke.yaml --prometheus :9100
 
 公開的指標：`ramplio_requests_total`、`ramplio_errors_total`、`ramplio_error_rate_pct`、`ramplio_rps`、`ramplio_latency_p50/p90/p99_ms`、`ramplio_active_vus` 等。
 
+### OpenTelemetry 整合
+
+```bash
+# 測試結束時把最終彙總指標推送到 OTel collector(OTLP/HTTP)
+ramplio run --url https://example.com --rps 200 -d 30s --sink otel://localhost:4318
+
+# 讓每個壓測請求帶 W3C traceparent,APM 就能標記出哪些流量來自壓測
+ramplio run --url https://example.com --rps 200 -d 30s --trace-context
+```
+
+匯出的指標:`ramplio.requests.count`、`ramplio.error_rate_pct`、`ramplio.throughput_rps`、`ramplio.latency.p50/p90/p95/p99_ms`、`ramplio.latency.corrected_p99_ms`(rate 模式)等,並附 `scenario` 標籤。
+
+> `--trace-context` 預設關閉:逐請求注入在產生器極限吞吐下有約 5% 成本,只在需要與 APM 做流量關聯時開啟。
+
 ### CI 整合
 
 閾值讓 Ramplio 成為 CI 流程的效能門禁：

@@ -5,6 +5,16 @@ Ramplio 的所有重要變更都記錄於此。
 
 ---
 
+## [Unreleased] — v3.0.0 開發中:「為什麼撐不住 + 跟上次比如何」
+
+### 新增
+- **容量回歸守門(Phase 1,已合併)**: `--save-baseline` 把壓測/探測結果存成 git-friendly 快照;`ramplio compare` 以雙門檻容差(相對 10% + 絕對下限,寧鬆勿誤報)白話判定持平/改善/退步,退步 exit 1 可放 CI 擋合併;量測可信度存疑(丟樣本/worker 達上限)強制警告。
+- **OpenTelemetry 打通(Phase 2)**: `--sink otel://host:4318` 以 OTLP/HTTP 匯出最終指標(零新依賴手刻,binary 僅 +18KB);`--trace-context` 對每個請求注入 W3C traceparent 供 APM 標記壓測流量(opt-in:開啟在產生器極限吞吐下約 -5%,成本如實記載)。
+- **rate 模式負載輪廓揭露**: 開跑即顯示爬升/持平/收尾三階段,「平均 RPS 低於目標」有跡可循。
+- **版本號 build info 回退**: `go install` 建置的 binary `--version` 能回報 module 版本;工作樹有未提交變更時誠實顯示 dev。
+
+---
+
 ## [v2.1.2] — go install 修復 (2026-07-06)
 
 ### 修正

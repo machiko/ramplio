@@ -102,6 +102,15 @@ Go 生態的事實標準，Kubernetes、Hugo、GitHub CLI 皆採用。
 
 ---
 
+## OpenTelemetry 整合:手刻 OTLP/JSON + opt-in trace context
+
+v3 Phase 2 的兩個反直覺選擇,皆由實測數據決定:
+
+- **不引入 otel SDK,手刻 OTLP/HTTP JSON**:sink 契約是「測後單發匯出 ~10 個 gauge」,不需要 SDK 的 MeterProvider/periodic reader 整棵依賴樹。實測 binary 增重 +18KB(SDK 路線估 +數 MB),與既有 Influx(line protocol)/Loki(JSON)手刻 sink 風格一致。代價是 OTLP/JSON 編碼細節自扛(camelCase、fixed64 以字串表示),已由審查對照規範驗證。
+- **traceparent 注入預設關閉(`--trace-context` opt-in)**:交錯 A/B benchmark 實測逐請求注入在產生器極限吞吐下造成約 5% 退化(生成已優化至 63ns/1 alloc,成本在 map insert/配置/GC 的複利),與「hot path 零額外成本」原則衝突。需要 APM 關聯時明確開啟,成本記載於旗標說明。
+
+---
+
 ## 選型核心原則
 
 > 每個選型都回到同一個問題：**「這個選擇會不會讓測試數據失真？」**
