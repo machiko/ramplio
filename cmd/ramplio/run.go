@@ -46,6 +46,7 @@ func newRunCmd() *cobra.Command {
 		dashboardToken string
 		dnsCache       bool
 		traceContext   bool
+		observeDSN     string
 		prometheusAddr string
 		requestTimeout string
 		ignoreErrors   bool
@@ -137,6 +138,7 @@ func newRunCmd() *cobra.Command {
 				err        error
 			)
 
+			runStart := time.Now()
 			if scenarioFile != "" {
 				sum, thresholds, err = runScenario(scenarioFile, prometheusAddr, httpCfg)
 			} else if rps > 0 {
@@ -194,6 +196,18 @@ func newRunCmd() *cobra.Command {
 				writeBaselineFile(os.Stdout, os.Stderr, baselineFile, b)
 			}
 
+			// 觀測失敗只警告不中斷:trace 關聯是補充,不可污染 exit code。
+			if observeDSN != "" {
+				if rps <= 0 {
+					fmt.Fprintln(os.Stderr, "warning: --observe 目前僅支援 rate 模式(--rps)——需要負載輪廓提供基準/臨界窗口")
+				} else if src, obsErr := parseObserveDSN(observeDSN); obsErr != nil {
+					fmt.Fprintf(os.Stderr, "warning: %v,略過觀測\n", obsErr)
+				} else if runDur, durErr := time.ParseDuration(duration); durErr == nil {
+					rampDur, holdDur := rateProfile(runDur)
+					runObservation(os.Stdout, os.Stderr, src, runStart, rampDur, holdDur)
+				}
+			}
+
 			if reportFile != "" {
 				if f, createErr := os.Create(reportFile); createErr != nil {
 					fmt.Fprintf(os.Stderr, "warning: could not create report file: %v\n", createErr)
@@ -243,6 +257,7 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().StringVar(&dashboardToken, "dashboard-token", "", "Bearer token to protect dashboard control endpoints (optional)")
 	cmd.Flags().BoolVar(&dnsCache, "dns-cache", false, "Cache DNS lookups to reduce latency measurement noise")
 	cmd.Flags().BoolVar(&traceContext, "trace-context", false, "對每個請求注入 W3C traceparent 供 APM 關聯壓測流量(每請求約 63ns 開銷,預設關閉)")
+	cmd.Flags().StringVar(&observeDSN, "observe", "", "壓測後拉取目標系統 trace 做瓶頸關聯(例:jaeger://localhost:16686?service=checkout;僅 rate 模式)")
 	cmd.Flags().StringVar(&prometheusAddr, "prometheus", "", "Expose Prometheus metrics on this address (e.g. :9100)")
 	cmd.Flags().StringVar(&requestTimeout, "timeout", "", "Per-request timeout (e.g. 10s, 500ms); overrides scenario default")
 	cmd.Flags().StringArrayVar(&sinkDSNs, "sink", nil, "Push results to an external sink (repeatable): csv:<file>  influxdb://host/bucket?token=T")
@@ -603,15 +618,7 @@ func runRPS(url, method string, targetRPS int, duration string, headers []string
 		req.Body = []byte(body)
 	}
 
-	rampDur := dur / 4
-	if rampDur < time.Second {
-		rampDur = time.Second
-	}
-	holdDur := dur - 2*rampDur
-	// duration ≤ 2×rampDur 時 holdDur 會為負;負時長 stage 不可進 engine。
-	if holdDur < 0 {
-		holdDur = 0
-	}
+	rampDur, holdDur := rateProfile(dur)
 
 	stgs := []scenarios.Stage{
 		{Duration: rampDur, TargetRPS: targetRPS},
