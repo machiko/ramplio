@@ -95,9 +95,26 @@ func TestEngine_RecordsWallTime(t *testing.T) {
 	}))
 	defer server.Close()
 
+	// 計時斷言在全套並行 race 下會被其他套件搶 CPU 撐爆。
+	// 比照 groundtruth_test.go 既有模式:上界用 driftTol 放寬(競爭只會
+	// 讓 wall time 偏大)、下界每輪必守——WallTime = time.Since(start)
+	// 不可能短於注入的 duration,短於就是記錄 bug,永不放寬。
 	const dur = 300 * time.Millisecond
-	eng, _ := newTestEngine(t, server.URL, 3, dur)
-	sum := eng.Run(context.Background())
+	upperTol := driftTol(100 * time.Millisecond)
 
-	assert.InDelta(t, dur.Seconds(), sum.WallTime.Seconds(), 0.1)
+	var last time.Duration
+	for i := 0; i < groundTruthRounds; i++ {
+		eng, _ := newTestEngine(t, server.URL, 3, dur)
+		sum := eng.Run(context.Background())
+		last = sum.WallTime
+		if last < dur {
+			t.Fatalf("wall time %v 短於注入的 duration %v——記錄 bug,非環境噪音", last, dur)
+		}
+		if last <= dur+upperTol {
+			return
+		}
+		t.Logf("round %d/%d wall time 上漂(%v > %v+%v)——疑似 CPU 競爭,重試",
+			i+1, groundTruthRounds, last, dur, upperTol)
+	}
+	t.Fatalf("連續 %d 輪皆上漂:wall=%v want ≤ %v", groundTruthRounds, last, dur+upperTol)
 }
