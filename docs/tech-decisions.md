@@ -111,6 +111,17 @@ v3 Phase 2 的兩個反直覺選擇,皆由實測數據決定:
 
 ---
 
+## 瓶頸關聯:Jaeger 首發 + 三態誠實歸因
+
+v3 Phase 3 的設計取捨:
+
+- **Jaeger query API 首發,TraceSource 介面留擴充位**:Jaeger 的 `/api/traces` JSON API 穩定且易 stub 測試;介面最小化(FetchSpans),Tempo 等後端之後以相同介面加入。Jaeger 預設 limit=20 對統計分析嚴重欠採樣,顯式設 1000 且「截斷」以 FetchResult.Truncated 對下游可見。
+- **三態歸因(ok/insufficient/no_culprit)+ 排除可見化**:錯誤歸因比不歸因更傷公信力。樣本不足回報「關聯不足」絕不硬給答案;等幅變慢回報「疑似資源飽和」而非硬指最慢者;因樣本不足被排除的 operation 一律列名(ExcludedOps)——沒有這個,no_culprit 會變成「已窮盡搜尋」的假斷言。
+- **比較窗口出自 rate 負載輪廓**:爬升前半(0→50% 負載)當基準、持平段當臨界,與 runRPS 共用同一份窗口數學(rateProfile)。已知偏誤如實揭露:冷啟動落在基準窗會讓倍率被低估;p95 偵測不到「慢路徑佔比上升」型退化。
+- **歸因自證**:與 `ramplio verify` 同一哲學——對已知瓶頸分佈做關聯,結論必須指向注入的瓶頸,固化為整合測試(TestObserveGroundTruthE2E)。
+
+---
+
 ## 選型核心原則
 
 > 每個選型都回到同一個問題：**「這個選擇會不會讓測試數據失真？」**
