@@ -596,6 +596,10 @@ func runRPS(url, method string, targetRPS int, duration string, headers []string
 		rampDur = time.Second
 	}
 	holdDur := dur - 2*rampDur
+	// duration ≤ 2×rampDur 時 holdDur 會為負;負時長 stage 不可進 engine。
+	if holdDur < 0 {
+		holdDur = 0
+	}
 
 	stgs := []scenarios.Stage{
 		{Duration: rampDur, TargetRPS: targetRPS},
@@ -618,7 +622,8 @@ func runRPS(url, method string, targetRPS int, duration string, headers []string
 		Executor: protocols.NewHTTPExecutor(httpCfg),
 	}, col)
 
-	fmt.Printf("Running rate mode: %d req/s for %s → %s %s\n\n", targetRPS, duration, req.Method, url)
+	fmt.Printf("Running rate mode: %d req/s for %s → %s %s\n", targetRPS, duration, req.Method, url)
+	fmt.Printf("%s\n\n", rateProfileLine(targetRPS, rampDur, holdDur))
 	return eng.Run(context.Background()), nil
 }
 
