@@ -8,7 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/machiko/ramplio/v2/internal/metrics"
+	"github.com/machiko/ramplio/v3/internal/metrics"
 )
 
 // LiveSnapshot is a point-in-time view of a running load test.

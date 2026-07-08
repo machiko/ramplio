@@ -1,6 +1,6 @@
 package reporter
 
-import "github.com/machiko/ramplio/v2/internal/metrics"
+import "github.com/machiko/ramplio/v3/internal/metrics"
 
 // Sink is a write-only output target for test results.
 // Implementations are responsible for their own I/O and must be safe for

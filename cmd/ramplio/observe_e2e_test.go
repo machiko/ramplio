@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/machiko/ramplio/v2/internal/observe"
+	"github.com/machiko/ramplio/v3/internal/observe"
 )
 
 // Ground-truth 自證(整合版):假 Jaeger 注入已知瓶頸,

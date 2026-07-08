@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/machiko/ramplio/v2/internal/observe"
+	"github.com/machiko/ramplio/v3/internal/observe"
 )
 
 // parseObserveDSN 解析 --observe 的 DSN。

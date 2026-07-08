@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/machiko/ramplio/v2/internal/importer"
-	"github.com/machiko/ramplio/v2/internal/metrics"
-	"github.com/machiko/ramplio/v2/internal/reporter"
+	"github.com/machiko/ramplio/v3/internal/importer"
+	"github.com/machiko/ramplio/v3/internal/metrics"
+	"github.com/machiko/ramplio/v3/internal/reporter"
 )
 
 // StepMetric is the per-step metrics payload in a wsMessage.

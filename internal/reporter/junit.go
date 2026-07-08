@@ -4,7 +4,7 @@ import (
 	"encoding/xml"
 	"io"
 
-	"github.com/machiko/ramplio/v2/internal/metrics"
+	"github.com/machiko/ramplio/v3/internal/metrics"
 )
 
 type junitTestsuites struct {

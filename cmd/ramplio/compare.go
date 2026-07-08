@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/machiko/ramplio/v2/internal/baseline"
+	"github.com/machiko/ramplio/v3/internal/baseline"
 	"github.com/spf13/cobra"
 )
 

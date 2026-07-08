@@ -10,9 +10,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/machiko/ramplio/v2/internal/baseline"
-	"github.com/machiko/ramplio/v2/internal/discover"
-	"github.com/machiko/ramplio/v2/internal/protocols"
+	"github.com/machiko/ramplio/v3/internal/baseline"
+	"github.com/machiko/ramplio/v3/internal/discover"
+	"github.com/machiko/ramplio/v3/internal/protocols"
 	"github.com/spf13/cobra"
 )
 

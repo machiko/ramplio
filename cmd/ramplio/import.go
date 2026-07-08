@@ -5,7 +5,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/machiko/ramplio/v2/internal/importer"
+	"github.com/machiko/ramplio/v3/internal/importer"
 	"github.com/spf13/cobra"
 )
 

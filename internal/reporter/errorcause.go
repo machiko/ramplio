@@ -3,7 +3,7 @@ package reporter
 import (
 	"fmt"
 
-	"github.com/machiko/ramplio/v2/internal/metrics"
+	"github.com/machiko/ramplio/v3/internal/metrics"
 )
 
 // errorCopy holds the plain-language wording for one failure cause. Like the

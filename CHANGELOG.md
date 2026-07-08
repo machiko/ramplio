@@ -7,6 +7,9 @@ Ramplio 的所有重要變更都記錄於此。
 
 ## [Unreleased] — v3.0.0 開發中:「為什麼撐不住 + 跟上次比如何」
 
+### 破壞性變更
+- **Module path 升為 `github.com/machiko/ramplio/v3`**(SIV 規則):下游 import 需同步改為 `.../v3/...`;`go install github.com/machiko/ramplio/v3/cmd/ramplio@latest` 自 v3.0.0 起生效。
+
 ### 新增
 - **容量回歸守門(Phase 1,已合併)**: `--save-baseline` 把壓測/探測結果存成 git-friendly 快照;`ramplio compare` 以雙門檻容差(相對 10% + 絕對下限,寧鬆勿誤報)白話判定持平/改善/退步,退步 exit 1 可放 CI 擋合併;量測可信度存疑(丟樣本/worker 達上限)強制警告。
 - **OpenTelemetry 打通(Phase 2)**: `--sink otel://host:4318` 以 OTLP/HTTP 匯出最終指標(零新依賴手刻,binary 僅 +18KB);`--trace-context` 對每個請求注入 W3C traceparent 供 APM 標記壓測流量(opt-in:開啟在產生器極限吞吐下約 -5%,成本如實記載)。

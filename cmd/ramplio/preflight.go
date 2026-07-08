@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/machiko/ramplio/v2/internal/metrics"
-	"github.com/machiko/ramplio/v2/internal/protocols"
-	"github.com/machiko/ramplio/v2/internal/reporter"
-	"github.com/machiko/ramplio/v2/internal/scenarios"
+	"github.com/machiko/ramplio/v3/internal/metrics"
+	"github.com/machiko/ramplio/v3/internal/protocols"
+	"github.com/machiko/ramplio/v3/internal/reporter"
+	"github.com/machiko/ramplio/v3/internal/scenarios"
 )
 
 // preflightTimeout caps the single probe request so a hung target can't stall

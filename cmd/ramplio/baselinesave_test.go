@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/machiko/ramplio/v2/internal/baseline"
-	"github.com/machiko/ramplio/v2/internal/metrics"
+	"github.com/machiko/ramplio/v3/internal/baseline"
+	"github.com/machiko/ramplio/v3/internal/metrics"
 )
 
 // --save-baseline 的失敗處理契約:寫檔問題(權限/磁碟)與「壓測是否達標」無關,

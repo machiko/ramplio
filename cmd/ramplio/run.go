@@ -16,14 +16,14 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/machiko/ramplio/v2/internal/baseline"
-	"github.com/machiko/ramplio/v2/internal/dashboard"
-	"github.com/machiko/ramplio/v2/internal/distributed"
-	"github.com/machiko/ramplio/v2/internal/engine"
-	"github.com/machiko/ramplio/v2/internal/metrics"
-	"github.com/machiko/ramplio/v2/internal/protocols"
-	"github.com/machiko/ramplio/v2/internal/reporter"
-	"github.com/machiko/ramplio/v2/internal/scenarios"
+	"github.com/machiko/ramplio/v3/internal/baseline"
+	"github.com/machiko/ramplio/v3/internal/dashboard"
+	"github.com/machiko/ramplio/v3/internal/distributed"
+	"github.com/machiko/ramplio/v3/internal/engine"
+	"github.com/machiko/ramplio/v3/internal/metrics"
+	"github.com/machiko/ramplio/v3/internal/protocols"
+	"github.com/machiko/ramplio/v3/internal/reporter"
+	"github.com/machiko/ramplio/v3/internal/scenarios"
 	"github.com/spf13/cobra"
 )
 

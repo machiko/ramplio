@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/machiko/ramplio/v2/internal/reporter"
+	"github.com/machiko/ramplio/v3/internal/reporter"
 	"github.com/spf13/cobra"
 )
 

@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/machiko/ramplio/v2/internal/metrics"
+	"github.com/machiko/ramplio/v3/internal/metrics"
 )
 
 // OtelSink 以 OTLP/HTTP(JSON 編碼)把最終 Summary 推送到 OpenTelemetry collector。

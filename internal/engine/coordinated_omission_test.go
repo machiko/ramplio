@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/machiko/ramplio/v2/internal/engine"
-	"github.com/machiko/ramplio/v2/internal/metrics"
-	"github.com/machiko/ramplio/v2/internal/protocols"
-	"github.com/machiko/ramplio/v2/internal/scenarios"
+	"github.com/machiko/ramplio/v3/internal/engine"
+	"github.com/machiko/ramplio/v3/internal/metrics"
+	"github.com/machiko/ramplio/v3/internal/protocols"
+	"github.com/machiko/ramplio/v3/internal/scenarios"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

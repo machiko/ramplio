@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/machiko/ramplio/v2/internal/discover"
-	"github.com/machiko/ramplio/v2/internal/metrics"
+	"github.com/machiko/ramplio/v3/internal/discover"
+	"github.com/machiko/ramplio/v3/internal/metrics"
 )
 
 func sampleSummary() metrics.Summary {

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/machiko/ramplio/v2/internal/metrics"
+	"github.com/machiko/ramplio/v3/internal/metrics"
 )
 
 func otelSummary() metrics.Summary {

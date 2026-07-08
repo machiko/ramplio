@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/machiko/ramplio/v2/internal/baseline"
+	"github.com/machiko/ramplio/v3/internal/baseline"
 )
 
 func comparisonFixture() baseline.Comparison {

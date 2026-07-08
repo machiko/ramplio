@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/machiko/ramplio/v2/internal/observe"
+	"github.com/machiko/ramplio/v3/internal/observe"
 )
 
 func TestParseObserveDSN(t *testing.T) {

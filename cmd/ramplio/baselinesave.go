@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/machiko/ramplio/v2/internal/baseline"
+	"github.com/machiko/ramplio/v3/internal/baseline"
 )
 
 // writeBaselineFile 儲存 baseline 快照。失敗只警告、不回傳錯誤(結構保證):

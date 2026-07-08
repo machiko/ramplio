@@ -9,8 +9,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/machiko/ramplio/v2/internal/discover"
-	"github.com/machiko/ramplio/v2/internal/metrics"
+	"github.com/machiko/ramplio/v3/internal/discover"
+	"github.com/machiko/ramplio/v3/internal/metrics"
 )
 
 // SchemaVersion 是目前的儲存格式版本;讀到更新的版本時拒絕解讀,

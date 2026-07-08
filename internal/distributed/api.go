@@ -1,6 +1,6 @@
 package distributed
 
-import "github.com/machiko/ramplio/v2/internal/metrics"
+import "github.com/machiko/ramplio/v3/internal/metrics"
 
 // AssignRequest represents the request to assign work to a worker.
 type AssignRequest struct {
