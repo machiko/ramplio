@@ -12,6 +12,7 @@ import (
 //	csv:path/to/file.csv         — append rows to a CSV file
 //	influxdb://host:port/bucket  — push to InfluxDB v2 (token via ?token=)
 //	loki://host:port             — push to Grafana Loki (labels via ?labels=k=v,...)
+//	otel://host:4318             — push to an OpenTelemetry collector (OTLP/HTTP)
 func ParseSink(dsn string) (Sink, error) {
 	switch {
 	case strings.HasPrefix(dsn, "csv:"):
@@ -21,7 +22,9 @@ func ParseSink(dsn string) (Sink, error) {
 		return NewInfluxSink(dsn)
 	case strings.HasPrefix(dsn, "loki://"), strings.HasPrefix(dsn, "lokis://"):
 		return NewLokiSink(dsn)
+	case strings.HasPrefix(dsn, "otel://"), strings.HasPrefix(dsn, "otels://"):
+		return NewOtelSink(dsn)
 	default:
-		return nil, fmt.Errorf("unknown sink scheme in %q — supported: csv:<path>, influxdb://..., influxdbs://..., loki://..., lokis://...", dsn)
+		return nil, fmt.Errorf("unknown sink scheme in %q — supported: csv:<path>, influxdb://..., influxdbs://..., loki://..., lokis://..., otel://..., otels://...", dsn)
 	}
 }
