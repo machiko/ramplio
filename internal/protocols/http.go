@@ -16,6 +16,11 @@ type HTTPConfig struct {
 	RequestTimeout      time.Duration
 	DNSCache            bool
 	DNSCacheTTL         time.Duration
+	// TraceContext 讓每個請求帶 W3C traceparent header,APM 可標記壓測流量。
+	// 預設關閉(opt-in):逐請求成本約 63ns + 1 次配置(microbenchmark);
+	// 引擎層影響小於本機 benchmark 噪音、無法定論,依「hot path 零額外成本」
+	// 紅線採保守預設。使用者自帶 traceparent header 時不覆蓋。
+	TraceContext bool
 }
 
 func DefaultHTTPConfig() HTTPConfig {
@@ -29,7 +34,8 @@ func DefaultHTTPConfig() HTTPConfig {
 }
 
 type HTTPExecutor struct {
-	client *http.Client
+	client       *http.Client
+	traceContext bool
 }
 
 func NewHTTPExecutor(cfg HTTPConfig) *HTTPExecutor {
@@ -48,6 +54,7 @@ func NewHTTPExecutor(cfg HTTPConfig) *HTTPExecutor {
 			Transport: transport,
 			Timeout:   cfg.RequestTimeout,
 		},
+		traceContext: cfg.TraceContext,
 	}
 }
 
@@ -69,7 +76,7 @@ func (e *HTTPExecutor) NewSession() *HTTPExecutor {
 		CheckRedirect: e.client.CheckRedirect,
 		Jar:           jar,
 	}
-	return &HTTPExecutor{client: clone}
+	return &HTTPExecutor{client: clone, traceContext: e.traceContext}
 }
 
 func (e *HTTPExecutor) Execute(ctx context.Context, req Request) Result {
@@ -84,6 +91,12 @@ func (e *HTTPExecutor) Execute(ctx context.Context, req Request) Result {
 	}
 	for k, v := range req.Headers {
 		httpReq.Header.Set(k, v)
+	}
+	// 直接用正規化後的 key 操作 map,避開 Get/Set 每請求各一次的 canonicalize 成本(hot path)。
+	if e.traceContext {
+		if _, exists := httpReq.Header["Traceparent"]; !exists {
+			httpReq.Header["Traceparent"] = []string{newTraceparent()}
+		}
 	}
 
 	start := time.Now()
