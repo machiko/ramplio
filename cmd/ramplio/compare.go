@@ -14,13 +14,15 @@ import (
 )
 
 // metricLabels 把指標鍵翻成白話;新指標沒對到時退回原鍵名,不會漏印。
+// 用語與 terminal/interpret 單一來源對齊:服務端延遲=「伺服器處理」、
+// CO 修正延遲=「使用者實感」,不自創同義詞。
 var metricLabels = map[string]string{
-	"p50_ms":             "一般回應時間 p50",
-	"p99_ms":             "最慢回應時間 p99",
-	"corrected_p99_ms":   "壓力下實感 p99",
+	"p50_ms":             "p50（伺服器處理）",
+	"p99_ms":             "p99（伺服器處理）",
+	"corrected_p99_ms":   "p99（使用者實感）",
 	"error_rate_pct":     "錯誤率",
 	"throughput_rps":     "每秒請求",
-	"safe_limit_rps":     "安全容量上限",
+	"safe_limit_rps":     "安全上限",
 	"breaking_point_rps": "臨界點",
 }
 
