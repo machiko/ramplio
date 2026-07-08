@@ -5,7 +5,7 @@ Ramplio 的所有重要變更都記錄於此。
 
 ---
 
-## [Unreleased] — v3.0.0 開發中:「為什麼撐不住 + 跟上次比如何」
+## [v3.0.0] — 為什麼撐不住 + 跟上次比如何 (2026-07-09)
 
 ### 破壞性變更
 - **Module path 升為 `github.com/machiko/ramplio/v3`**(SIV 規則):下游 import 需同步改為 `.../v3/...`;`go install github.com/machiko/ramplio/v3/cmd/ramplio@latest` 自 v3.0.0 起生效。

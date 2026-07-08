@@ -111,6 +111,16 @@ v3 Phase 2 的兩個反直覺選擇,皆由實測數據決定:
 
 ---
 
+## Module Path 主版本字尾(SIV)
+
+Go modules 的 Semantic Import Versioning 規則:v2+ 的 module path 必須帶 `/vN` 字尾,
+否則 `go install` 拒絕解析、`@latest` 只會抓到 v1。這不是選擇,是 Go 生態的硬規則——
+v2.1.1 曾因缺字尾讓 go install 整條路失效(審查關實測抓到)。
+**每次 major bump 都要重複**:go.mod module 行 + 全部 import + 文件安裝路徑一起改,
+歷史 CHANGELOG 的舊路徑是事實記錄,不可回溯竄改;發布後必以 `go install @<新版>` 實測驗收。
+
+---
+
 ## 瓶頸關聯:Jaeger 首發 + 三態誠實歸因
 
 v3 Phase 3 的設計取捨:
