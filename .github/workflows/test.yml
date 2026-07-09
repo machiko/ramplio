@@ -31,6 +31,8 @@ jobs:
         with:
           go-version-file: go.mod
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        # v6 只會安裝 golangci-lint v1(1.59.x),看不懂 .golangci.yml 的
+        # version: "2" 設定格式;v8 起支援 golangci-lint v2。
+        uses: golangci/golangci-lint-action@v8
         with:
           version: latest
