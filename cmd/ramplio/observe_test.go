@@ -22,8 +22,24 @@ func TestParseObserveDSN(t *testing.T) {
 	if _, err := parseObserveDSN("jaeger://localhost:16686"); err == nil {
 		t.Fatal("缺 service 參數應報錯(Jaeger 查詢必要)")
 	}
-	if _, err := parseObserveDSN("tempo://x?service=y"); err == nil {
+
+	// v3.1 起支援 Tempo backend
+	tempoSrc, tempoErr := parseObserveDSN("tempo://localhost:3200?service=checkout")
+	if tempoErr != nil {
+		t.Fatalf("tempo:// 應為合法 DSN: %v", tempoErr)
+	}
+	if tempoSrc == nil {
+		t.Fatal("應回傳 TraceSource")
+	}
+	if _, err := parseObserveDSN("tempo://localhost:3200"); err == nil {
+		t.Fatal("tempo 缺 service 應報錯")
+	}
+	if _, err := parseObserveDSN("zipkin://x?service=y"); err == nil {
 		t.Fatal("不支援的 scheme 應報錯並列出支援清單")
+	}
+	// scheme 錯 + service 也缺:應報 scheme(根本原因),不誤導補參數
+	if err := func() error { _, e := parseObserveDSN("zipkin://x"); return e }(); err == nil || !strings.Contains(err.Error(), "scheme") {
+		t.Fatalf("雙重錯誤時應優先報不支援的 scheme,得到: %v", err)
 	}
 }
 

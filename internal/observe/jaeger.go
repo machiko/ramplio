@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -12,16 +11,8 @@ import (
 	"time"
 )
 
-// defaultTraceLimit 顯式覆蓋 Jaeger 的預設 limit=20——
-// 20 條 trace 對壓測時間窗的統計分析嚴重欠採樣。
-// 1000 低於常見後端上限(1500),再高就該縮小時間窗而非加大 limit。
-const defaultTraceLimit = 1000
-
-// defaultMaxResponseBytes 限制單次回應的讀取量:
-// 壓測工具自身不可因吞下巨型回應而成為記憶體瓶頸(干擾同進程的量測)。
-const defaultMaxResponseBytes = 32 << 20 // 32 MiB
-
 // JaegerSource 透過 Jaeger query API(/api/traces)拉取 spans。
+// 共用常數(defaultTraceLimit 等)與傳輸層(fetchLimited)見 fetch.go。
 // 時間參數以微秒 epoch 表示(Jaeger API 慣例)。
 type JaegerSource struct {
 	baseURL  string
@@ -81,29 +72,9 @@ func (j *JaegerSource) FetchSpans(ctx context.Context, start, end time.Time) (Fe
 	q.Set("limit", strconv.Itoa(j.limit))
 	endpoint := j.baseURL + "/api/traces?" + q.Encode()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	raw, err := fetchLimited(ctx, j.client, endpoint, "jaeger source", j.maxBytes)
 	if err != nil {
-		return FetchResult{}, fmt.Errorf("jaeger source: 建立請求失敗: %w", err)
-	}
-	resp, err := j.client.Do(req)
-	if err != nil {
-		return FetchResult{}, fmt.Errorf("jaeger source: 查詢 %s 失敗: %w", j.baseURL, err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return FetchResult{}, fmt.Errorf("jaeger source: 回應 %d: %s", resp.StatusCode, snippet)
-	}
-
-	// LimitReader 多讀 1 byte 以區分「剛好等於上限」與「超過上限」。
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, j.maxBytes+1))
-	if err != nil {
-		return FetchResult{}, fmt.Errorf("jaeger source: 讀取回應失敗: %w", err)
-	}
-	if int64(len(raw)) > j.maxBytes {
-		return FetchResult{}, fmt.Errorf(
-			"jaeger source: 回應超過 %d bytes 上限——請縮小時間窗或降低 trace limit", j.maxBytes)
+		return FetchResult{}, err
 	}
 
 	var parsed jaegerResponse

@@ -12,25 +12,36 @@ import (
 )
 
 // parseObserveDSN 解析 --observe 的 DSN。
-// 支援:jaeger://host:16686?service=<名稱>(jaegers:// 走 https)。
+// 支援:jaeger://host:16686?service=<名稱>、tempo://host:3200?service=<名稱>
+// (jaegers:// / tempos:// 走 https)。
 func parseObserveDSN(dsn string) (observe.TraceSource, error) {
 	u, err := url.Parse(dsn)
 	if err != nil {
 		return nil, fmt.Errorf("--observe: 無效的 DSN: %w", err)
 	}
+	// scheme 先驗:兩個錯誤同時存在時,「不支援的 scheme」才是根本原因,
+	// 先報缺 service 會誤導使用者補參數後再撞一次牆。
 	scheme := "http"
+	var newSource func(baseURL, service string) (observe.TraceSource, error)
 	switch u.Scheme {
-	case "jaeger":
 	case "jaegers":
 		scheme = "https"
+		fallthrough
+	case "jaeger":
+		newSource = func(b, s string) (observe.TraceSource, error) { return observe.NewJaegerSource(b, s) }
+	case "tempos":
+		scheme = "https"
+		fallthrough
+	case "tempo":
+		newSource = func(b, s string) (observe.TraceSource, error) { return observe.NewTempoSource(b, s) }
 	default:
-		return nil, fmt.Errorf("--observe: 不支援的 scheme %q——目前支援 jaeger://host:16686?service=名稱", u.Scheme)
+		return nil, fmt.Errorf("--observe: 不支援的 scheme %q——目前支援 jaeger:// 與 tempo://(host?service=名稱)", u.Scheme)
 	}
 	service := u.Query().Get("service")
 	if service == "" {
 		return nil, fmt.Errorf("--observe: 缺 service 參數(例:jaeger://localhost:16686?service=checkout)")
 	}
-	return observe.NewJaegerSource(scheme+"://"+u.Host, service)
+	return newSource(scheme+"://"+u.Host, service)
 }
 
 // observeWindows 由 rate 模式負載輪廓推導比較窗口:
