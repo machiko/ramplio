@@ -149,7 +149,7 @@ func newRunCmd() *cobra.Command {
 			runStart := time.Now()
 			switch {
 			case scenarioFile != "":
-				sum, thresholds, err = runScenario(scenarioFile, prometheusAddr, httpCfg)
+				sum, thresholds, err = runScenario(scenarioFile, prometheusAddr, httpCfg, noTUI)
 			case rps > 0:
 				sum, err = runRPS(url, method, rps, duration, headers, body, httpCfg)
 			default:
@@ -289,7 +289,7 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&tlsSkipVerify, "tls-skip-verify", false, "Skip TLS verification for https:// workers (self-signed certs)")
 	cmd.Flags().StringVar(&pollInterval, "poll-interval", "", "Live-metrics polling interval for distributed runs (e.g. 500ms, 2s; default 1s)")
 	cmd.Flags().StringVar(&assignTimeout, "assign-timeout", "", "Timeout for broadcasting work to workers (e.g. 10s, 30s; default 10s)")
-	cmd.Flags().BoolVar(&noTUI, "no-tui", false, "Disable the live TUI and print plain progress lines (auto-enabled when output is not a terminal; for distributed runs)")
+	cmd.Flags().BoolVar(&noTUI, "no-tui", false, "Disable the live TUI and print plain progress lines (auto-enabled when output is not a terminal)")
 	cmd.Flags().BoolVar(&noPreflight, "no-preflight", false, "Skip the quick reachability check before the test (run even if the target looks unreachable)")
 
 	return cmd
@@ -400,7 +400,7 @@ func (p *rampProvider) Snapshot() reporter.LiveSnapshot {
 	}
 }
 
-func runScenario(path, promAddr string, httpCfg protocols.HTTPConfig) (metrics.Summary, *scenarios.Thresholds, error) {
+func runScenario(path, promAddr string, httpCfg protocols.HTTPConfig, noTUI bool) (metrics.Summary, *scenarios.Thresholds, error) {
 	sc, err := scenarios.ParseFile(path)
 	if err != nil {
 		return metrics.Summary{}, nil, fmt.Errorf("loading scenario: %w", err)
@@ -475,7 +475,11 @@ func runScenario(path, promAddr string, httpCfg protocols.HTTPConfig) (metrics.S
 		}
 	}
 
-	if err := reporter.RunTUI(provider, cancel, done); err != nil {
+	// TUI 需要真終端;CI/pipe(或 --no-tui)下改印進度行,
+	// 否則 TUI 立即退出並 cancel,壓測提早結束(與分散式同一修法)。
+	if noTUI || !isTerminal() {
+		runHeadlessProgress(provider, cancel, done, 0)
+	} else if err := reporter.RunTUI(provider, cancel, done); err != nil {
 		<-done
 	}
 	cancel()

@@ -622,6 +622,11 @@ ramplio run --scenario smoke.yaml --dashboard --dashboard-port 8080
 
 執行中與結果畫面的關鍵指標（p99、錯誤率）都附帶白話說明，且用語與終端機輸出完全一致。
 
+結果頁還有兩張進階卡片（v3.1）：
+
+- **容量回歸比較** — 在設定表單上傳 `--save-baseline` 產生的 JSON 快照，run 結束自動比較並顯示每個指標的持平/改善/退步（判定與 `ramplio compare` 同一套雙門檻容差，量測可信度警告強制顯示）
+- **目標系統觀測** — 伺服器以 `ramplio run --dashboard --observe "jaeger://…?service=X"` 啟動時，rate 模式 run 結束後自動做 trace 瓶頸關聯，白話指出是哪個環節先垮（誠實邊界與 CLI 相同：樣本不足不猜測、截斷一律可見）
+
 ### Prometheus 整合
 
 ```bash
@@ -649,8 +654,17 @@ ramplio run --url https://example.com --rps 200 -d 30s --trace-context
 不只告訴你撐不住,還告訴你**是哪裡先垮**。壓測結束後自動拉取目標系統的 trace,比較「低負載基準窗 vs 滿載臨界窗」的 per-operation 延遲,白話指出退化最嚴重的環節:
 
 ```bash
+# Jaeger 後端
 ramplio run --url https://example.com --rps 200 -d 60s \
   --observe "jaeger://localhost:16686?service=checkout"
+
+# Grafana Tempo 後端(tempos:// 走 https)
+ramplio run --url https://example.com --rps 200 -d 60s \
+  --observe "tempo://localhost:3200?service=checkout"
+
+# CI 場景:觀測不可信(拉取失敗/樣本截斷/關聯不足)時視同失敗
+ramplio run --url https://example.com --rps 200 -d 60s \
+  --observe "jaeger://localhost:16686?service=checkout" --strict-trust
 ```
 
 ```

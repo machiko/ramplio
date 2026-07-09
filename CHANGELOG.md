@@ -5,6 +5,20 @@ Ramplio 的所有重要變更都記錄於此。
 
 ---
 
+## [v3.1.0] — v3 能力在 dashboard 被看見 (2026-07-09)
+
+### 新增
+- **Dashboard 基準比較**: 網頁儀表板可上傳 `--save-baseline` 快照(`POST /api/baseline`,token 保護),run 結束自動比較並在結果頁顯示持平/改善/退步卡片;判定邏輯、指標標籤與結論文案跟 `ramplio compare` 同一來源,量測可信度警告強制顯示。
+- **Dashboard 觀測卡片**: 伺服器以 `--dashboard --observe ...` 啟動時,rate 模式 run 結束後自動拉取 trace,結果頁顯示「目標系統觀測」卡片(瓶頸指認/關聯不足/疑似資源飽和三態 + 排除名單 + 取樣截斷警示),語意與 CLI 白話輸出同源。手動停止的 run 不觀測——提前中止的窗口與實際負載不符,數字不可信。
+- **Tempo trace 後端**: `--observe tempo://host:3200?service=X`(`tempos://` 走 https),與 Jaeger 同介面;TraceQL 查詢顯式取樣上限,截斷一律可見。
+- **`--strict-trust` 旗標**(`run`/`compare`): 觀測或量測可信度存疑(拉取失敗/樣本截斷/關聯不足/警告非空)時視同失敗——CI 無人讀警告,不可信的「通過」是危險的假陽性。守門判定在所有輸出產物之後執行,不可信 ≠ 不可看。
+
+### 修正
+- **單機場景 headless fallback**: `run --scenario` 在非 TTY(CI/pipe)或 `--no-tui` 下改印純文字進度行,修正 TUI 立即退出導致壓測提早結束的問題(與分散式同一修法)。
+- **Dashboard rate 模式窗口數學統一**: CLI 與 dashboard 共用同一份三階段組裝(`rateStages`),消除短 duration 下負時長 stage 進入引擎的風險。
+
+---
+
 ## [v3.0.0] — 為什麼撐不住 + 跟上次比如何 (2026-07-09)
 
 ### 破壞性變更

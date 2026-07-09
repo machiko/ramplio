@@ -83,7 +83,6 @@
 | 優先度 | 項目 | 位置 |
 |--------|------|------|
 | MED | `dashboard/controller.go` 與 `dashcontrol.go` 職責重疊 | 兩者 |
-| LOW | 單機 `runScenario` 仍依賴 TUI，非 TTY 下亦會提早結束（分散式已修，單機未做）| cmd/ramplio/run.go |
 | MED | WebSocket 每次請求開新連線（無持久連線）| protocols/ws.go |
 | LOW | HTML 報告無互動圖表 | reporter/html.go |
 | LOW | Setup 步驟執行結果不計入指標 | engine/ramp.go |
@@ -96,6 +95,7 @@
 > 失敗白話化（2026-06-19）：新增失敗分類（`metrics.ErrorKind`/`ClassifyError`）、失敗歸因白話（`reporter/errorcause.go`，連線被拒/DNS/TLS/逾時/4xx/5xx/斷言各有人話+下一步）、修正連線層失敗被誤判為「超出負荷」、開跑前 pre-flight 預檢（連線層硬錯即時白話中止）。錯誤分類隨 `HistogramExport` 跨節點合併。
 > 鞏固設計+透明度（P2，2026-06-22）：~~runRate worker = maxRPS×5 記憶體壓力~~（改 **grow-on-demand**：`ratePool` idle/total/capHit，dispatcher 送前 `maybeGrow`，低延遲目標只生 ~需求量，達 cap 才阻塞——完整保留 CO 背壓語義；CO 回歸測試全綠）、~~assertion 失敗不觸發 retry 疑似漏洞~~（**釐清為刻意設計**：assertion 失敗代表真實缺陷，retry 會掩蓋並虛低錯誤率，比照 k6/Gatling 不 retry；補 `assertion_retry_test.go` 回歸守 + ramp.go 意圖註解）。新增透明度：`Summary.GeneratorWorkerCapHit` → rate 達 worker 上限時，「量測可信度」判語標示「產生器自身可能是瓶頸」，避免假性 overload 被誤歸因於目標。
 > 已解決（Phase 5）：~~分散式僅明文 HTTP / 無 TLS~~（worker `ListenAndServeTLS` + coordinator scheme-aware URL 與可注入 TLS client；CLI `--tls-cert/--tls-key/--tls-ca/--tls-skip-verify`）、~~PollIntervalMs/AssignTimeoutSec 未生效~~（coordinator `SetTiming` + CLI `--poll-interval/--assign-timeout`，config helper）。
+> 已解決（v3.1，2026-07-09）：~~單機 `runScenario` 非 TTY 提早結束~~（比照分散式：非 TTY 或 `--no-tui` 走 `runHeadlessProgress`，整合測試以 go test 的 pipe stdout 直接重現並驗證跑滿）。
 
 ---
 
@@ -157,5 +157,5 @@
 **Phase 7+ — 功能擴張（未做）**
 1. **WebSocket 持久連線模式**（MED，中）— `ws_mode: persistent`，VU 生命週期內保持連線
 2. **gRPC 協定支援**（MED，大）— `protocols/grpc.go` + .proto 載入
-3. **單機 headless**（LOW，小）— `runScenario` 比照分散式做非 TTY fallback
+3. ~~**單機 headless**（LOW，小）~~ — ✅ 已完成（v3.1）
 4. **Test Suite（多場景串接）**（LOW，中）
