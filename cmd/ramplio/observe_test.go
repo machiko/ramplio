@@ -43,6 +43,44 @@ func TestParseObserveDSN(t *testing.T) {
 	}
 }
 
+// 設定錯誤要在開跑前失敗(fail fast),不浪費一輪壓測;
+// 「不適用」(VU 模式配 --observe)與「不可信」(觀測品質)是不同語意。
+func TestValidateObserveConfig(t *testing.T) {
+	if src, err := validateObserveConfig("", 0); src != nil || err != nil {
+		t.Fatalf("未啟用觀測應回 nil, nil: %v %v", src, err)
+	}
+	if _, err := validateObserveConfig("jaeger://h:1?service=x", 0); err == nil || !strings.Contains(err.Error(), "--rps") {
+		t.Fatalf("VU 模式配 --observe 應報「需搭配 --rps」的設定錯誤: %v", err)
+	}
+	if _, err := validateObserveConfig("zipkin://h?service=x", 100); err == nil {
+		t.Fatal("壞 DSN 應在開跑前報錯")
+	}
+	if src, err := validateObserveConfig("jaeger://h:1?service=x", 100); src == nil || err != nil {
+		t.Fatalf("合法設定應回 TraceSource: %v %v", src, err)
+	}
+}
+
+// strict-trust 守門:僅在「有啟用觀測且不可信」時失敗;
+// 未啟用觀測時不適用(不可把 no-op 當失敗)。
+func TestStrictTrustGateErr(t *testing.T) {
+	tests := []struct {
+		strict, hasObserve, trusted bool
+		wantErr                     bool
+	}{
+		{true, true, false, true},   // strict + 觀測不可信 → 失敗
+		{true, true, true, false},   // strict + 可信 → 過
+		{true, false, false, false}, // strict 但未啟用觀測 → 不適用
+		{false, true, false, false}, // 非 strict → 只警告不擋
+	}
+	for _, tt := range tests {
+		err := strictTrustGateErr(tt.strict, tt.hasObserve, tt.trusted)
+		if (err != nil) != tt.wantErr {
+			t.Fatalf("strict=%v hasObserve=%v trusted=%v: err=%v, wantErr=%v",
+				tt.strict, tt.hasObserve, tt.trusted, err, tt.wantErr)
+		}
+	}
+}
+
 // 觀測窗口出自 rate 模式負載輪廓:爬升前半(低負載)當基準、持平段當臨界。
 func TestObserveWindowsFromProfile(t *testing.T) {
 	start := time.UnixMicro(1700000000000000)
@@ -159,48 +197,80 @@ func TestRunObservationBranches(t *testing.T) {
 		return out
 	}
 
-	t.Run("holdDur 為零時警告並略過", func(t *testing.T) {
+	t.Run("holdDur 為零時警告並略過(不可信)", func(t *testing.T) {
 		var out, errW strings.Builder
 		src := &stubSource{}
-		runObservation(&out, &errW, src, time.Now(), time.Second, 0)
+		trusted := runObservation(&out, &errW, src, time.Now(), time.Second, 0)
 		if src.calls != 0 {
 			t.Fatal("無持平段不應發出任何查詢")
 		}
 		if !strings.Contains(errW.String(), "warning") {
 			t.Fatalf("應警告略過,實際: %q", errW.String())
 		}
+		if trusted {
+			t.Fatal("略過的觀測不可回報為可信")
+		}
 	})
 
-	t.Run("基準窗失敗警告並略過", func(t *testing.T) {
+	t.Run("基準窗失敗警告並略過(不可信)", func(t *testing.T) {
 		var out, errW strings.Builder
 		src := &stubSource{errs: []error{fmt.Errorf("boom")}}
-		runObservation(&out, &errW, src, time.Now(), time.Second, time.Second)
+		if trusted := runObservation(&out, &errW, src, time.Now(), time.Second, time.Second); trusted {
+			t.Fatal("拉取失敗不可回報為可信")
+		}
 		if !strings.Contains(errW.String(), "基準窗") {
 			t.Fatalf("錯誤訊息應指明基準窗,實際: %q", errW.String())
 		}
 	})
 
-	t.Run("臨界窗失敗警告並略過", func(t *testing.T) {
+	t.Run("臨界窗失敗警告並略過(不可信)", func(t *testing.T) {
 		var out, errW strings.Builder
 		src := &stubSource{errs: []error{nil, fmt.Errorf("boom")}}
-		runObservation(&out, &errW, src, time.Now(), time.Second, time.Second)
+		if trusted := runObservation(&out, &errW, src, time.Now(), time.Second, time.Second); trusted {
+			t.Fatal("拉取失敗不可回報為可信")
+		}
 		if !strings.Contains(errW.String(), "臨界窗") {
 			t.Fatalf("錯誤訊息應指明臨界窗,實際: %q", errW.String())
 		}
 	})
 
-	t.Run("成功路徑輸出觀測段落且截斷傳遞", func(t *testing.T) {
+	t.Run("成功但截斷:輸出完整、回報不可信", func(t *testing.T) {
 		var out, errW strings.Builder
 		src := &stubSource{results: []observe.FetchResult{
 			{Spans: okSpans("op", 25, 10*time.Millisecond)},
 			{Spans: okSpans("op", 25, 80*time.Millisecond), Truncated: true},
 		}}
-		runObservation(&out, &errW, src, time.Now(), time.Second, time.Second)
+		trusted := runObservation(&out, &errW, src, time.Now(), time.Second, time.Second)
 		if !strings.Contains(out.String(), "目標系統觀測") {
 			t.Fatalf("應輸出觀測段落,實際: %q", out.String())
 		}
 		if !strings.Contains(out.String(), "可能不完整") {
 			t.Fatalf("任一窗截斷應警示,實際: %q", out.String())
+		}
+		if trusted {
+			t.Fatal("樣本截斷的觀測不可回報為可信(strict-trust 據此判定)")
+		}
+	})
+
+	t.Run("成功且樣本充分:可信", func(t *testing.T) {
+		var out, errW strings.Builder
+		src := &stubSource{results: []observe.FetchResult{
+			{Spans: okSpans("op", 25, 10*time.Millisecond)},
+			{Spans: okSpans("op", 25, 80*time.Millisecond)},
+		}}
+		if trusted := runObservation(&out, &errW, src, time.Now(), time.Second, time.Second); !trusted {
+			t.Fatal("成功且無截斷、非 insufficient 的觀測應為可信")
+		}
+	})
+
+	t.Run("關聯不足:輸出誠實、回報不可信", func(t *testing.T) {
+		var out, errW strings.Builder
+		src := &stubSource{results: []observe.FetchResult{
+			{Spans: okSpans("op", 3, 10*time.Millisecond)}, // 遠低於樣本門檻
+			{Spans: okSpans("op", 3, 80*time.Millisecond)},
+		}}
+		if trusted := runObservation(&out, &errW, src, time.Now(), time.Second, time.Second); trusted {
+			t.Fatal("關聯不足(insufficient)不可回報為可信")
 		}
 	})
 }

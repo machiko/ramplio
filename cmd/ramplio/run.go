@@ -47,6 +47,7 @@ func newRunCmd() *cobra.Command {
 		dnsCache       bool
 		traceContext   bool
 		observeDSN     string
+		strictTrust    bool
 		prometheusAddr string
 		requestTimeout string
 		ignoreErrors   bool
@@ -132,6 +133,12 @@ func newRunCmd() *cobra.Command {
 				}
 			}
 
+			// --observe 設定錯誤在開跑前攔截(fail fast),不浪費一輪壓測。
+			observeSrc, obsCfgErr := validateObserveConfig(observeDSN, rps)
+			if obsCfgErr != nil {
+				return obsCfgErr
+			}
+
 			var (
 				sum        metrics.Summary
 				thresholds *scenarios.Thresholds
@@ -200,15 +207,14 @@ func newRunCmd() *cobra.Command {
 				writeBaselineFile(os.Stdout, os.Stderr, baselineFile, b)
 			}
 
-			// 觀測失敗只警告不中斷:trace 關聯是補充,不可污染 exit code。
-			if observeDSN != "" {
-				if rps <= 0 {
-					fmt.Fprintln(os.Stderr, "warning: --observe 目前僅支援 rate 模式(--rps)——需要負載輪廓提供基準/臨界窗口")
-				} else if src, obsErr := parseObserveDSN(observeDSN); obsErr != nil {
-					fmt.Fprintf(os.Stderr, "warning: %v,略過觀測\n", obsErr)
-				} else if runDur, durErr := time.ParseDuration(duration); durErr == nil {
+			// 觀測失敗預設只警告不中斷:trace 關聯是補充,不可污染 exit code。
+			observeTrusted := false
+			if observeSrc != nil {
+				if runDur, durErr := time.ParseDuration(duration); durErr == nil {
 					rampDur, holdDur := rateProfile(runDur)
-					runObservation(os.Stdout, os.Stderr, src, runStart, rampDur, holdDur)
+					observeTrusted = runObservation(os.Stdout, os.Stderr, observeSrc, runStart, rampDur, holdDur)
+				} else {
+					fmt.Fprintf(os.Stderr, "warning: duration 解析失敗,略過觀測: %v\n", durErr)
 				}
 			}
 
@@ -227,6 +233,12 @@ func newRunCmd() *cobra.Command {
 						fmt.Printf("Report saved to %s\n", reportFile)
 					}
 				}
+			}
+
+			// strict-trust 守門刻意放在所有輸出產物(sink/output/baseline/report)
+			// 之後:CI 失敗時使用者仍拿得到完整產物去診斷,不可信 ≠ 不可看。
+			if gateErr := strictTrustGateErr(strictTrust, observeSrc != nil, observeTrusted); gateErr != nil {
+				return gateErr
 			}
 
 			if thresholdMsg != "" {
@@ -265,6 +277,7 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&dnsCache, "dns-cache", false, "Cache DNS lookups to reduce latency measurement noise")
 	cmd.Flags().BoolVar(&traceContext, "trace-context", false, "對每個請求注入 W3C traceparent 供 APM 關聯壓測流量(每請求約 63ns 開銷,預設關閉)")
 	cmd.Flags().StringVar(&observeDSN, "observe", "", "壓測後拉取目標系統 trace 做瓶頸關聯(例:jaeger://localhost:16686?service=checkout;僅 rate 模式)")
+	cmd.Flags().BoolVar(&strictTrust, "strict-trust", false, "觀測結果不可信(拉取失敗/截斷/關聯不足)時視同失敗(CI 場景;需搭配 --observe)")
 	cmd.Flags().StringVar(&prometheusAddr, "prometheus", "", "Expose Prometheus metrics on this address (e.g. :9100)")
 	cmd.Flags().StringVar(&requestTimeout, "timeout", "", "Per-request timeout (e.g. 10s, 500ms); overrides scenario default")
 	cmd.Flags().StringArrayVar(&sinkDSNs, "sink", nil, "Push results to an external sink (repeatable): csv:<file>  influxdb://host/bucket?token=T")

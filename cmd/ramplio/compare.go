@@ -82,9 +82,14 @@ func renderComparison(w io.Writer, c baseline.Comparison) {
 }
 
 // compareVerdictErr 是守門契約:退步 → 錯誤(CLI 以 exit 1 結束,CI 據此擋合併)。
-func compareVerdictErr(c baseline.Comparison) error {
+// strictTrust 開啟時,量測可信度存疑(Warnings 非空)也視同失敗——
+// CI 無人讀 stderr 警告,不可信的「通過」是危險的假陽性。
+func compareVerdictErr(c baseline.Comparison, strictTrust bool) error {
 	if c.Regressed {
 		return fmt.Errorf("容量回歸:有指標超出容差退步")
+	}
+	if strictTrust && len(c.Warnings) > 0 {
+		return fmt.Errorf("嚴格信任模式:量測可信度存疑(%d 項警告),視同失敗", len(c.Warnings))
 	}
 	return nil
 }
@@ -103,6 +108,7 @@ func currentGitCommit() string {
 
 func newCompareCmd() *cobra.Command {
 	var relPct float64
+	var strictTrust bool
 
 	cmd := &cobra.Command{
 		Use:   "compare <基準.json> <本次.json>",
@@ -132,10 +138,12 @@ func newCompareCmd() *cobra.Command {
 				return err
 			}
 			renderComparison(os.Stdout, result)
-			return compareVerdictErr(result)
+			return compareVerdictErr(result, strictTrust)
 		},
 	}
 	cmd.Flags().Float64Var(&relPct, "rel-tolerance-pct", 0,
 		"相對容差百分比(預設 10;調低守得更嚴)")
+	cmd.Flags().BoolVar(&strictTrust, "strict-trust", false,
+		"量測可信度存疑時視同失敗(CI 場景:不可信的通過是假陽性)")
 	return cmd
 }

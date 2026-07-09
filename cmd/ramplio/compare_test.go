@@ -96,10 +96,34 @@ func TestRenderComparisonVocabularyMatchesInterpret(t *testing.T) {
 
 // 守門契約:退步時 compare 必須以非零 exit code 結束(CI 靠這個擋合併)。
 func TestCompareVerdictError(t *testing.T) {
-	if err := compareVerdictErr(baseline.Comparison{Regressed: true}); err == nil {
+	if err := compareVerdictErr(baseline.Comparison{Regressed: true}, false); err == nil {
 		t.Fatal("Regressed=true 必須回傳錯誤(exit 1)")
 	}
-	if err := compareVerdictErr(baseline.Comparison{Regressed: false}); err != nil {
+	if err := compareVerdictErr(baseline.Comparison{Regressed: false}, false); err != nil {
 		t.Fatalf("Regressed=false 不應回傳錯誤,得到: %v", err)
+	}
+}
+
+// --strict-trust:CI 場景「量測不可信視同失敗」——Warnings 非空即非零 exit,
+// 即使指標全持平;預設(非 strict)維持只警告不擋的既有行為。
+func TestCompareStrictTrust(t *testing.T) {
+	suspect := baseline.Comparison{
+		Regressed: false,
+		Warnings:  []string{"本次(after)的量測可信度存疑:收集器丟棄了 500 筆樣本"},
+	}
+	if err := compareVerdictErr(suspect, false); err != nil {
+		t.Fatalf("非 strict 模式下可信度存疑只警告不擋,得到: %v", err)
+	}
+	err := compareVerdictErr(suspect, true)
+	if err == nil {
+		t.Fatal("strict 模式下 Warnings 非空必須回傳錯誤")
+	}
+	if !strings.Contains(err.Error(), "可信") {
+		t.Fatalf("錯誤訊息應說明是可信度問題而非回歸: %v", err)
+	}
+
+	clean := baseline.Comparison{Regressed: false}
+	if err := compareVerdictErr(clean, true); err != nil {
+		t.Fatalf("strict 模式下無警告無退步不應報錯: %v", err)
 	}
 }

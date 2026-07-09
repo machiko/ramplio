@@ -44,6 +44,28 @@ func parseObserveDSN(dsn string) (observe.TraceSource, error) {
 	return newSource(scheme+"://"+u.Host, service)
 }
 
+// validateObserveConfig 在開跑前驗證 --observe 設定(fail fast):
+// 設定錯誤不該浪費一輪壓測。「不適用」(VU 模式)與「不可信」(觀測品質)
+// 是不同語意,前者屬旗標錯誤在此攔截,後者由 runObservation 回報。
+func validateObserveConfig(observeDSN string, rps int) (observe.TraceSource, error) {
+	if observeDSN == "" {
+		return nil, nil
+	}
+	if rps <= 0 {
+		return nil, fmt.Errorf("--observe 需搭配 --rps(rate 模式的負載輪廓提供基準/臨界窗口)")
+	}
+	return parseObserveDSN(observeDSN)
+}
+
+// strictTrustGateErr 是 --strict-trust 的守門判定:僅在「有啟用觀測且
+// 觀測不可信」時視同失敗;未啟用觀測時不適用,不可把 no-op 當失敗。
+func strictTrustGateErr(strict, hasObserve, trusted bool) error {
+	if strict && hasObserve && !trusted {
+		return fmt.Errorf("嚴格信任模式:觀測結果不可信(拉取失敗/樣本截斷/關聯不足),視同失敗")
+	}
+	return nil
+}
+
 // observeWindows 由 rate 模式負載輪廓推導比較窗口:
 // 基準窗 = 爬升前半(負載 0→50%,最接近「健康狀態」的取樣)
 // 臨界窗 = 持平段(全程滿載)
@@ -112,16 +134,31 @@ func formatDur(d time.Duration) string {
 	return fmt.Sprintf("%.0fms", float64(d)/float64(time.Millisecond))
 }
 
-// runObservation 執行完整觀測流程。任何失敗只警告不中斷:
-// 觀測是壓測結果的補充,不可污染主流程 exit code(比照 sink 慣例)。
-func runObservation(outW, errW io.Writer, src observe.TraceSource, start time.Time, rampDur, holdDur time.Duration) {
+// runObservation 執行完整觀測流程,回傳觀測結果是否可信
+// (拉取成功、無截斷、非關聯不足)。預設模式下任何失敗只警告不中斷——
+// 觀測是壓測結果的補充,不可污染主流程 exit code(比照 sink 慣例);
+// --strict-trust 由呼叫端依回傳值決定是否視同失敗。
+func runObservation(outW, errW io.Writer, src observe.TraceSource, start time.Time, rampDur, holdDur time.Duration) (trusted bool) {
 	if holdDur <= 0 {
 		fmt.Fprintln(errW, "warning: --observe 需要有持平段(duration 過短),略過觀測")
-		return
+		return false
 	}
+	analysis, truncated, err := fetchAndAnalyze(src, start, rampDur, holdDur)
+	if err != nil {
+		fmt.Fprintf(errW, "warning: %v,略過觀測\n", err)
+		return false
+	}
+	renderObservation(outW, analysis, truncated)
+	// 可信 = 樣本完整且分析有代表性;截斷與關聯不足都是「數字本身存疑」。
+	return !truncated && analysis.Status != observe.StatusInsufficient
+}
+
+// fetchAndAnalyze 是觀測的共用核心(CLI 與 dashboard 皆用):
+// 拉取兩窗 trace、跑歸因分析。兩窗各自獨立逾時——
+// 基準窗查詢耗時不可壓縮臨界窗的時間預算。
+func fetchAndAnalyze(src observe.TraceSource, start time.Time, rampDur, holdDur time.Duration) (observe.Analysis, bool, error) {
 	baseStart, baseEnd, stressStart, stressEnd := observeWindows(start, rampDur, holdDur)
 
-	// 兩窗各自獨立逾時:基準窗查詢耗時不可壓縮臨界窗的時間預算。
 	fetch := func(s, e time.Time) (observe.FetchResult, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
@@ -129,15 +166,12 @@ func runObservation(outW, errW io.Writer, src observe.TraceSource, start time.Ti
 	}
 	baseRes, err := fetch(baseStart, baseEnd)
 	if err != nil {
-		fmt.Fprintf(errW, "warning: 拉取基準窗 trace 失敗,略過觀測: %v\n", err)
-		return
+		return observe.Analysis{}, false, fmt.Errorf("拉取基準窗 trace 失敗: %w", err)
 	}
 	stressRes, err := fetch(stressStart, stressEnd)
 	if err != nil {
-		fmt.Fprintf(errW, "warning: 拉取臨界窗 trace 失敗,略過觀測: %v\n", err)
-		return
+		return observe.Analysis{}, false, fmt.Errorf("拉取臨界窗 trace 失敗: %w", err)
 	}
-
 	analysis := observe.AnalyzeWindows(baseRes.Spans, stressRes.Spans, observe.DefaultAnalyzeConfig())
-	renderObservation(outW, analysis, baseRes.Truncated || stressRes.Truncated)
+	return analysis, baseRes.Truncated || stressRes.Truncated, nil
 }
