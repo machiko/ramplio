@@ -301,16 +301,9 @@ func (c *dashController) Start(req dashboard.RunRequest) error {
 		if method == "" {
 			method = http.MethodGet
 		}
-		rampDur := dur / 4
-		if rampDur < time.Second {
-			rampDur = time.Second
-		}
-		holdDur := dur - 2*rampDur
-		stgs := []scenarios.Stage{
-			{Duration: rampDur, TargetRPS: req.RPS},
-			{Duration: holdDur, TargetRPS: req.RPS},
-			{Duration: rampDur, TargetRPS: 0},
-		}
+		// 與 CLI 共用 rateStages:此處曾自行實作窗口數學且缺負值鉗制,
+		// 短 duration 會把負時長 stage 送進 engine。
+		stgs := rateStages(req.RPS, dur)
 		steps := []engine.RampStep{{
 			Request: protocols.Request{Method: method, URL: req.URL},
 		}}

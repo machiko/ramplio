@@ -50,3 +50,23 @@ func TestRateProfileLineDisclosesRampStages(t *testing.T) {
 		})
 	}
 }
+
+// rateStages 是 rate 模式三階段的唯一組裝點(CLI runRPS 與 dashboard 共用),
+// 兩處窗口數學曾經分歧:dashboard 路徑缺負值鉗制,短 duration 會把
+// 負時長 stage 送進 engine。此測試釘死單一來源的正確性。
+func TestRateStagesNeverNegative(t *testing.T) {
+	for _, dur := range []time.Duration{time.Second, 2 * time.Second, 3 * time.Second, 10 * time.Second} {
+		stages := rateStages(100, dur)
+		if len(stages) != 3 {
+			t.Fatalf("dur=%v 應為三階段,得到 %d", dur, len(stages))
+		}
+		for i, s := range stages {
+			if s.Duration < 0 {
+				t.Fatalf("dur=%v stage[%d] 時長為負: %v", dur, i, s.Duration)
+			}
+		}
+		if stages[0].TargetRPS != 100 || stages[1].TargetRPS != 100 || stages[2].TargetRPS != 0 {
+			t.Fatalf("dur=%v 三階段 RPS 輪廓錯誤: %+v", dur, stages)
+		}
+	}
+}

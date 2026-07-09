@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"time"
+
+	"github.com/machiko/ramplio/v3/internal/scenarios"
 )
 
 // rateProfile 計算 --rps 模式的三階段時長(¼ 爬升 + ½ 持平 + ¼ 收尾,
@@ -18,6 +20,18 @@ func rateProfile(dur time.Duration) (rampDur, holdDur time.Duration) {
 		holdDur = 0
 	}
 	return rampDur, holdDur
+}
+
+// rateStages 組裝 rate 模式的三階段(爬升/持平/收尾)。
+// CLI runRPS 與 dashboard 必須共用此函式——兩處窗口數學曾分歧,
+// dashboard 路徑缺負值鉗制導致短 duration 送負時長 stage 進 engine。
+func rateStages(targetRPS int, dur time.Duration) []scenarios.Stage {
+	rampDur, holdDur := rateProfile(dur)
+	return []scenarios.Stage{
+		{Duration: rampDur, TargetRPS: targetRPS},
+		{Duration: holdDur, TargetRPS: targetRPS},
+		{Duration: rampDur, TargetRPS: 0},
+	}
 }
 
 // rateProfileLine 描述 --rps 模式的三階段負載輪廓。

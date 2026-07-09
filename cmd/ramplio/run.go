@@ -626,12 +626,7 @@ func runRPS(url, method string, targetRPS int, duration string, headers []string
 	}
 
 	rampDur, holdDur := rateProfile(dur)
-
-	stgs := []scenarios.Stage{
-		{Duration: rampDur, TargetRPS: targetRPS},
-		{Duration: holdDur, TargetRPS: targetRPS},
-		{Duration: rampDur, TargetRPS: 0},
-	}
+	stgs := rateStages(targetRPS, dur)
 	steps := []engine.RampStep{{Request: req}}
 
 	workerCount := targetRPS * 5
