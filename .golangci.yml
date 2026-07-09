@@ -1,30 +1,36 @@
 version: "2"
 
+# golangci-lint v2 設定格式(v1 的 linters-settings / issues.exclude-rules 已改制):
+# - linters-settings → linters.settings
+# - issues.exclude-rules → linters.exclusions.rules
+# - gofmt 在 v2 屬 formatters,不在 linters
+# - gosimple 已併入 staticcheck,不再單獨列出
 linters:
   enable:
-    - errcheck       # 未處理的 error 回傳值
-    - staticcheck    # 靜態分析，包含 SA 系列規則
-    - govet          # go vet 內建檢查
-    - gofmt          # 格式化一致性
-    - gosimple       # 可簡化的程式碼
-    - unused         # 未使用的程式碼
-    - gocritic       # 額外的慣用寫法建議
-    - misspell       # 英文拼寫錯誤
+    - errcheck # 未處理的 error 回傳值
+    - staticcheck # 靜態分析,含 SA 系列與原 gosimple 規則
+    - govet # go vet 內建檢查
+    - unused # 未使用的程式碼
+    - gocritic # 額外的慣用寫法建議
+    - misspell # 英文拼寫錯誤
+  settings:
+    govet:
+      enable:
+        - shadow # 變數遮蔽
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+  exclusions:
+    rules:
+      - path: '_test\.go'
+        linters:
+          - errcheck # 測試中允許不檢查 error(如 t.Log)
 
-linters-settings:
-  govet:
-    enable:
-      - shadow        # 變數遮蔽
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - performance
+formatters:
+  enable:
+    - gofmt # 格式化一致性
 
 issues:
-  exclude-rules:
-    - path: "_test\\.go"
-      linters:
-        - errcheck    # 測試中允許不檢查 error（如 t.Log）
-
   max-issues-per-linter: 50
   max-same-issues: 10
