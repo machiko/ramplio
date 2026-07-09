@@ -692,6 +692,47 @@
     .diag-card-action   { font-size: 12px; color: var(--text); line-height: 1.6; margin-top: 4px; }
     .diag-card-action strong { color: var(--muted); font-weight: 600; }
 
+    /* 容量回歸比較(基準上傳與結果卡片) */
+    .baseline-row { display: flex; align-items: center; gap: 8px; margin: 10px 0 4px; }
+    .btn-baseline {
+      background: none; border: 1px dashed var(--border); border-radius: 6px;
+      color: var(--muted); font-size: 12px; padding: 7px 12px; cursor: pointer;
+    }
+    .btn-baseline:hover { color: var(--text); border-color: var(--muted); }
+    .baseline-loaded { font-size: 12px; color: var(--text); }
+    .btn-clear-baseline {
+      background: none; border: none; color: var(--muted);
+      font-size: 12px; cursor: pointer; text-decoration: underline;
+    }
+    .btn-clear-baseline:hover { color: var(--red); }
+    .compare-section { padding: 14px 24px 0; }
+    .compare-card {
+      padding: 12px 16px;
+      border-radius: 8px;
+      border-left: 3px solid var(--border);
+      background: var(--card);
+    }
+    .compare-card.regressed { border-left-color: var(--red); }
+    .compare-card.ok        { border-left-color: var(--green); }
+    .compare-baseline-id { font-size: 11px; color: var(--muted); margin-bottom: 8px; }
+    .compare-line {
+      display: flex; gap: 8px; align-items: baseline;
+      font-size: 12px; color: var(--text); line-height: 1.8;
+      font-variant-numeric: tabular-nums;
+    }
+    .compare-line.regressed .compare-mark { color: var(--red); }
+    .compare-line.improved  .compare-mark { color: var(--green); }
+    .compare-line.stable    .compare-mark { color: var(--muted); }
+    .compare-label  { min-width: 130px; }
+    .compare-values { color: var(--muted); }
+    .compare-line.regressed .compare-values { color: var(--red); }
+    .compare-warnings { margin-top: 8px; }
+    .compare-warn-title { font-size: 12px; color: var(--amber); font-weight: 600; }
+    .compare-warn-line  { font-size: 12px; color: var(--amber); line-height: 1.6; }
+    .compare-conclusion { font-size: 13px; font-weight: 600; margin-top: 8px; }
+    .compare-conclusion.regressed { color: var(--red); }
+    .compare-conclusion.ok        { color: var(--green); }
+
     /* 目標系統觀測（--observe trace 關聯）結果卡片 */
     .observe-section { padding: 14px 24px 0; }
     .observe-card {
@@ -1726,6 +1767,24 @@
                 <div class="field-hint">例如：30s、2m、1m30s</div>
               </div>
             </div>
+            <!-- 與基準比較(選填):上傳 --save-baseline 產生的快照 -->
+            <div class="baseline-row">
+              <template v-if="baselineInfo">
+                <span class="baseline-loaded">
+                  ⚖ 將與基準比較：{{ baselineInfo.scenario || '(未命名)' }}
+                  <template v-if="baselineInfo.git_commit"> · {{ baselineInfo.git_commit }}</template>
+                  <template v-if="baselineInfo.created_at"> · {{ baselineInfo.created_at.slice(0, 10) }}</template>
+                </span>
+                <button type="button" class="btn-clear-baseline" @click="clearBaseline">移除</button>
+              </template>
+              <template v-else>
+                <button type="button" class="btn-baseline" @click="triggerBaselineInput">
+                  ⚖ 與基準比較（選填，上傳 --save-baseline 的 JSON）
+                </button>
+                <input ref="baselineInput" type="file" accept=".json,application/json"
+                       style="display:none" @change="handleBaselineFileChange" />
+              </template>
+            </div>
             <button type="submit" class="btn-run" :disabled="submitting">
               {{ submitting ? 'Starting…' : '▶  Run Test' }}
             </button>
@@ -2254,6 +2313,30 @@
         <div class="diag-card-cause">{{ f.cause }}</div>
         <div v-if="f.evidence" class="diag-card-evidence">{{ f.evidence }}</div>
         <div class="diag-card-action"><strong>→ 建議：</strong>{{ f.action }}</div>
+      </div>
+    </div>
+
+    <!-- 容量回歸比較：文案與 CLI renderComparison 同源 -->
+    <div v-if="finalResult?.compare" class="compare-section">
+      <div class="diag-section-title">容量回歸比較（本次 vs 基準）</div>
+      <div class="compare-card" :class="finalResult.compare.regressed ? 'regressed' : 'ok'">
+        <div class="compare-baseline-id">
+          基準：{{ finalResult.compare.baseline_scenario || '(未命名)' }}
+          <template v-if="finalResult.compare.baseline_git_commit"> · {{ finalResult.compare.baseline_git_commit }}</template>
+          <template v-if="finalResult.compare.baseline_created_at"> · {{ finalResult.compare.baseline_created_at.slice(0, 10) }}</template>
+        </div>
+        <div v-for="d in finalResult.compare.deltas" :key="d.name" class="compare-line" :class="d.verdict">
+          <span class="compare-mark">{{ d.verdict === 'regressed' ? '✗' : d.verdict === 'improved' ? '↑' : '✓' }}</span>
+          <span class="compare-label">{{ d.label }}</span>
+          <span class="compare-values">{{ d.before_text }} → {{ d.after_text }}（{{ (d.delta_pct >= 0 ? '+' : '') + d.delta_pct.toFixed(1) }}%，{{ cmpWord(d.verdict) }}）</span>
+        </div>
+        <div v-if="finalResult.compare.warnings?.length" class="compare-warnings">
+          <div class="compare-warn-title">⚠ 注意</div>
+          <div v-for="(warning, i) in finalResult.compare.warnings" :key="i" class="compare-warn-line">{{ warning }}</div>
+        </div>
+        <div class="compare-conclusion" :class="finalResult.compare.regressed ? 'regressed' : 'ok'">
+          {{ cmpConclusion(finalResult.compare) }}
+        </div>
       </div>
     </div>
 
@@ -3196,13 +3279,60 @@ createApp({
     }
 
 
-    onMounted(async () => { await nextTick(); initCharts(); connect(); });
+    onMounted(async () => { await nextTick(); initCharts(); connect(); restoreBaselineStatus(); });
     onUnmounted(() => { ws?.close(); rpsChart?.destroy(); latChart?.destroy(); });
 
     // Formatters
     const fmt1 = v => (v ?? 0).toFixed(1);
     const fmt2 = v => (v ?? 0).toFixed(2);
     const pct  = v => Math.min(Math.round((v ?? 0) * 100), 100) + '%';
+
+    // 比較卡片文案：與 CLI renderComparison 同源（cmd/ramplio/compare.go），
+    // 標籤與數值格式由後端(baseline 套件)給定,前端不自備第二份規則。
+    const CMP_WORDS = { regressed: '退步', improved: '改善', stable: '持平' };
+    const cmpWord = v => CMP_WORDS[v] || v;
+    function cmpConclusion(c) {
+      if (!c.regressed) return '結論：✓ 沒有超出容差的退步，整體持平或更好。';
+      const n = c.deltas.filter(d => d.verdict === 'regressed').length;
+      return `結論：✗ 有 ${n} 項指標退步——這次改動讓你的服務更不能扛了，建議先查再上。`;
+    }
+
+    const baselineInfo = ref(null);
+    const baselineInput = ref(null);
+    function triggerBaselineInput() { baselineInput.value?.click(); }
+    function handleBaselineFileChange(e) {
+      const file = e.target.files?.[0];
+      if (file) uploadBaseline(file);
+      e.target.value = '';
+    }
+    async function uploadBaseline(file) {
+      formError.value = '';
+      try {
+        const text = await file.text();
+        const res = await fetch('/api/baseline', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: text,
+        });
+        if (!res.ok) { formError.value = await res.text(); return; }
+        baselineInfo.value = await res.json();
+      } catch (err) {
+        formError.value = err.message || '基準上傳失敗';
+      }
+    }
+    async function clearBaseline() {
+      try { await fetch('/api/baseline', { method: 'DELETE' }); } catch {}
+      baselineInfo.value = null;
+    }
+    // 重新整理後從 status 恢復顯示——GUI 不可與 controller 實際狀態脫鉤
+    async function restoreBaselineStatus() {
+      try {
+        const res = await fetch('/api/status');
+        if (!res.ok) return;
+        const d = await res.json();
+        if (d.baseline) baselineInfo.value = d.baseline;
+      } catch {}
+    }
 
     // 觀測卡片文案：用語與 CLI renderObservation 同源（cmd/ramplio/observe.go），
     // 標點依 GUI 慣例用全形。最多顯示 Top1 + 兩個其次（同 CLI 上限）。
@@ -3413,6 +3543,8 @@ createApp({
       latClass, latLabel, errClass, errLabel,
       p99Color, tailRatio, ratioClass, ratioLabel, fmtElapsed,
       obsMs, obsConclusion, obsRest,
+      baselineInfo, baselineInput, triggerBaselineInput, handleBaselineFileChange, clearBaseline,
+      cmpWord, cmpConclusion,
     };
   },
 }).mount('#app');

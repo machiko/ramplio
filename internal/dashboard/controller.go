@@ -48,6 +48,8 @@ type RunResult struct {
 	GuidedVerdict *GuidedVerdict          `json:"guided_verdict,omitempty"` // set when started via guided wizard
 	// Observe 是 trace 瓶頸關聯結果(rate 模式 + 伺服器啟動時帶 --observe 才有)。
 	Observe *ObserveSnap `json:"observe,omitempty"`
+	// Compare 是與已上傳基準的容量回歸比較(有載入 baseline 才有)。
+	Compare *CompareSnap `json:"compare,omitempty"`
 }
 
 // ScenarioMeta holds display metadata for a YAML scenario loaded via --scenario flag.
@@ -115,6 +117,13 @@ type Controller interface {
 	// WriteReport generates an HTML report for the last completed test and writes it to w.
 	// Returns an error if no test has completed yet.
 	WriteReport(w io.Writer) error
+	// LoadBaseline parses uploaded baseline JSON and holds it for post-run comparison.
+	// Returns a summary of the loaded baseline, or an error if the data is invalid.
+	LoadBaseline(raw []byte) (BaselineInfo, error)
+	// ClearBaseline removes the held baseline; subsequent runs are not compared.
+	ClearBaseline()
+	// BaselineMeta returns the held baseline's summary, or nil when none is loaded.
+	BaselineMeta() *BaselineInfo
 	// StartDiscover launches a capacity discovery probe in the background.
 	// Returns an error if a test is already running or if req is invalid.
 	StartDiscover(req DiscoverRequest) error

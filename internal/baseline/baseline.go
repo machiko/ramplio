@@ -136,16 +136,27 @@ func Load(path string) (Baseline, error) {
 	if err != nil {
 		return Baseline{}, fmt.Errorf("讀取 baseline %s 失敗: %w", path, err)
 	}
+	return parse(raw, path)
+}
+
+// Parse 解析並驗證 baseline 位元組(上傳情境:dashboard 收 bytes 沒有路徑)。
+// 與 Load 共用同一套驗證——壞資料必須大聲失敗,不可默默收下。
+func Parse(raw []byte) (Baseline, error) {
+	return parse(raw, "(上傳內容)")
+}
+
+// parse 是 Load/Parse 的共用主體;source 只用於錯誤訊息定位。
+func parse(raw []byte, source string) (Baseline, error) {
 	var b Baseline
 	if err := json.Unmarshal(raw, &b); err != nil {
-		return Baseline{}, fmt.Errorf("解析 baseline %s 失敗(非有效 JSON): %w", path, err)
+		return Baseline{}, fmt.Errorf("解析 baseline %s 失敗(非有效 JSON): %w", source, err)
 	}
 	if b.SchemaVersion > SchemaVersion {
 		return Baseline{}, fmt.Errorf(
 			"baseline %s 的 schema 版本 %d 比本工具支援的 %d 新,請升級 ramplio",
-			path, b.SchemaVersion, SchemaVersion)
+			source, b.SchemaVersion, SchemaVersion)
 	}
-	if err := validate(b, path); err != nil {
+	if err := validate(b, source); err != nil {
 		return Baseline{}, err
 	}
 	return b, nil

@@ -130,14 +130,19 @@ func (c *benchController) Snapshot() reporter.LiveSnapshot {
 		Elapsed:      time.Since(c.startedAt),
 	}
 }
-func (c *benchController) Start(_ dashboard.RunRequest) error              { return nil }
-func (c *benchController) Stop()                                           {}
-func (c *benchController) State() dashboard.State                          { return dashboard.StateRunning }
-func (c *benchController) Result() *dashboard.RunResult                    { return nil }
-func (c *benchController) ScenarioInfo() *dashboard.ScenarioMeta           { return nil }
-func (c *benchController) LoadScenario(_ []byte, _ string) error           { return nil }
-func (c *benchController) ActiveGuidedProfile() *dashboard.GuidedProfile   { return nil }
-func (c *benchController) WriteReport(_ io.Writer) error                   { return fmt.Errorf("no report") }
+func (c *benchController) Start(_ dashboard.RunRequest) error            { return nil }
+func (c *benchController) Stop()                                         {}
+func (c *benchController) State() dashboard.State                        { return dashboard.StateRunning }
+func (c *benchController) Result() *dashboard.RunResult                  { return nil }
+func (c *benchController) ScenarioInfo() *dashboard.ScenarioMeta         { return nil }
+func (c *benchController) LoadScenario(_ []byte, _ string) error         { return nil }
+func (c *benchController) ActiveGuidedProfile() *dashboard.GuidedProfile { return nil }
+func (c *benchController) WriteReport(_ io.Writer) error                 { return fmt.Errorf("no report") }
+func (c *benchController) LoadBaseline(_ []byte) (dashboard.BaselineInfo, error) {
+	return dashboard.BaselineInfo{}, nil
+}
+func (c *benchController) ClearBaseline()                                  {}
+func (c *benchController) BaselineMeta() *dashboard.BaselineInfo           { return nil }
 func (c *benchController) StartDiscover(_ dashboard.DiscoverRequest) error { return nil }
 func (c *benchController) DiscoverProgress() ([]dashboard.DiscoverProbeSnap, *dashboard.DiscoverResultSnap, *dashboard.DiscoverCurrentSnap, []int, bool) {
 	return nil, nil, nil, nil, false

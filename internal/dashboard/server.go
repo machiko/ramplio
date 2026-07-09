@@ -131,6 +131,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/import-har", s.requireToken(s.handleImportHAR))
 	mux.HandleFunc("/api/report", s.handleReport)
 	mux.HandleFunc("/api/discover", s.requireToken(s.handleDiscover))
+	mux.HandleFunc("/api/baseline", s.requireToken(s.handleBaseline))
 
 	srv := &http.Server{Handler: mux}
 	s.ctx = ctx
@@ -203,6 +204,38 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusAccepted)
 }
 
+// maxBaselineBytes 是上傳 baseline 的大小上限;正常快照僅數 KB,
+// 上限防止誤傳大檔佔用記憶體。
+const maxBaselineBytes = 1 << 20
+
+// handleBaseline 管理待比較的基準:POST 上傳、DELETE 清除。
+func (s *Server) handleBaseline(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodPost:
+		raw, err := io.ReadAll(io.LimitReader(r.Body, maxBaselineBytes+1))
+		if err != nil {
+			http.Error(w, "讀取上傳內容失敗", http.StatusBadRequest)
+			return
+		}
+		if len(raw) > maxBaselineBytes {
+			http.Error(w, "baseline 檔案過大(上限 1MB)", http.StatusRequestEntityTooLarge)
+			return
+		}
+		info, err := s.ctrl.LoadBaseline(raw)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(info)
+	case http.MethodDelete:
+		s.ctrl.ClearBaseline()
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
 func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -273,13 +306,15 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	type response struct {
-		State  State      `json:"state"`
-		Result *RunResult `json:"result,omitempty"`
+		State    State         `json:"state"`
+		Result   *RunResult    `json:"result,omitempty"`
+		Baseline *BaselineInfo `json:"baseline,omitempty"`
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(response{
-		State:  s.ctrl.State(),
-		Result: s.ctrl.Result(),
+		State:    s.ctrl.State(),
+		Result:   s.ctrl.Result(),
+		Baseline: s.ctrl.BaselineMeta(),
 	})
 }
 

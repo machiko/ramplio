@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/machiko/ramplio/v3/internal/baseline"
 	"github.com/machiko/ramplio/v3/internal/dashboard"
 	"github.com/machiko/ramplio/v3/internal/discover"
 	"github.com/machiko/ramplio/v3/internal/engine"
@@ -49,6 +50,12 @@ type dashController struct {
 	observeSrc observe.TraceSource
 	obsRampDur time.Duration
 	obsHoldDur time.Duration
+
+	// pendingBaseline 是 GUI 上傳的待比較基準(nil = 未載入);run 結束後
+	// 保留,使用者可連跑多次與同一基準比較。runIdent 是本次 run 的場景識別,
+	// 供 FromSummary 填 Scenario(與 CLI 規則對齊:場景名,否則 URL)。
+	pendingBaseline *baseline.Baseline
+	runIdent        string
 
 	discoverActive     bool
 	discoverProbes     []dashboard.DiscoverProbeSnap
@@ -221,6 +228,37 @@ func (c *dashController) Result() *dashboard.RunResult {
 	return c.result
 }
 
+// LoadBaseline 解析上傳的基準並保存供 run 結束後比較。
+// 壞資料大聲失敗,且不覆蓋既有的合法基準。
+func (c *dashController) LoadBaseline(raw []byte) (dashboard.BaselineInfo, error) {
+	b, err := baseline.Parse(raw)
+	if err != nil {
+		return dashboard.BaselineInfo{}, err
+	}
+	c.mu.Lock()
+	c.pendingBaseline = &b
+	c.mu.Unlock()
+	return dashboard.BaselineInfoFrom(b), nil
+}
+
+// ClearBaseline 移除已載入的基準,之後的 run 不再比較。
+func (c *dashController) ClearBaseline() {
+	c.mu.Lock()
+	c.pendingBaseline = nil
+	c.mu.Unlock()
+}
+
+// BaselineMeta 回傳已載入基準的摘要;nil 表示未載入。
+func (c *dashController) BaselineMeta() *dashboard.BaselineInfo {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.pendingBaseline == nil {
+		return nil
+	}
+	info := dashboard.BaselineInfoFrom(*c.pendingBaseline)
+	return &info
+}
+
 func (c *dashController) Stop() {
 	c.mu.RLock()
 	cancel := c.cancel
@@ -264,9 +302,12 @@ func (c *dashController) Start(req dashboard.RunRequest) error {
 
 	// 每次 run 重置觀測窗口;僅 rate 分支會重新設定(其他模式不適用)
 	c.obsRampDur, c.obsHoldDur = 0, 0
+	// 場景識別與 CLI 規則對齊:URL 模式用 URL;scenario 分支下面覆蓋為場景名
+	c.runIdent = req.URL
 
 	switch {
 	case c.scenarioMeta != nil:
+		c.runIdent = c.scenarioMeta.Name
 		stages := c.pendingStages
 		maxVUs := c.scenarioMeta.MaxVUs
 
@@ -403,6 +444,7 @@ func (c *dashController) startGuided(p *dashboard.GuidedProfile) error {
 	// guided 一律不觀測:窗口若殘留上一輪 rate run 的值,
 	// 會對本輪誤觸發觀測且窗口與 guided 的 stage 配置毫無對應。
 	c.obsRampDur, c.obsHoldDur = 0, 0
+	c.runIdent = p.URL
 
 	col := metrics.NewCollector(plan.MaxVUs)
 	ramp := engine.NewRamp(engine.RampConfig{
@@ -508,6 +550,17 @@ func (c *dashController) runLoop(
 				c.lastProfile = nil
 			}
 			result.Observe = obsSnap
+			// 與已上傳基準比較(純計算,鎖內安全)。失敗只警告不掛卡片——
+			// 比較是結果的補充,不可污染主流程(比照 observe/sink 慣例)。
+			if c.pendingBaseline != nil {
+				after := baseline.FromSummary(sum, c.runIdent)
+				if cmp, cmpErr := baseline.Compare(*c.pendingBaseline, after, baseline.DefaultTolerance()); cmpErr == nil {
+					snap := dashboard.CompareSnapFrom(cmp, *c.pendingBaseline)
+					result.Compare = &snap
+				} else {
+					fmt.Fprintf(os.Stderr, "warning: 基準比較失敗:%v,結果頁略過比較卡片\n", cmpErr)
+				}
+			}
 			c.result = result
 			c.lastSummary = sum
 			c.lastSummarySet = true

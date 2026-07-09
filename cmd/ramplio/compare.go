@@ -13,36 +13,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// metricLabels 把指標鍵翻成白話;新指標沒對到時退回原鍵名,不會漏印。
-// 用語與 terminal/interpret 單一來源對齊:服務端延遲=「伺服器處理」、
-// CO 修正延遲=「使用者實感」,不自創同義詞。
-var metricLabels = map[string]string{
-	"p50_ms":             "p50（伺服器處理）",
-	"p99_ms":             "p99（伺服器處理）",
-	"corrected_p99_ms":   "p99（使用者實感）",
-	"error_rate_pct":     "錯誤率",
-	"throughput_rps":     "每秒請求",
-	"safe_limit_rps":     "安全上限",
-	"breaking_point_rps": "臨界點",
-}
-
-func metricLabel(name string) string {
-	if l, ok := metricLabels[name]; ok {
-		return l
-	}
-	return name
-}
-
-func formatMetricValue(name string, v float64) string {
-	switch {
-	case strings.HasSuffix(name, "_ms"):
-		return fmt.Sprintf("%.0fms", v)
-	case strings.HasSuffix(name, "_pct"):
-		return fmt.Sprintf("%.1f%%", v)
-	default:
-		return fmt.Sprintf("%.0f", v)
-	}
-}
+// 指標標籤與數值格式化已上移到 internal/baseline(labels.go):
+// CLI 與 dashboard 卡片共用同一份用語來源,不各自演化同義詞。
 
 // renderComparison 輸出白話比較報告。Warnings 一律完整印出——
 // 不可信的比較結果默默通過,是守門工具最危險的假陽性。
@@ -61,8 +33,8 @@ func renderComparison(w io.Writer, c baseline.Comparison) {
 			mark, word = "↑", "改善"
 		}
 		fmt.Fprintf(w, "  %s %-14s %s → %s(%+.1f%%,%s)\n",
-			mark, metricLabel(d.Name),
-			formatMetricValue(d.Name, d.Before), formatMetricValue(d.Name, d.After),
+			mark, baseline.MetricLabel(d.Name),
+			baseline.FormatMetricValue(d.Name, d.Before), baseline.FormatMetricValue(d.Name, d.After),
 			d.DeltaPct, word)
 	}
 

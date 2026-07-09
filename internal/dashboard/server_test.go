@@ -26,7 +26,27 @@ type mockController struct {
 	startCalled []dashboard.RunRequest
 	stopCalled  bool
 	startErr    error
+
+	baselineInfo        *dashboard.BaselineInfo
+	loadBaselineRaw     []byte
+	loadBaselineErr     error
+	clearBaselineCalled bool
 }
+
+func (m *mockController) LoadBaseline(raw []byte) (dashboard.BaselineInfo, error) {
+	m.loadBaselineRaw = raw
+	if m.loadBaselineErr != nil {
+		return dashboard.BaselineInfo{}, m.loadBaselineErr
+	}
+	if m.baselineInfo != nil {
+		return *m.baselineInfo, nil
+	}
+	return dashboard.BaselineInfo{}, nil
+}
+
+func (m *mockController) ClearBaseline() { m.clearBaselineCalled = true }
+
+func (m *mockController) BaselineMeta() *dashboard.BaselineInfo { return m.baselineInfo }
 
 func (m *mockController) Snapshot() reporter.LiveSnapshot               { return m.snap }
 func (m *mockController) State() dashboard.State                        { return m.state }
@@ -228,6 +248,97 @@ func TestServer_ShutdownOnContextCancel(t *testing.T) {
 
 	_, _, err := websocket.DefaultDialer.Dial(fmt.Sprintf("ws://%s/ws", addr), nil)
 	assert.Error(t, err, "new connections should be rejected after shutdown")
+}
+
+// POST /api/baseline 上傳基準:成功回 info;controller 收到原始 bytes。
+func TestServer_BaselineAPI_UploadReturnsInfo(t *testing.T) {
+	ctrl := &mockController{
+		baselineInfo: &dashboard.BaselineInfo{Scenario: "s", GitCommit: "abc", HasMetrics: true},
+	}
+	srv, _ := newTestServer(t, ctrl)
+
+	body := `{"schema_version":1,"scenario":"s","metrics":{"total":1}}`
+	resp, err := http.Post(
+		fmt.Sprintf("http://%s/api/baseline", srv.Addr()),
+		"application/json",
+		strings.NewReader(body),
+	)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	assert.Equal(t, body, string(ctrl.loadBaselineRaw), "controller 應收到原始 bytes")
+
+	var info dashboard.BaselineInfo
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&info))
+	assert.Equal(t, "s", info.Scenario)
+	assert.True(t, info.HasMetrics)
+}
+
+// 壞 baseline 必須回 400,錯誤訊息給使用者看得懂的原因。
+func TestServer_BaselineAPI_RejectsInvalid(t *testing.T) {
+	ctrl := &mockController{loadBaselineErr: fmt.Errorf("解析 baseline 失敗")}
+	srv, _ := newTestServer(t, ctrl)
+
+	resp, err := http.Post(
+		fmt.Sprintf("http://%s/api/baseline", srv.Addr()),
+		"application/json",
+		strings.NewReader("{not json"),
+	)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+// DELETE /api/baseline 清除已載入的基準。
+func TestServer_BaselineAPI_DeleteClears(t *testing.T) {
+	ctrl := &mockController{baselineInfo: &dashboard.BaselineInfo{Scenario: "s"}}
+	srv, _ := newTestServer(t, ctrl)
+
+	req, err := http.NewRequest(http.MethodDelete,
+		fmt.Sprintf("http://%s/api/baseline", srv.Addr()), nil)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
+	assert.True(t, ctrl.clearBaselineCalled)
+}
+
+// /api/status 帶出已載入基準——GUI 重新整理後不可與 controller 實際狀態脫鉤。
+func TestServer_StatusAPI_IncludesBaseline(t *testing.T) {
+	ctrl := &mockController{
+		state:        dashboard.StateIdle,
+		baselineInfo: &dashboard.BaselineInfo{Scenario: "s", GitCommit: "abc"},
+	}
+	srv, _ := newTestServer(t, ctrl)
+
+	resp, err := http.Get(fmt.Sprintf("http://%s/api/status", srv.Addr()))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	var payload map[string]any
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&payload))
+	b, ok := payload["baseline"].(map[string]any)
+	require.True(t, ok, "status 應含 baseline 欄位")
+	assert.Equal(t, "s", b["scenario"])
+}
+
+// 未載入基準時 status 的 baseline 鍵缺席(omitempty)。
+func TestServer_StatusAPI_OmitsBaselineWhenNil(t *testing.T) {
+	ctrl := &mockController{state: dashboard.StateIdle}
+	srv, _ := newTestServer(t, ctrl)
+
+	resp, err := http.Get(fmt.Sprintf("http://%s/api/status", srv.Addr()))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	var payload map[string]any
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&payload))
+	_, present := payload["baseline"]
+	assert.False(t, present)
 }
 
 func TestServer_RunAPI_AcceptsValidRequest(t *testing.T) {
