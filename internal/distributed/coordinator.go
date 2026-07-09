@@ -100,8 +100,8 @@ func (c *Coordinator) Run(ctx context.Context) (metrics.Summary, error) {
 	allocation := c.allocateVUs()
 
 	// Step 4: Broadcast assign requests to all workers
-	if err := c.broadcastAssign(ctx, allocation, setupCaptures); err != nil {
-		return metrics.Summary{}, fmt.Errorf("broadcast assign failed: %w", err)
+	if assignErr := c.broadcastAssign(ctx, allocation, setupCaptures); assignErr != nil {
+		return metrics.Summary{}, fmt.Errorf("broadcast assign failed: %w", assignErr)
 	}
 
 	// Step 5: Poll live metrics and aggregate
@@ -114,9 +114,9 @@ func (c *Coordinator) Run(ctx context.Context) (metrics.Summary, error) {
 
 	// Wait for all workers to finish
 	select {
-	case err := <-pollErr:
-		if err != nil && err != context.Canceled {
-			return metrics.Summary{}, fmt.Errorf("polling failed: %w", err)
+	case pErr := <-pollErr:
+		if pErr != nil && pErr != context.Canceled {
+			return metrics.Summary{}, fmt.Errorf("polling failed: %w", pErr)
 		}
 	case <-ctx.Done():
 		// Context cancelled, stop all workers

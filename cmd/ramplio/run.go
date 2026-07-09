@@ -139,11 +139,12 @@ func newRunCmd() *cobra.Command {
 			)
 
 			runStart := time.Now()
-			if scenarioFile != "" {
+			switch {
+			case scenarioFile != "":
 				sum, thresholds, err = runScenario(scenarioFile, prometheusAddr, httpCfg)
-			} else if rps > 0 {
+			case rps > 0:
 				sum, err = runRPS(url, method, rps, duration, headers, body, httpCfg)
-			} else {
+			default:
 				if !cmd.Flags().Changed("vus") {
 					fmt.Println("提示：目前用 1 個虛擬用戶（預設）。加上 --vus 50 可模擬更多同時流量。")
 				}
@@ -443,8 +444,8 @@ func runScenario(path, promAddr string, httpCfg protocols.HTTPConfig) (metrics.S
 
 	if promAddr != "" {
 		prom := reporter.NewPrometheusServer(provider, promAddr)
-		if err := prom.Start(ctx); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: prometheus unavailable: %v\n", err)
+		if promErr := prom.Start(ctx); promErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: prometheus unavailable: %v\n", promErr)
 		} else {
 			fmt.Printf("Prometheus → http://%s/metrics\n\n", promAddr)
 		}
@@ -543,8 +544,8 @@ func runDistributed(scenarioFile string, workerAddrs []string, promAddr string, 
 
 	if promAddr != "" {
 		prom := reporter.NewPrometheusServer(provider, promAddr)
-		if err := prom.Start(ctx); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: prometheus unavailable: %v\n", err)
+		if promErr := prom.Start(ctx); promErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: prometheus unavailable: %v\n", promErr)
 		} else {
 			fmt.Printf("Prometheus → http://%s/metrics\n\n", promAddr)
 		}
@@ -555,7 +556,7 @@ func runDistributed(scenarioFile string, workerAddrs []string, promAddr string, 
 	// TUI exiting immediately and cancelling the test.
 	if opts.noTUI || !isTerminal() {
 		runHeadlessProgress(provider, cancel, done, opts.pollInterval)
-	} else if err := reporter.RunTUI(provider, cancel, done); err != nil {
+	} else if tuiErr := reporter.RunTUI(provider, cancel, done); tuiErr != nil {
 		<-done
 	}
 	cancel()

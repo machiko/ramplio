@@ -254,7 +254,8 @@ func (c *dashController) Start(req dashboard.RunRequest) error {
 		ramp *engine.RampEngine
 	)
 
-	if c.scenarioMeta != nil {
+	switch {
+	case c.scenarioMeta != nil:
 		stages := c.pendingStages
 		maxVUs := c.scenarioMeta.MaxVUs
 
@@ -294,7 +295,7 @@ func (c *dashController) Start(req dashboard.RunRequest) error {
 			Executor:      protocols.NewHTTPExecutor(c.httpCfg),
 			WSExecutor:    protocols.NewWSExecutor(),
 		}, col)
-	} else if req.RPS > 0 {
+	case req.RPS > 0:
 		dur, _ := time.ParseDuration(req.Duration) // validated above
 		method := strings.ToUpper(req.Method)
 		if method == "" {
@@ -326,7 +327,7 @@ func (c *dashController) Start(req dashboard.RunRequest) error {
 			Steps:    steps,
 			Executor: protocols.NewHTTPExecutor(c.httpCfg),
 		}, col)
-	} else {
+	default:
 		vus := req.VUs
 		if vus <= 0 {
 			vus = 1

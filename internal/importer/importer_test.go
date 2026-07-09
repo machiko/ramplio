@@ -244,12 +244,6 @@ func fixture(t *testing.T, path string) []byte {
 	return data
 }
 
-type minHAR struct {
-	Log struct {
-		Entries []any `json:"entries"`
-	} `json:"log"`
-}
-
 func singleEntryHAR(method, reqURL string, status int, contentType, body string) []byte {
 	entry := map[string]any{
 		"request": map[string]any{

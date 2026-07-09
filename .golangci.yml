@@ -28,6 +28,13 @@ linters:
       enabled-tags:
         - diagnostic
         - performance
+      disabled-checks:
+        # metrics.Summary 以值傳遞是刻意設計:不可變快照語意(見 CLAUDE.md
+        # 架構契約與 coding-style 的 immutability 原則)。複製只發生在
+        # 報告期,不在壓測 hot path(hot path 走 chan metrics.Sample)。
+        # 改 74 個簽名為指標會顛覆設計換取無關緊要的複製節省。
+        - hugeParam
+        - rangeValCopy
   exclusions:
     rules:
       - path: '_test\.go'

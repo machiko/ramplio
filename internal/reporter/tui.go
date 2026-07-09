@@ -123,8 +123,8 @@ func (m tuiModel) View() string {
 func renderStepTable(steps []metrics.StepSummary) string {
 	const nameW = 34
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("  %-*s  %7s  %7s  %7s  %6s\n",
-		nameW, "Step", "Total", "p50", "p99", "Err%"))
+	fmt.Fprintf(&sb, "  %-*s  %7s  %7s  %7s  %6s\n",
+		nameW, "Step", "Total", "p50", "p99", "Err%")
 	sb.WriteString("  " + strings.Repeat("─", nameW+36) + "\n")
 	for _, s := range steps {
 		errPct := 0.0
@@ -135,8 +135,8 @@ func renderStepTable(steps []metrics.StepSummary) string {
 		if len(name) > nameW {
 			name = name[:nameW-3] + "..."
 		}
-		sb.WriteString(fmt.Sprintf("  %-*s  %7d  %7s  %7s  %5.1f%%\n",
-			nameW, name, s.Total, fmtLatency(s.P50), fmtLatency(s.P99), errPct))
+		fmt.Fprintf(&sb, "  %-*s  %7d  %7s  %7s  %5.1f%%\n",
+			nameW, name, s.Total, fmtLatency(s.P50), fmtLatency(s.P99), errPct)
 	}
 	return sb.String()
 }

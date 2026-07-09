@@ -40,7 +40,7 @@ func sanitizeVarName(name string) string {
 func findPreAuthToken(entries []harEntry) (int, string, string, string) {
 	const minTokenLen = 20
 	for i, e := range entries {
-		if strings.ToUpper(e.Request.Method) != "GET" {
+		if !strings.EqualFold(e.Request.Method, "GET") {
 			continue
 		}
 		if !strings.Contains(responseContentType(e), "json") {
@@ -89,7 +89,7 @@ func loginScore(entry harEntry) float64 {
 		score += 0.3
 	}
 
-	if strings.ToUpper(entry.Request.Method) == "POST" {
+	if strings.EqualFold(entry.Request.Method, "POST") {
 		score += 0.2
 	}
 

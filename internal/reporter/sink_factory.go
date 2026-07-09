@@ -25,6 +25,6 @@ func ParseSink(dsn string) (Sink, error) {
 	case strings.HasPrefix(dsn, "otel://"), strings.HasPrefix(dsn, "otels://"):
 		return NewOtelSink(dsn)
 	default:
-		return nil, fmt.Errorf("unknown sink scheme in %q — supported: csv:<path>, influxdb://..., influxdbs://..., loki://..., lokis://..., otel://..., otels://...", dsn)
+		return nil, fmt.Errorf("unknown sink scheme in %q — supported: csv:<path>, influxdb://, influxdbs://, loki://, lokis://, otel://, otels://", dsn)
 	}
 }

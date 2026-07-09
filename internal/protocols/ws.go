@@ -49,8 +49,8 @@ func (e *WSExecutor) Execute(ctx context.Context, req Request) Result {
 
 	// Send the message body as a text frame if provided.
 	if len(req.Body) > 0 {
-		if err := conn.WriteMessage(websocket.TextMessage, req.Body); err != nil {
-			return Result{StatusCode: statusCode, Latency: time.Since(start), Error: err}
+		if wErr := conn.WriteMessage(websocket.TextMessage, req.Body); wErr != nil {
+			return Result{StatusCode: statusCode, Latency: time.Since(start), Error: wErr}
 		}
 	}
 

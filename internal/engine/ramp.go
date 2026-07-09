@@ -637,10 +637,8 @@ func (e *RampEngine) runRateWorker(ctx context.Context, jobs <-chan time.Time, i
 
 			if result.Error != nil {
 				e.incFails()
-			} else {
-				if e.cbWindow != nil {
-					e.cbWindow.reset()
-				}
+			} else if e.cbWindow != nil {
+				e.cbWindow.reset()
 			}
 		}
 		e.activeVUs.Add(-1)
@@ -737,10 +735,8 @@ func (e *RampEngine) runVU(ctx context.Context) {
 
 				if result.Error != nil {
 					e.incFails()
-				} else {
-					if e.cbWindow != nil {
-						e.cbWindow.reset()
-					}
+				} else if e.cbWindow != nil {
+					e.cbWindow.reset()
 				}
 
 				if step.Pause > 0 {

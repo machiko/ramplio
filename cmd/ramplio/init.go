@@ -228,7 +228,7 @@ func generateYAML(
 	b.WriteString(stagesYAML(vus, duration, shape))
 
 	if auth.kind == "jwt" {
-		loginBody := fmt.Sprintf(`{"%s": "%s", "%s": "%s"}`,
+		loginBody := fmt.Sprintf(`{%q: %q, %q: %q}`,
 			auth.emailField, auth.loginEmail, auth.passwordField, auth.loginPass)
 		b.WriteString("\nsetup:\n")
 		b.WriteString("  - name: 登入取得 JWT\n")
@@ -278,7 +278,7 @@ func generateYAML(
 		b.WriteString("      status: " + s.statusCode + "\n")
 
 		if s.pauseMs > 0 {
-			b.WriteString(fmt.Sprintf("    pause: %dms\n", s.pauseMs))
+			fmt.Fprintf(&b, "    pause: %dms\n", s.pauseMs)
 		}
 	}
 

@@ -273,23 +273,23 @@ func (w *Worker) handleAssign(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rw.Header().Set("Content-Type", "application/json")
-	// 回應寫入失敗 = 客戶端已斷線,無可行處理
-	_ = json.NewEncoder(rw).Encode(&StatusResponse{OK: true})
+	writeJSON(rw, &StatusResponse{OK: true})
 }
 
 func (w *Worker) handleStop(rw http.ResponseWriter, r *http.Request) {
 	w.Stop()
+	writeJSON(rw, &StatusResponse{OK: true})
+}
+
+// writeJSON 寫 JSON 回應;寫入失敗代表客戶端已斷線,無可行處理故忽略。
+func writeJSON(rw http.ResponseWriter, v any) {
 	rw.Header().Set("Content-Type", "application/json")
-	// 回應寫入失敗 = 客戶端已斷線,無可行處理
-	_ = json.NewEncoder(rw).Encode(&StatusResponse{OK: true})
+	_ = json.NewEncoder(rw).Encode(v)
 }
 
 func (w *Worker) handleLive(rw http.ResponseWriter, r *http.Request) {
 	metrics := w.GetLiveMetrics()
-	rw.Header().Set("Content-Type", "application/json")
-	// 回應寫入失敗 = 客戶端已斷線,無可行處理
-	_ = json.NewEncoder(rw).Encode(metrics)
+	writeJSON(rw, metrics)
 }
 
 func (w *Worker) handleResult(rw http.ResponseWriter, r *http.Request) {
@@ -298,15 +298,11 @@ func (w *Worker) handleResult(rw http.ResponseWriter, r *http.Request) {
 		http.Error(rw, "no result available yet", http.StatusNotFound)
 		return
 	}
-	rw.Header().Set("Content-Type", "application/json")
-	// 回應寫入失敗 = 客戶端已斷線,無可行處理
-	_ = json.NewEncoder(rw).Encode(result)
+	writeJSON(rw, result)
 }
 
 func (w *Worker) handleHealth(rw http.ResponseWriter, r *http.Request) {
-	rw.Header().Set("Content-Type", "application/json")
-	// 回應寫入失敗 = 客戶端已斷線,無可行處理
-	_ = json.NewEncoder(rw).Encode(&StatusResponse{OK: true, Message: "healthy"})
+	writeJSON(rw, &StatusResponse{OK: true, Message: "healthy"})
 }
 
 // scaleScenario scales the scenario's VU counts based on the assigned VUs.

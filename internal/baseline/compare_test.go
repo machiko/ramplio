@@ -64,7 +64,7 @@ func TestCompareToleranceJudgement(t *testing.T) {
 }
 
 func TestCompareRegressionFlagsAndDirection(t *testing.T) {
-	// 錯誤率上升與吞吐下降都是退步(方向相反的兩種指標)
+	// 錯誤率上升與吞吐下降都是退步——方向相反的兩種指標
 	before := metricsBaseline(100, 0.1, 200)
 	after := metricsBaseline(100, 5.0, 120)
 

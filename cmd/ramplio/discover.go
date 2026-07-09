@@ -166,11 +166,12 @@ func writeDiscoverReport(w io.Writer, result discover.DiscoverResult, tolerance 
 		row("安全上限：    每秒不到 5 個請求")
 	}
 
-	if result.BreakingPoint > 0 {
+	switch {
+	case result.BreakingPoint > 0:
 		row(fmt.Sprintf("臨界點：      每秒約 %d 個請求", result.BreakingPoint))
-	} else if result.Exhausted {
+	case result.Exhausted:
 		row("臨界點：      測試範圍內未觸及")
-	} else {
+	default:
 		row("臨界點：      測試已中斷")
 	}
 
