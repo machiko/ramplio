@@ -181,7 +181,7 @@ func (c *Coordinator) healthCheckWorkers(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("worker %s health check failed: %w", addr, err)
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			return fmt.Errorf("worker %s returned status %d", addr, resp.StatusCode)
 		}
@@ -249,7 +249,7 @@ func (c *Coordinator) broadcastAssign(ctx context.Context, allocation map[string
 				errCh <- fmt.Errorf("worker %s assign failed: %w", addr, err)
 				return
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			if resp.StatusCode != http.StatusOK {
 				msg, _ := io.ReadAll(resp.Body)
 				errCh <- fmt.Errorf("worker %s returned status %d: %s", addr, resp.StatusCode, string(msg))
@@ -307,7 +307,7 @@ func (c *Coordinator) pollWorkers(ctx context.Context) error {
 						mu.Unlock()
 						return
 					}
-					defer resp.Body.Close()
+					defer func() { _ = resp.Body.Close() }()
 
 					var lm LiveMetricsResponse
 					if err := json.NewDecoder(resp.Body).Decode(&lm); err != nil {
@@ -415,7 +415,7 @@ func (c *Coordinator) stopAllWorkers(ctx context.Context) error {
 				mu.Unlock()
 				return
 			}
-			resp.Body.Close()
+			_ = resp.Body.Close()
 		}(worker)
 	}
 
@@ -455,7 +455,7 @@ func (c *Coordinator) collectResults(ctx context.Context) ([]metrics.HistogramEx
 				mu.Unlock()
 				return
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 
 			if resp.StatusCode != http.StatusOK {
 				mu.Lock()

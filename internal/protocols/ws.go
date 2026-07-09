@@ -40,7 +40,7 @@ func (e *WSExecutor) Execute(ctx context.Context, req Request) Result {
 		}
 		return Result{StatusCode: status, Latency: time.Since(start), Error: err}
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	statusCode := resp.StatusCode
 	if statusCode == 0 {

@@ -24,7 +24,7 @@ func newReportCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("opening input file: %w", err)
 			}
-			defer f.Close()
+			defer func() { _ = f.Close() }() // 唯讀,close 錯誤無資料風險
 
 			r, err := reporter.ReadJSON(f)
 			if err != nil {
@@ -40,10 +40,14 @@ func newReportCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("creating output file: %w", err)
 			}
-			defer out.Close()
 
 			if err := reporter.WriteHTMLFromReport(out, r); err != nil {
+				_ = out.Close()
 				return fmt.Errorf("generating HTML report: %w", err)
+			}
+			// 寫入側的 close 錯誤 = 報告可能不完整,必須回報而非吞掉
+			if err := out.Close(); err != nil {
+				return fmt.Errorf("關閉報告檔失敗(內容可能不完整): %w", err)
 			}
 
 			fmt.Printf("✓ Report saved to %s\n", outPath)

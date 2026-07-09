@@ -38,7 +38,7 @@ func NewCsvSink(path string) (*CsvSink, error) {
 	w := csv.NewWriter(f)
 	if needHeader {
 		if err := w.Write(csvHeaders); err != nil {
-			f.Close()
+			_ = f.Close() // 已在回傳寫入錯誤,close 錯誤無額外資訊
 			return nil, err
 		}
 		w.Flush()

@@ -89,7 +89,7 @@ func (j *JaegerSource) FetchSpans(ctx context.Context, start, end time.Time) (Fe
 	if err != nil {
 		return FetchResult{}, fmt.Errorf("jaeger source: 查詢 %s 失敗: %w", j.baseURL, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))

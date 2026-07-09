@@ -134,7 +134,7 @@ func (s *InfluxSink) sendLines(lines []string) error {
 	if err != nil {
 		return fmt.Errorf("influx sink: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 300 {
 		return fmt.Errorf("influx sink: server returned %s", resp.Status)
 	}

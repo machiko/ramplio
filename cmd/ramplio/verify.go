@@ -225,7 +225,7 @@ func newVerifyCmd() *cobra.Command {
 			}
 			srv := &http.Server{Handler: newMockHandler(profile, &reqCount)}
 			go func() { _ = srv.Serve(ln) }()
-			defer srv.Close()
+			defer func() { _ = srv.Close() }()
 			url := "http://" + ln.Addr().String() + "/"
 
 			ctx, cancel := context.WithCancel(context.Background())

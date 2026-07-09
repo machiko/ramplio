@@ -57,7 +57,7 @@ func (e *HTTPExecutor) ExecuteTraced(ctx context.Context, req Request) (Result, 
 		tr.Total = time.Since(start)
 		return Result{Error: err, Latency: tr.Total}, tr
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	tr.Total = time.Since(start)

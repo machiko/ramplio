@@ -175,7 +175,10 @@ func newRunCmd() *cobra.Command {
 				if writeErr != nil {
 					fmt.Fprintf(os.Stderr, "warning: sink %q write: %v\n", dsn, writeErr)
 				}
-				_ = sink.Close()
+				// CsvSink 的 close 是寫入側(檔案可能不完整),錯誤必須可見
+				if cerr := sink.Close(); cerr != nil {
+					fmt.Fprintf(os.Stderr, "warning: sink %q close: %v\n", dsn, cerr)
+				}
 			}
 
 			if outputFile != "" {
@@ -213,7 +216,10 @@ func newRunCmd() *cobra.Command {
 					fmt.Fprintf(os.Stderr, "warning: could not create report file: %v\n", createErr)
 				} else {
 					writeErr := reporter.WriteHTML(f, sum)
-					f.Close()
+					// 寫入側 close 錯誤 = 報告可能不完整,併入警告
+					if cerr := f.Close(); writeErr == nil {
+						writeErr = cerr
+					}
 					if writeErr != nil {
 						fmt.Fprintf(os.Stderr, "warning: could not write report: %v\n", writeErr)
 					} else {
@@ -648,12 +654,17 @@ func runRPS(url, method string, targetRPS int, duration string, headers []string
 
 // saveResults writes results to path. Uses JUnit XML format for .xml files,
 // JSON for all other extensions.
-func saveResults(path string, sum metrics.Summary, scenarioName, thresholdMsg string) error {
-	f, err := os.Create(path)
-	if err != nil {
-		return err
+func saveResults(path string, sum metrics.Summary, scenarioName, thresholdMsg string) (err error) {
+	f, createErr := os.Create(path)
+	if createErr != nil {
+		return createErr
 	}
-	defer f.Close()
+	// 寫入側 close 錯誤 = 結果檔可能不完整,必須傳回而非吞掉
+	defer func() {
+		if cerr := f.Close(); cerr != nil && err == nil {
+			err = fmt.Errorf("關閉結果檔失敗(內容可能不完整): %w", cerr)
+		}
+	}()
 	if filepath.Ext(path) == ".xml" {
 		return reporter.WriteJUnit(f, sum, scenarioName, thresholdMsg)
 	}

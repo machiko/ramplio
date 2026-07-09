@@ -161,7 +161,7 @@ func (s *LokiSink) push(scenarioName string, lines []lokiLine) error {
 	if err != nil {
 		return fmt.Errorf("loki sink: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode >= 300 {
 		return fmt.Errorf("loki sink: server returned %s", resp.Status)
 	}

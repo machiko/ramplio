@@ -104,7 +104,7 @@ func (e *HTTPExecutor) Execute(ctx context.Context, req Request) Result {
 	if err != nil {
 		return Result{Error: err, Latency: time.Since(start)}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	latency := time.Since(start)

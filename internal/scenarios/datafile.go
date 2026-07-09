@@ -32,7 +32,7 @@ func loadCSV(path string) ([]map[string]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("opening CSV: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	r := csv.NewReader(f)
 	r.FieldsPerRecord = -1 // allow rows with varying column counts

@@ -274,19 +274,22 @@ func (w *Worker) handleAssign(rw http.ResponseWriter, r *http.Request) {
 	}
 
 	rw.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(rw).Encode(&StatusResponse{OK: true})
+	// 回應寫入失敗 = 客戶端已斷線,無可行處理
+	_ = json.NewEncoder(rw).Encode(&StatusResponse{OK: true})
 }
 
 func (w *Worker) handleStop(rw http.ResponseWriter, r *http.Request) {
 	w.Stop()
 	rw.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(rw).Encode(&StatusResponse{OK: true})
+	// 回應寫入失敗 = 客戶端已斷線,無可行處理
+	_ = json.NewEncoder(rw).Encode(&StatusResponse{OK: true})
 }
 
 func (w *Worker) handleLive(rw http.ResponseWriter, r *http.Request) {
 	metrics := w.GetLiveMetrics()
 	rw.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(rw).Encode(metrics)
+	// 回應寫入失敗 = 客戶端已斷線,無可行處理
+	_ = json.NewEncoder(rw).Encode(metrics)
 }
 
 func (w *Worker) handleResult(rw http.ResponseWriter, r *http.Request) {
@@ -296,12 +299,14 @@ func (w *Worker) handleResult(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rw.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(rw).Encode(result)
+	// 回應寫入失敗 = 客戶端已斷線,無可行處理
+	_ = json.NewEncoder(rw).Encode(result)
 }
 
 func (w *Worker) handleHealth(rw http.ResponseWriter, r *http.Request) {
 	rw.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(rw).Encode(&StatusResponse{OK: true, Message: "healthy"})
+	// 回應寫入失敗 = 客戶端已斷線,無可行處理
+	_ = json.NewEncoder(rw).Encode(&StatusResponse{OK: true, Message: "healthy"})
 }
 
 // scaleScenario scales the scenario's VU counts based on the assigned VUs.

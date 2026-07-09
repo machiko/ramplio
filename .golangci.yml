@@ -14,6 +14,13 @@ linters:
     - gocritic # 額外的慣用寫法建議
     - misspell # 英文拼寫錯誤
   settings:
+    errcheck:
+      # 終端/buffer 輸出的錯誤無可行處理,排除避免百餘處 `_ =` 噪音;
+      # Close 家族刻意不排除——寫入側的 close 錯誤是真風險,逐站處理。
+      exclude-functions:
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - fmt.Fprint
     govet:
       enable:
         - shadow # 變數遮蔽

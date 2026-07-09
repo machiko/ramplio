@@ -129,7 +129,7 @@ func (s *OtelSink) Write(sum metrics.Summary, scenarioName string) error {
 	if err != nil {
 		return fmt.Errorf("otel sink: 推送到 %s 失敗: %w", s.endpoint, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return fmt.Errorf("otel sink: collector 回應 %d: %s", resp.StatusCode, snippet)

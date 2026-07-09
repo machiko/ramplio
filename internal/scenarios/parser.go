@@ -47,7 +47,7 @@ func ParseFile(path string) (*Scenario, error) {
 	if err != nil {
 		return nil, fmt.Errorf("opening scenario file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	return Parse(f)
 }
 
