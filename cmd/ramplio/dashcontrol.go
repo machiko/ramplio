@@ -17,6 +17,7 @@ import (
 	"github.com/machiko/ramplio/v3/internal/discover"
 	"github.com/machiko/ramplio/v3/internal/engine"
 	"github.com/machiko/ramplio/v3/internal/metrics"
+	"github.com/machiko/ramplio/v3/internal/observe"
 	"github.com/machiko/ramplio/v3/internal/protocols"
 	"github.com/machiko/ramplio/v3/internal/reporter"
 	"github.com/machiko/ramplio/v3/internal/scenarios"
@@ -43,6 +44,12 @@ type dashController struct {
 	lastSummary          metrics.Summary
 	lastSummarySet       bool
 
+	// observeSrc 來自伺服器啟動時的 --observe(nil = 未啟用);
+	// obsRampDur/obsHoldDur 是本次 run 的觀測窗口,holdDur=0 表示不適用(非 rate 模式)。
+	observeSrc observe.TraceSource
+	obsRampDur time.Duration
+	obsHoldDur time.Duration
+
 	discoverActive     bool
 	discoverProbes     []dashboard.DiscoverProbeSnap
 	discoverResult     *dashboard.DiscoverResultSnap
@@ -52,10 +59,11 @@ type dashController struct {
 	discoverProbeSeq   []int
 }
 
-func newDashController(httpCfg protocols.HTTPConfig) *dashController {
+func newDashController(httpCfg protocols.HTTPConfig, observeSrc observe.TraceSource) *dashController {
 	return &dashController{
-		state:   dashboard.StateIdle,
-		httpCfg: httpCfg,
+		state:      dashboard.StateIdle,
+		httpCfg:    httpCfg,
+		observeSrc: observeSrc,
 	}
 }
 
@@ -254,6 +262,9 @@ func (c *dashController) Start(req dashboard.RunRequest) error {
 		ramp *engine.RampEngine
 	)
 
+	// 每次 run 重置觀測窗口;僅 rate 分支會重新設定(其他模式不適用)
+	c.obsRampDur, c.obsHoldDur = 0, 0
+
 	switch {
 	case c.scenarioMeta != nil:
 		stages := c.pendingStages
@@ -301,6 +312,8 @@ func (c *dashController) Start(req dashboard.RunRequest) error {
 		if method == "" {
 			method = http.MethodGet
 		}
+		// 觀測窗口只在 rate 模式有意義(負載輪廓提供基準/臨界窗)
+		c.obsRampDur, c.obsHoldDur = rateProfile(dur)
 		// 與 CLI 共用 rateStages:此處曾自行實作窗口數學且缺負值鉗制,
 		// 短 duration 會把負時長 stage 送進 engine。
 		stgs := rateStages(req.RPS, dur)
@@ -387,6 +400,10 @@ func (c *dashController) startGuided(p *dashboard.GuidedProfile) error {
 		return fmt.Errorf("a test is already running; stop it first")
 	}
 
+	// guided 一律不觀測:窗口若殘留上一輪 rate run 的值,
+	// 會對本輪誤觸發觀測且窗口與 guided 的 stage 配置毫無對應。
+	c.obsRampDur, c.obsHoldDur = 0, 0
+
 	col := metrics.NewCollector(plan.MaxVUs)
 	ramp := engine.NewRamp(engine.RampConfig{
 		Stages:   plan.Stages,
@@ -448,6 +465,24 @@ func (c *dashController) runLoop(
 			c.refreshSnap(col, ramp, startedAt)
 		case sum := <-sumCh:
 			c.refreshSnap(col, ramp, startedAt)
+
+			// 觀測(網路 I/O,秒級)必須在取鎖前完成,不可鎖內拉 trace。
+			// ctx 已取消 = 使用者主動 Stop:窗口是照原計畫時長推導的,
+			// 提前中止後與實際負載不符,觀測數字不可信,直接跳過——
+			// 也避免 Stop 後還卡最長 30 秒(兩窗各 15s 逾時)才進 done。
+			var obsSnap *dashboard.ObserveSnap
+			c.mu.RLock()
+			obsSrc, obsRamp, obsHold := c.observeSrc, c.obsRampDur, c.obsHoldDur
+			c.mu.RUnlock()
+			if obsSrc != nil && obsHold > 0 && ctx.Err() == nil {
+				if analysis, truncated, obsErr := fetchAndAnalyze(obsSrc, startedAt, obsRamp, obsHold); obsErr == nil {
+					snap := dashboard.ObserveSnapFrom(analysis, truncated)
+					obsSnap = &snap
+				} else {
+					fmt.Fprintf(os.Stderr, "warning: %v,結果頁略過觀測卡片\n", obsErr)
+				}
+			}
+
 			c.mu.Lock()
 			c.state = dashboard.StateDone
 			errPct := 0.0
@@ -472,6 +507,7 @@ func (c *dashController) runLoop(
 				result.GuidedVerdict = &verdict
 				c.lastProfile = nil
 			}
+			result.Observe = obsSnap
 			c.result = result
 			c.lastSummary = sum
 			c.lastSummarySet = true

@@ -692,6 +692,22 @@
     .diag-card-action   { font-size: 12px; color: var(--text); line-height: 1.6; margin-top: 4px; }
     .diag-card-action strong { color: var(--muted); font-weight: 600; }
 
+    /* 目標系統觀測（--observe trace 關聯）結果卡片 */
+    .observe-section { padding: 14px 24px 0; }
+    .observe-card {
+      padding: 12px 16px;
+      border-radius: 8px;
+      border-left: 3px solid var(--border);
+      background: var(--card);
+    }
+    .observe-card.ok           { border-left-color: var(--red); }    /* 找到瓶頸 = 需要行動 */
+    .observe-card.insufficient { border-left-color: var(--muted); }
+    .observe-card.no_culprit   { border-left-color: var(--amber); } /* 整體變慢無單點 = 疑似資源飽和 */
+    .observe-conclusion { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
+    .observe-line   { font-size: 12px; color: var(--muted); line-height: 1.6; font-variant-numeric: tabular-nums; }
+    .observe-warn   { font-size: 12px; color: var(--amber); line-height: 1.6; margin-bottom: 4px; }
+    .observe-note   { font-size: 11px; color: var(--muted); line-height: 1.6; margin-top: 6px; opacity: .8; }
+
     /* ── Result View ─────────────────────────────────── */
     .result-view {
       flex: 1;
@@ -2241,6 +2257,27 @@
       </div>
     </div>
 
+    <!-- 目標系統觀測（trace 關聯）：文案語意與 CLI renderObservation 同源 -->
+    <div v-if="finalResult?.observe" class="observe-section">
+      <div class="diag-section-title">目標系統觀測（trace 關聯）</div>
+      <div class="observe-card" :class="finalResult.observe.status">
+        <div v-if="finalResult.observe.truncated" class="observe-warn">
+          ⚠ trace 取樣達到查詢上限，樣本可能不完整——以下結論僅基於已取得的部分。
+        </div>
+        <div class="observe-conclusion">{{ obsConclusion(finalResult.observe) }}</div>
+        <div v-for="(d, i) in obsRest(finalResult.observe)" :key="i" class="observe-line">
+          其次：{{ d.operation }} {{ obsMs(d.baseline_p95_ms) }} → {{ obsMs(d.stressed_p95_ms) }}（{{ d.factor.toFixed(1) }} 倍）
+        </div>
+        <div v-if="finalResult.observe.reason" class="observe-line">{{ finalResult.observe.reason }}</div>
+        <div v-if="finalResult.observe.excluded_ops?.length" class="observe-line">
+          未納入比較：{{ finalResult.observe.excluded_ops.join('、') }}
+        </div>
+        <div class="observe-note">
+          註：基準窗取自爬升前段，若目標系統有明顯冷啟動效應，退化倍率可能被低估。
+        </div>
+      </div>
+    </div>
+
     <div class="kpi-row" style="border-top: none;">
       <div class="kpi">
         <div class="kpi-label-row">
@@ -3167,6 +3204,22 @@ createApp({
     const fmt2 = v => (v ?? 0).toFixed(2);
     const pct  = v => Math.min(Math.round((v ?? 0) * 100), 100) + '%';
 
+    // 觀測卡片文案：用語與 CLI renderObservation 同源（cmd/ramplio/observe.go），
+    // 標點依 GUI 慣例用全形。最多顯示 Top1 + 兩個其次（同 CLI 上限）。
+    const obsMs = v => (v ?? 0).toFixed(0) + 'ms';
+    const OBS_MAX_REST = 2;
+    function obsConclusion(o) {
+      if (o.status === 'insufficient') return '結論：關聯不足——trace 樣本不夠，不猜測瓶頸。';
+      if (o.status === 'no_culprit')  return '結論：未發現單點瓶頸。';
+      const t = o.top?.[0];
+      if (!t) return '';
+      return `結論：瓶頸指向 ${t.operation}——p95 從 ${obsMs(t.baseline_p95_ms)} 惡化到 ${obsMs(t.stressed_p95_ms)}（${t.factor.toFixed(1)} 倍）。`;
+    }
+    function obsRest(o) {
+      if (o.status !== 'ok' || !o.top) return [];
+      return o.top.slice(1, 1 + OBS_MAX_REST);
+    }
+
     function latClass(ms) {
       if (!ms) return 'ok';
       if (ms > 1000) return 'bad';
@@ -3359,6 +3412,7 @@ createApp({
       fmt1, fmt2, pct,
       latClass, latLabel, errClass, errLabel,
       p99Color, tailRatio, ratioClass, ratioLabel, fmtElapsed,
+      obsMs, obsConclusion, obsRest,
     };
   },
 }).mount('#app');

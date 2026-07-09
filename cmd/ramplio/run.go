@@ -21,6 +21,7 @@ import (
 	"github.com/machiko/ramplio/v3/internal/distributed"
 	"github.com/machiko/ramplio/v3/internal/engine"
 	"github.com/machiko/ramplio/v3/internal/metrics"
+	"github.com/machiko/ramplio/v3/internal/observe"
 	"github.com/machiko/ramplio/v3/internal/protocols"
 	"github.com/machiko/ramplio/v3/internal/reporter"
 	"github.com/machiko/ramplio/v3/internal/scenarios"
@@ -105,7 +106,7 @@ func newRunCmd() *cobra.Command {
 
 			// Dashboard mode: browser handles test setup and control.
 			if dashboardOn {
-				return runDashboard(url, method, vus, rps, duration, scenarioFile, dashboardPort, dashboardToken, httpCfg)
+				return runDashboard(url, method, vus, rps, duration, scenarioFile, dashboardPort, dashboardToken, httpCfg, observeDSN)
 			}
 
 			// CLI mode: --url or --scenario required.
@@ -297,8 +298,18 @@ func newRunCmd() *cobra.Command {
 // runDashboard starts the web control panel and blocks until Ctrl+C.
 // If scenarioFile is set, the scenario is loaded and displayed in the browser (user clicks Run).
 // If url is set (and no scenario), the test auto-starts immediately.
-func runDashboard(url, method string, vus, rps int, duration, scenarioFile string, port int, token string, httpCfg protocols.HTTPConfig) error {
-	ctrl := newDashController(httpCfg)
+// observeDSN 在啟動時 fail-fast 解析;rate/VU 的取捨延到每次 run 才知道
+// (由瀏覽器決定),VU 模式該次不觀測,不在此攔截。
+func runDashboard(url, method string, vus, rps int, duration, scenarioFile string, port int, token string, httpCfg protocols.HTTPConfig, observeDSN string) error {
+	var observeSrc observe.TraceSource
+	if observeDSN != "" {
+		src, err := parseObserveDSN(observeDSN)
+		if err != nil {
+			return err
+		}
+		observeSrc = src
+	}
+	ctrl := newDashController(httpCfg, observeSrc)
 	srv := dashboard.New(ctrl, port, token)
 
 	ctx, cancel := context.WithCancel(context.Background())

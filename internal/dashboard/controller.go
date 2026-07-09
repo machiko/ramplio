@@ -46,6 +46,8 @@ type RunResult struct {
 	// JSON and HTML outputs) so the browser speaks identical wording to the CLI.
 	Verdict       reporter.Interpretation `json:"verdict"`
 	GuidedVerdict *GuidedVerdict          `json:"guided_verdict,omitempty"` // set when started via guided wizard
+	// Observe 是 trace 瓶頸關聯結果(rate 模式 + 伺服器啟動時帶 --observe 才有)。
+	Observe *ObserveSnap `json:"observe,omitempty"`
 }
 
 // ScenarioMeta holds display metadata for a YAML scenario loaded via --scenario flag.

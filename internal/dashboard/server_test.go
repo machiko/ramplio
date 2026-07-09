@@ -127,6 +127,75 @@ func TestServer_WebSocket_IncludesResult(t *testing.T) {
 	assert.InDelta(t, 42.0, result["rps"], 0.01)
 }
 
+// 觀測快照必須完整通過 JSON 契約送達瀏覽器——
+// 釘住前端讀取的鍵名(status/top/excluded_ops/truncated),重構時不可默默改名。
+func TestServer_WebSocket_IncludesObserveSnap(t *testing.T) {
+	res := &dashboard.RunResult{
+		Total: 500,
+		Observe: &dashboard.ObserveSnap{
+			Status:      "ok",
+			Truncated:   true,
+			ExcludedOps: []string{"SELECT orders"},
+			Top: []dashboard.ObserveDegradation{
+				{Operation: "GET /checkout", BaselineP95Ms: 30, StressedP95Ms: 270, Factor: 9},
+			},
+		},
+	}
+	ctrl := &mockController{state: dashboard.StateDone, result: res}
+	srv, _ := newTestServer(t, ctrl)
+
+	wsURL := url.URL{Scheme: "ws", Host: srv.Addr(), Path: "/ws"}
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL.String(), nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { conn.Close() })
+
+	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	_, msg, err := conn.ReadMessage()
+	require.NoError(t, err)
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(msg, &payload))
+
+	result, ok := payload["result"].(map[string]any)
+	require.True(t, ok, "result field should be present when state is done")
+	obs, ok := result["observe"].(map[string]any)
+	require.True(t, ok, "observe snapshot should ride along with the result")
+	assert.Equal(t, "ok", obs["status"])
+	assert.Equal(t, true, obs["truncated"])
+	assert.Equal(t, []any{"SELECT orders"}, obs["excluded_ops"])
+	top, ok := obs["top"].([]any)
+	require.True(t, ok, "top degradations should be present")
+	require.Len(t, top, 1)
+	first := top[0].(map[string]any)
+	assert.Equal(t, "GET /checkout", first["operation"])
+	assert.InDelta(t, 9.0, first["factor"], 0.001)
+}
+
+// 未啟用觀測時 observe 鍵必須缺席(omitempty)——卡片以「缺席」表達未啟用,
+// 空物件會被前端誤判為有資料。
+func TestServer_WebSocket_OmitsObserveWhenNil(t *testing.T) {
+	res := &dashboard.RunResult{Total: 500}
+	ctrl := &mockController{state: dashboard.StateDone, result: res}
+	srv, _ := newTestServer(t, ctrl)
+
+	wsURL := url.URL{Scheme: "ws", Host: srv.Addr(), Path: "/ws"}
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL.String(), nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { conn.Close() })
+
+	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	_, msg, err := conn.ReadMessage()
+	require.NoError(t, err)
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(msg, &payload))
+
+	result, ok := payload["result"].(map[string]any)
+	require.True(t, ok)
+	_, present := result["observe"]
+	assert.False(t, present, "observe 未啟用時不應出現在 JSON")
+}
+
 func TestServer_MultipleClients(t *testing.T) {
 	ctrl := &mockController{snap: reporter.LiveSnapshot{Total: 1}}
 	srv, _ := newTestServer(t, ctrl)
