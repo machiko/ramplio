@@ -777,6 +777,7 @@ func scenarioStepsToRamp(steps []scenarios.Step) []engine.RampStep {
 			Pause:      s.Pause,
 			Group:      s.Group,
 			Protocol:   s.Protocol,
+			WSMode:     s.WSMode,
 			If:         s.If,
 			Loop:       s.Loop,
 		}

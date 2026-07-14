@@ -88,8 +88,11 @@ func ClassifyError(err error, statusCode int) ErrorKind {
 			return ErrKindHTTP4xx
 		case statusCode >= 200 && statusCode < 300:
 			return ErrKindNone
+		case statusCode == 101:
+			// WebSocket 握手成功;isError() 對 101 豁免,分類須一致。
+			return ErrKindNone
 		default:
-			// 1xx / 3xx counted as errors by isError() but with no transport error.
+			// 其餘 1xx / 3xx counted as errors by isError() but with no transport error.
 			return ErrKindOther
 		}
 	}

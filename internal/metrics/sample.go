@@ -20,5 +20,13 @@ type Sample struct {
 }
 
 func (s Sample) isError() bool {
-	return s.Error != nil || s.StatusCode < 200 || s.StatusCode >= 300
+	if s.Error != nil {
+		return true
+	}
+	// 101 Switching Protocols 是 WebSocket 握手成功(WSExecutor 回報),
+	// 是「非 2xx」規則的唯一豁免;其餘 1xx/3xx 維持計為錯誤。
+	if s.StatusCode == 101 {
+		return false
+	}
+	return s.StatusCode < 200 || s.StatusCode >= 300
 }

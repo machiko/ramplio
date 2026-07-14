@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -17,6 +18,13 @@ func Parse(r io.Reader) (*Scenario, error) {
 	dec.KnownFields(true)
 	if err := dec.Decode(&sc); err != nil {
 		return nil, fmt.Errorf("decoding scenario: %w", err)
+	}
+	// Protocol 在解析期正規化為小寫:下游(engine stepExecutor)一律嚴格
+	// 比對,`protocol: WebSocket` 若不正規化會被靜默當 HTTP 執行。
+	for _, steps := range [][]Step{sc.Steps, sc.Setup, sc.Teardown} {
+		for i := range steps {
+			steps[i].Protocol = strings.ToLower(steps[i].Protocol)
+		}
 	}
 	if err := validate(&sc); err != nil {
 		return nil, err
@@ -88,6 +96,15 @@ func validate(sc *Scenario) error {
 		}
 		if step.Method == "" {
 			return fmt.Errorf("step %d (%q): method is required", i, step.Name)
+		}
+		// ws_mode 是設定錯誤,必須在解析期擋下,不浪費一輪壓測。
+		switch step.WSMode {
+		case "", "per_request", "persistent":
+		default:
+			return fmt.Errorf("step %d (%q): ws_mode 必須是 per_request 或 persistent,得到 %q", i, step.Name, step.WSMode)
+		}
+		if step.WSMode != "" && !strings.EqualFold(step.Protocol, "websocket") {
+			return fmt.Errorf("step %d (%q): ws_mode 僅適用於 protocol: websocket 的步驟", i, step.Name)
 		}
 	}
 	return nil

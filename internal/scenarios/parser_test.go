@@ -186,3 +186,80 @@ steps:
 	assert.True(t, sc.Steps[0].Assertions.Status.Match(204))
 	assert.False(t, sc.Steps[0].Assertions.Status.Match(404))
 }
+
+// ws_mode 宣告持久連線;僅 websocket 步驟可用,非法值必須在解析期擋下
+// (執行期才發現設定錯誤會浪費一輪壓測)。
+func TestParse_WSModePersistent(t *testing.T) {
+	yaml := `
+name: ws persistent
+stages:
+  - duration: 10s
+    target: 2
+steps:
+  - name: ws echo
+    method: GET
+    url: ws://localhost:8080/echo
+    protocol: websocket
+    ws_mode: persistent
+    ws_message: ping
+`
+	sc, err := scenarios.Parse(strings.NewReader(yaml))
+	require.NoError(t, err)
+	assert.Equal(t, "persistent", sc.Steps[0].WSMode)
+}
+
+func TestParse_WSModeRejectsUnknownValue(t *testing.T) {
+	yaml := `
+name: bad ws mode
+stages:
+  - duration: 10s
+    target: 1
+steps:
+  - name: ws echo
+    method: GET
+    url: ws://localhost:8080/echo
+    protocol: websocket
+    ws_mode: pooled
+`
+	_, err := scenarios.Parse(strings.NewReader(yaml))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ws_mode")
+}
+
+func TestParse_WSModeRejectsNonWebsocketStep(t *testing.T) {
+	yaml := `
+name: ws mode on http
+stages:
+  - duration: 10s
+    target: 1
+steps:
+  - name: plain http
+    method: GET
+    url: https://example.com/
+    ws_mode: persistent
+`
+	_, err := scenarios.Parse(strings.NewReader(yaml))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "ws_mode")
+}
+
+// 審查關發現(MEDIUM):解析期用 EqualFold 驗證、引擎執行期嚴格比對——
+// `protocol: WebSocket` 會通過驗證卻被引擎當 HTTP 執行。
+// 解析期正規化為小寫,讓下游一律嚴格比對。
+func TestParse_ProtocolNormalizedToLower(t *testing.T) {
+	yaml := `
+name: mixed case protocol
+stages:
+  - duration: 10s
+    target: 1
+steps:
+  - name: ws echo
+    method: GET
+    url: ws://localhost:8080/echo
+    protocol: WebSocket
+    ws_mode: persistent
+`
+	sc, err := scenarios.Parse(strings.NewReader(yaml))
+	require.NoError(t, err)
+	assert.Equal(t, "websocket", sc.Steps[0].Protocol, "Protocol 應正規化為小寫")
+}

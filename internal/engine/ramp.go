@@ -36,6 +36,9 @@ type RampStep struct {
 	Pause    time.Duration
 	Group    string // optional group name for aggregate reporting
 	Protocol string // "http" (default) or "websocket"
+	// WSMode is the websocket connection strategy: "" / "per_request" opens a
+	// fresh connection per exchange; "persistent" reuses one per VU lifetime.
+	WSMode string
 	// If is evaluated before executing; the step is skipped when false.
 	If   string
 	Loop int // 0/1 = once, N = repeat N times per VU iteration
@@ -660,6 +663,15 @@ func (e *RampEngine) runVU(ctx context.Context) {
 		sessionExec = h.NewSession()
 	}
 
+	// ws_mode: persistent 的 per-VU 連線持有者(比照 HTTP cookie jar 的
+	// session 先例)。注入的假執行器沒有連線概念,wsSession 維持 nil,
+	// stepExecutor 自然退回逐請求呼叫。VU 結束時關閉全部連線。
+	var wsSession *protocols.WSSession
+	if w, ok := e.wsBase().(*protocols.WSExecutor); ok {
+		wsSession = w.NewSession()
+		defer func() { _ = wsSession.Close() }()
+	}
+
 	varCtx := e.newVarContext()
 
 	for {
@@ -693,7 +705,7 @@ func (e *RampEngine) runVU(ctx context.Context) {
 				repeat = 1
 			}
 
-			exec := e.stepExecutor(step, sessionExec)
+			exec := e.stepExecutor(step, sessionExec, wsSession)
 
 			for r := 0; r < repeat; r++ {
 				select {
@@ -767,15 +779,25 @@ func (e *RampEngine) newVarContext() *scenarios.VarContext {
 	return ctx
 }
 
+// wsBase returns the configured websocket executor (a real one by default).
+func (e *RampEngine) wsBase() protocols.Executor {
+	if e.cfg.WSExecutor != nil {
+		return e.cfg.WSExecutor
+	}
+	return protocols.NewWSExecutor()
+}
+
 // stepExecutor returns the correct executor for a step (protocol + retry wrapper).
 // sessionExec is the HTTP session executor for the current VU; pass e.cfg.Executor for rate mode.
-func (e *RampEngine) stepExecutor(step RampStep, sessionExec protocols.Executor) protocols.Executor {
+// wsSession is the VU's persistent websocket session (nil outside a VU loop or
+// when the websocket executor is a test double) — used only for ws_mode: persistent.
+func (e *RampEngine) stepExecutor(step RampStep, sessionExec protocols.Executor, wsSession *protocols.WSSession) protocols.Executor {
 	var base protocols.Executor
 	if step.Protocol == "websocket" {
-		if e.cfg.WSExecutor != nil {
-			base = e.cfg.WSExecutor
+		if step.WSMode == "persistent" && wsSession != nil {
+			base = wsSession
 		} else {
-			base = protocols.NewWSExecutor()
+			base = e.wsBase()
 		}
 	} else {
 		base = sessionExec
@@ -787,8 +809,9 @@ func (e *RampEngine) stepExecutor(step RampStep, sessionExec protocols.Executor)
 }
 
 // pickExecutor selects the executor for a step without a session (setup/teardown/rate mode).
+// persistent websocket 在此不適用:這些路徑沒有 VU 生命週期可以承載連線。
 func (e *RampEngine) pickExecutor(step RampStep) protocols.Executor {
-	return e.stepExecutor(step, e.cfg.Executor)
+	return e.stepExecutor(step, e.cfg.Executor, nil)
 }
 
 // executeSingleStep runs a step once; used by setup and teardown.

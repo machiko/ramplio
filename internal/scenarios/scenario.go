@@ -114,6 +114,10 @@ type Step struct {
 	Protocol  string `yaml:"protocol,omitempty"`
 	WSMessage string `yaml:"ws_message,omitempty"` // text frame to send (websocket only)
 	WSExpect  string `yaml:"ws_expect,omitempty"`  // substring the server response must contain
+	// WSMode selects the connection strategy for websocket steps:
+	// "per_request" (default) opens a fresh connection per exchange;
+	// "persistent" reuses one connection per VU for the VU's lifetime.
+	WSMode string `yaml:"ws_mode,omitempty"`
 
 	// If is a template expression; the step is skipped when it evaluates to false.
 	// Supported forms: `{{capture.X}} == ""`, `{{capture.X}} != ""`, `{{capture.X}} == "value"`

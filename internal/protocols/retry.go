@@ -54,6 +54,12 @@ func (r *RetryingExecutor) shouldRetry(res Result) bool {
 		return true
 	}
 	if len(r.onCodes) == 0 {
+		// 101 是 WS 握手成功,與 metrics 的 isError()/ClassifyError 同一豁免——
+		// 「非 2xx = 失敗」規則的三個複製點必須同步,否則成功的 WS exchange
+		// 會被當失敗假重試。
+		if res.StatusCode == 101 {
+			return false
+		}
 		return res.StatusCode < 200 || res.StatusCode >= 300
 	}
 	return r.onCodes[res.StatusCode]

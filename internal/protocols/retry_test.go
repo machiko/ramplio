@@ -142,3 +142,17 @@ func TestRetryingExecutorContextCancelDuringBackoff(t *testing.T) {
 	assert.Equal(t, 503, got.StatusCode, "應回傳取消前的最後結果")
 	assert.Less(t, elapsed, time.Second, "不應等滿 5s backoff")
 }
+
+// 審查關發現(HIGH):101 是 WS 握手成功,retry 的「非 2xx 需重試」規則
+// 是 isError()/ClassifyError 之外的第三個複製點,漏了豁免會讓每次
+// 成功的 WS exchange 都被多打 N 次假重試。
+func TestRetryingExecutorDoesNotRetryWS101(t *testing.T) {
+	stub := &scriptedExecutor{results: []Result{{StatusCode: 101}}}
+	rex := NewRetryingExecutor(stub, 3, nil, 0)
+
+	res := rex.Execute(context.Background(), Request{})
+
+	assert.NoError(t, res.Error)
+	assert.Equal(t, 101, res.StatusCode)
+	assert.Equal(t, 1, stub.calls, "成功的 WS exchange 不應觸發任何重試")
+}

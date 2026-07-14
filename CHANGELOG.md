@@ -5,6 +5,20 @@ Ramplio 的所有重要變更都記錄於此。
 
 ---
 
+## [Unreleased]
+
+### 新增
+- **WebSocket 持久連線模式**: 場景步驟可宣告 `ws_mode: persistent`,同一 VU 生命週期內重用連線(比照 HTTP per-VU cookie jar 的 session 設計)。本地 A/B 實測單次 exchange ~180µs → ~24µs(去除逐次握手成本),並避免高速率下的 ephemeral port 耗盡。斷線以錯誤如實回報並於下次 exchange 自動重撥;`ws_expect` 不符屬應用層失敗,不棄置健康連線。預設 `per_request` 行為不變。
+
+### 修正
+- **WebSocket 101 誤判為錯誤**: 指標層「非 2xx = 錯誤」規則誤傷 WS 握手成功的 101(Switching Protocols),導致 WebSocket 步驟錯誤率恆為 100%。101 現豁免並在錯誤分類中歸為正常;其餘 1xx/3xx 維持原判定。
+- **WebSocket 步驟配 retry 會假重試**: 同一「非 2xx」規則在 retry 判定中的複製點也誤傷 101——成功的 WS exchange 被當失敗多打 N 次。三個複製點(錯誤判定/錯誤分類/重試判定)已同步豁免。
+- **WebSocket 斷線誤分類為「斷言失敗」**: 握手成功後的傳輸失敗保留 101 狀態碼,使錯誤分類誤判為斷言失敗;現歸零狀態碼走連線層分類,斷線的診斷方向不再誤導。
+- **WebSocket 阻塞讀寫不可中斷**: 對端握手後沉默(黑洞/掛起)會讓 VU 永久卡住、測試無法收工;現於 ctx 取消時主動關閉連線中斷阻塞 I/O。
+- **`protocol` 欄位大小寫不一致**: `protocol: WebSocket` 會通過驗證卻被引擎靜默當 HTTP 執行;解析期正規化為小寫。
+
+---
+
 ## [v3.1.0] — v3 能力在 dashboard 被看見 (2026-07-09)
 
 ### 新增

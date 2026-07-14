@@ -65,3 +65,13 @@ func TestSummary_RPS(t *testing.T) {
 
 	assert.InDelta(t, 50.0, s.RPS(), 0.001)
 }
+
+// 101 是 WebSocket 握手成功的狀態碼(WSExecutor 回報 Switching Protocols),
+// 不可被「非 2xx = 錯誤」誤傷——否則 WS 步驟的錯誤率恆為 100%。
+func TestSummary_WebSocket101IsNotError(t *testing.T) {
+	var s Summary
+	s.record(Sample{Latency: 10 * time.Millisecond, StatusCode: 101})
+
+	assert.Equal(t, int64(1), s.Total)
+	assert.Equal(t, int64(0), s.Errors, "101(WS 握手成功)不應計為錯誤")
+}

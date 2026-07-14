@@ -96,6 +96,37 @@ steps:
       status: 201
 ```
 
+### WebSocket steps
+
+Set `protocol: websocket` to exchange one text frame per step execution
+(send `ws_message`, read one frame back). The handshake success status is
+reported as `101` and is not counted as an error.
+
+```yaml
+steps:
+  - name: ws echo
+    method: GET
+    url: ws://localhost:8080/echo
+    protocol: websocket
+    ws_message: ping          # text frame to send
+    ws_expect: pong           # substring the reply must contain
+    ws_mode: persistent       # connection strategy (see below)
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `protocol` | string | no | `http` (default) or `websocket`. |
+| `ws_message` | string | no | Text frame sent after the handshake. Falls back to `body` when both set. |
+| `ws_expect` | string | no | The reply must contain this substring, otherwise the step counts as an error. |
+| `ws_mode` | string | no | `per_request` (default) opens a fresh connection per exchange; `persistent` reuses one connection per VU for the VU's lifetime. |
+
+`ws_mode: persistent` removes the per-exchange handshake cost (locally measured
+~180µs → ~24µs per exchange) and avoids ephemeral-port exhaustion under high
+rates. A dropped connection surfaces as an error for that exchange — it is a
+real event the test should record — and the next exchange redials automatically.
+`ws_expect` mismatches keep the (healthy) connection open. Setup/teardown steps
+always use per-request connections: they run once and have no VU lifetime.
+
 ---
 
 ## Capture

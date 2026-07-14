@@ -103,7 +103,6 @@
 | 優先度 | 項目 | 位置 |
 |--------|------|------|
 | MED | `dashboard/controller.go` 與 `dashcontrol.go` 職責重疊 | 兩者 |
-| MED | WebSocket 每次請求開新連線（無持久連線）| protocols/ws.go |
 | LOW | HTML 報告無互動圖表 | reporter/html.go |
 | LOW | Setup 步驟執行結果不計入指標 | engine/ramp.go |
 | LOW | RetryExecutor 只支援固定 backoff（無指數退避/jitter）| protocols/retry.go |
@@ -116,6 +115,7 @@
 > 鞏固設計+透明度（P2，2026-06-22）：~~runRate worker = maxRPS×5 記憶體壓力~~（改 **grow-on-demand**：`ratePool` idle/total/capHit，dispatcher 送前 `maybeGrow`，低延遲目標只生 ~需求量，達 cap 才阻塞——完整保留 CO 背壓語義；CO 回歸測試全綠）、~~assertion 失敗不觸發 retry 疑似漏洞~~（**釐清為刻意設計**：assertion 失敗代表真實缺陷，retry 會掩蓋並虛低錯誤率，比照 k6/Gatling 不 retry；補 `assertion_retry_test.go` 回歸守 + ramp.go 意圖註解）。新增透明度：`Summary.GeneratorWorkerCapHit` → rate 達 worker 上限時，「量測可信度」判語標示「產生器自身可能是瓶頸」，避免假性 overload 被誤歸因於目標。
 > 已解決（Phase 5）：~~分散式僅明文 HTTP / 無 TLS~~（worker `ListenAndServeTLS` + coordinator scheme-aware URL 與可注入 TLS client；CLI `--tls-cert/--tls-key/--tls-ca/--tls-skip-verify`）、~~PollIntervalMs/AssignTimeoutSec 未生效~~（coordinator `SetTiming` + CLI `--poll-interval/--assign-timeout`，config helper）。
 > 已解決（v3.0，2026-07-08）：~~版本公信力三支柱缺口~~——(1) **容量回歸守門**(`internal/baseline` 快照+雙門檻 compare、`--save-baseline`/`compare` 命令);(2) **APM 瓶頸關聯**(`internal/observe` Jaeger 後端+慢 span 歸因引擎、`--observe`、opt-in `--trace-context` W3C traceparent 注入);(3) **可觀測性匯出**(`sink_otel.go` OTLP/HTTP);(4) **一鍵量測自證**(`verify` 命令對已知分佈斷言百分位)。module path 升 `/v3`、golangci 遷 v2 格式、CI 收斂為單一 test workflow。
+> 已解決（td-1，2026-07-14）：~~WebSocket 每次請求開新連線~~（`ws_mode: persistent`:per-VU `WSSession` 比照 HTTP cookie jar session 先例,連線 keyed by URL、傳輸錯誤如實回報並棄連重撥、`ws_expect` 不符保留健康連線;A/B 實測單次 exchange ~180µs→~24µs、alloc 126→5）。**附帶修正既有 bug**:~~WS 101 被「非 2xx=錯誤」誤判~~——WebSocket 步驟錯誤率恆 100%,`isError()`/`ClassifyError` 對 101 豁免。
 > 已解決（v3.1，2026-07-09）：~~單機 `runScenario` 非 TTY 提早結束~~（比照分散式：非 TTY 或 `--no-tui` 走 `runHeadlessProgress`，整合測試以 go test 的 pipe stdout 直接重現並驗證跑滿）；新增 **Tempo trace 後端**(`tempo.go`,spanSets 契約修正+spss 欠採樣可見化)、**`--strict-trust`**(不可信量測在 CI 視同失敗)、**dashboard 觀測/比較卡片**(observe_snap/compare_snap,GUI 呈現瓶頸關聯與容量回歸);rate 三階段組裝收斂單一來源(`rateprofile.go`)消除 dashboard 負時長風險;lint 債清零(errcheck 129→0、其餘 110→0)。
 
 ---
@@ -181,7 +181,7 @@
 - ✅ **分散式 headless 輸出** — `run --worker` 在非 TTY（CI/pipe）或 `--no-tui` 時改印進度行；修正分散式 run 在 pipeline 中提早結束的問題，並讓整個分散式流程可透過 CLI 端到端完成
 
 **Phase 7+ — 功能擴張（未做）**
-1. **WebSocket 持久連線模式**（MED，中）— `ws_mode: persistent`，VU 生命週期內保持連線
+1. ~~**WebSocket 持久連線模式**（MED，中）~~ — ✅ 已完成（td-1，2026-07-14）
 2. **gRPC 協定支援**（MED，大）— `protocols/grpc.go` + .proto 載入
 3. ~~**單機 headless**（LOW，小）~~ — ✅ 已完成（v3.1）
 4. **Test Suite（多場景串接）**（LOW，中）

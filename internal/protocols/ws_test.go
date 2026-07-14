@@ -158,7 +158,10 @@ func TestWSExecutorServerClosesWithoutReply(t *testing.T) {
 	res := NewWSExecutor().Execute(context.Background(), Request{URL: wsURL(srv)})
 
 	require.Error(t, res.Error, "讀不到回覆訊息應回報錯誤")
-	assert.Equal(t, 101, res.StatusCode, "握手已成功,狀態碼保留 101")
+	// 審查關裁決:握手後的傳輸失敗回報 status 0——executor 契約以
+	// 「status>0 = 回應已完整到達」區分斷言失敗與連線層失敗,保留 101
+	// 會讓 ClassifyError 把真正的斷線誤分類為「斷言失敗」誤導診斷。
+	assert.Equal(t, 0, res.StatusCode, "exchange 未完成一輪,狀態碼應歸零走連線層分類")
 }
 
 func TestWSExpectErrorMessage(t *testing.T) {
