@@ -1,21 +1,17 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/machiko/ramplio/v3/internal/baseline"
 	"github.com/machiko/ramplio/v3/internal/dashboard"
-	"github.com/machiko/ramplio/v3/internal/discover"
 	"github.com/machiko/ramplio/v3/internal/engine"
 	"github.com/machiko/ramplio/v3/internal/metrics"
 	"github.com/machiko/ramplio/v3/internal/observe"
@@ -26,6 +22,13 @@ import (
 
 // dashController implements dashboard.Controller, managing the load test lifecycle
 // for tests triggered from the web UI or pre-started from CLI flags.
+//
+// 職責界線(td-2 收斂):internal/dashboard 只負責傳輸(HTTP/WS/JSON 契約)
+// 與快照型別;engine 編排一律在 cmd 層的 dashController。本型別依職責拆檔:
+//   - dashcontrol.go           run 生命週期(Start/Stop/runLoop/快照)
+//   - dashcontrol_scenario.go  場景載入(轉換與 CLI 單一來源)
+//   - dashcontrol_baseline.go  基準比較的保存與查詢
+//   - dashcontrol_discover.go  容量探測生命週期
 type dashController struct {
 	mu                   sync.RWMutex
 	state                dashboard.State
@@ -74,140 +77,10 @@ func newDashController(httpCfg protocols.HTTPConfig, observeSrc observe.TraceSou
 	}
 }
 
-// setScenario loads a YAML scenario into the controller so the browser can display
-// its metadata and start it by sending POST /api/run with an empty body.
-func (c *dashController) setScenario(
-	meta *dashboard.ScenarioMeta,
-	steps, setupSteps, teardownSteps []engine.RampStep,
-	stages []scenarios.Stage,
-	vars map[string]string,
-	dataRows []map[string]string,
-	dataMode string,
-) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.scenarioMeta = meta
-	c.pendingSteps = steps
-	c.pendingSetupSteps = setupSteps
-	c.pendingTeardownSteps = teardownSteps
-	c.pendingStages = stages
-	c.pendingVars = vars
-	c.pendingDataRows = dataRows
-	c.pendingDataMode = dataMode
-}
-
 func (c *dashController) ActiveGuidedProfile() *dashboard.GuidedProfile {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.lastProfile
-}
-
-func (c *dashController) ScenarioInfo() *dashboard.ScenarioMeta {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.scenarioMeta
-}
-
-// LoadScenario parses raw YAML and replaces the active scenario. Rejected while
-// a test is running so the browser always sees a consistent state.
-// scenarioDir is used to resolve relative paths in vars_from; pass "" to use cwd.
-func (c *dashController) LoadScenario(yaml []byte, scenarioDir string) error {
-	c.mu.RLock()
-	running := c.state == dashboard.StateRunning
-	c.mu.RUnlock()
-	if running {
-		return fmt.Errorf("cannot load scenario while a test is running; stop it first")
-	}
-
-	sc, err := scenarios.Parse(bytes.NewReader(yaml))
-	if err != nil {
-		return fmt.Errorf("invalid scenario YAML: %w", err)
-	}
-
-	steps, stepNames := buildStepsFromScenario(sc)
-	setupSteps, _ := buildStepsFromScenario(&scenarios.Scenario{Steps: sc.Setup})
-	teardownSteps, _ := buildStepsFromScenario(&scenarios.Scenario{Steps: sc.Teardown})
-
-	var dataRows []map[string]string
-	var dataMode string
-	if sc.VarsFrom != nil && sc.VarsFrom.File != "" {
-		dataFile := sc.VarsFrom.File
-		if !filepath.IsAbs(dataFile) {
-			base := scenarioDir
-			if base == "" {
-				base, _ = os.Getwd()
-			}
-			dataFile = filepath.Join(base, dataFile)
-		}
-		rows, err := scenarios.LoadDataFile(dataFile)
-		if err != nil {
-			return fmt.Errorf("loading data file %q: %w", sc.VarsFrom.File, err)
-		}
-		dataRows = rows
-		dataMode = sc.VarsFrom.Mode
-	}
-
-	maxVUs := maxTarget(sc.Stages)
-	var totalSec float64
-	for _, stg := range sc.Stages {
-		totalSec += stg.Duration.Seconds()
-	}
-	meta := &dashboard.ScenarioMeta{
-		Name:          sc.Name,
-		StepNames:     stepNames,
-		MaxVUs:        maxVUs,
-		TotalSec:      totalSec,
-		StageCount:    len(sc.Stages),
-		SetupCount:    len(sc.Setup),
-		TeardownCount: len(sc.Teardown),
-	}
-	c.setScenario(meta, steps, setupSteps, teardownSteps, sc.Stages, sc.Vars, dataRows, dataMode)
-	return nil
-}
-
-func buildStepsFromScenario(sc *scenarios.Scenario) ([]engine.RampStep, []string) {
-	steps := make([]engine.RampStep, len(sc.Steps))
-	names := make([]string, len(sc.Steps))
-	for i, s := range sc.Steps {
-		name := s.Name
-		if name == "" {
-			name = strings.ToUpper(s.Method) + " " + s.URL
-		}
-		steps[i] = engine.RampStep{
-			Name: name,
-			Request: protocols.Request{
-				Method:  strings.ToUpper(s.Method),
-				URL:     s.URL,
-				Headers: s.Headers,
-				Body:    []byte(s.Body),
-			},
-			Assertions: s.Assertions,
-			Auth:       s.Auth,
-			Capture:    s.Capture,
-			Pause:      s.Pause,
-			Retry:      s.Retry,
-			Group:      s.Group,
-			Protocol:   s.Protocol,
-			If:         s.If,
-			Loop:       s.Loop,
-		}
-		if s.Capture != nil {
-			compiled := make(map[string]*regexp.Regexp)
-			for _, expr := range s.Capture.Values {
-				if strings.HasPrefix(expr, "regex:") {
-					pattern := strings.TrimPrefix(expr, "regex:")
-					if re, err := regexp.Compile(pattern); err == nil {
-						compiled[pattern] = re
-					}
-				}
-			}
-			if len(compiled) > 0 {
-				steps[i].CompiledRegexes = compiled
-			}
-		}
-		names[i] = name
-	}
-	return steps, names
 }
 
 func (c *dashController) Snapshot() reporter.LiveSnapshot {
@@ -226,37 +99,6 @@ func (c *dashController) Result() *dashboard.RunResult {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.result
-}
-
-// LoadBaseline 解析上傳的基準並保存供 run 結束後比較。
-// 壞資料大聲失敗,且不覆蓋既有的合法基準。
-func (c *dashController) LoadBaseline(raw []byte) (dashboard.BaselineInfo, error) {
-	b, err := baseline.Parse(raw)
-	if err != nil {
-		return dashboard.BaselineInfo{}, err
-	}
-	c.mu.Lock()
-	c.pendingBaseline = &b
-	c.mu.Unlock()
-	return dashboard.BaselineInfoFrom(b), nil
-}
-
-// ClearBaseline 移除已載入的基準,之後的 run 不再比較。
-func (c *dashController) ClearBaseline() {
-	c.mu.Lock()
-	c.pendingBaseline = nil
-	c.mu.Unlock()
-}
-
-// BaselineMeta 回傳已載入基準的摘要;nil 表示未載入。
-func (c *dashController) BaselineMeta() *dashboard.BaselineInfo {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	if c.pendingBaseline == nil {
-		return nil
-	}
-	info := dashboard.BaselineInfoFrom(*c.pendingBaseline)
-	return &info
 }
 
 func (c *dashController) Stop() {
@@ -597,118 +439,6 @@ func (c *dashController) WriteReport(w io.Writer) error {
 		return fmt.Errorf("no completed test run")
 	}
 	return reporter.WriteHTML(w, sum)
-}
-
-func (c *dashController) StartDiscover(req dashboard.DiscoverRequest) error {
-	if req.URL == "" {
-		return fmt.Errorf("url is required")
-	}
-	tol := 2 * time.Second
-	if req.Tolerance != "" {
-		var err error
-		tol, err = time.ParseDuration(req.Tolerance)
-		if err != nil {
-			return fmt.Errorf("invalid tolerance %q", req.Tolerance)
-		}
-	}
-	pd := 15 * time.Second
-	if req.ProbeDuration != "" {
-		var err error
-		pd, err = time.ParseDuration(req.ProbeDuration)
-		if err != nil {
-			return fmt.Errorf("invalid probe_duration %q", req.ProbeDuration)
-		}
-	}
-	maxRPS := req.MaxRPS
-	if maxRPS <= 0 {
-		maxRPS = 500
-	}
-
-	c.mu.Lock()
-	if c.state == dashboard.StateRunning {
-		c.mu.Unlock()
-		return fmt.Errorf("a test is already running; stop it first")
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	c.cancel = cancel
-	c.state = dashboard.StateRunning
-	c.result = nil
-	c.discoverActive = true
-	c.discoverProbes = nil
-	c.discoverResult = nil
-	c.mu.Unlock()
-
-	go c.runDiscover(ctx, req.URL, tol, maxRPS, pd)
-	return nil
-}
-
-func (c *dashController) runDiscover(ctx context.Context, url string, tol time.Duration, maxRPS int, pd time.Duration) {
-	cfg := discover.Config{
-		URL:           url,
-		Tolerance:     tol,
-		MaxRPS:        maxRPS,
-		ProbeDuration: pd,
-		HTTPConfig:    c.httpCfg,
-	}
-
-	probeSeq := discover.ProbeSequence(maxRPS)
-	c.mu.Lock()
-	c.discoverProbeSeq = probeSeq
-	c.discoverProbeDur = pd
-	c.mu.Unlock()
-
-	prober := discover.New(cfg)
-	result := prober.Run(ctx,
-		func(rps int) {
-			c.mu.Lock()
-			c.discoverCurrentRPS = rps
-			c.discoverProbeStart = time.Now()
-			c.mu.Unlock()
-		},
-		func(pr discover.ProbeResult) {
-			status := "pass"
-			switch pr.Status {
-			case discover.ProbeWarn:
-				status = "warn"
-			case discover.ProbeFail:
-				status = "fail"
-			}
-			snap := dashboard.DiscoverProbeSnap{
-				RPS:      pr.RPS,
-				P99Ms:    pr.P99.Milliseconds(),
-				ErrorPct: pr.ErrorRate,
-				Status:   status,
-			}
-			c.mu.Lock()
-			c.discoverProbes = append(c.discoverProbes, snap)
-			c.discoverCurrentRPS = 0
-			c.mu.Unlock()
-		},
-	)
-
-	discResult := &dashboard.DiscoverResultSnap{
-		SafeLimit:     result.SafeLimit,
-		BreakingPoint: result.BreakingPoint,
-		Exhausted:     result.Exhausted,
-	}
-	c.mu.Lock()
-	c.state = dashboard.StateDone
-	c.discoverResult = discResult
-	c.mu.Unlock()
-}
-
-func (c *dashController) DiscoverProgress() ([]dashboard.DiscoverProbeSnap, *dashboard.DiscoverResultSnap, *dashboard.DiscoverCurrentSnap, []int, bool) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	var cur *dashboard.DiscoverCurrentSnap
-	if c.discoverCurrentRPS > 0 {
-		cur = &dashboard.DiscoverCurrentSnap{
-			RPS:             c.discoverCurrentRPS,
-			ElapsedMs:       time.Since(c.discoverProbeStart).Milliseconds(),
-			ProbeDurationMs: c.discoverProbeDur.Milliseconds(),
-		}
-	}
-	return c.discoverProbes, c.discoverResult, cur, c.discoverProbeSeq, c.discoverActive
 }
 
 func (c *dashController) refreshSnap(col *metrics.Collector, ramp *engine.RampEngine, startedAt time.Time) {

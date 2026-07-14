@@ -1,3 +1,7 @@
+// Package dashboard 只負責傳輸——HTTP/WS 端點、JSON 契約與 GUI 快照型別
+// (*_snap.go 與 guided.go 的轉換皆屬呈現層)。engine 編排(啟動/停止/
+// 觀測/比較的執行)一律在 cmd 層的 dashController,透過 Controller 介面
+// 注入;本套件不得 import engine(td-2 職責界線)。
 package dashboard
 
 import (
