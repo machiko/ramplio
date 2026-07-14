@@ -68,7 +68,7 @@ func TestTempoSourceFetchSpans(t *testing.T) {
 	}
 
 	// 查詢契約:unix 秒、TraceQL service 過濾、limit 與 spss 皆顯式
-	//(Tempo 的 spss 預設僅 3,壓測場景會系統性欠採樣)
+	// (Tempo 的 spss 預設僅 3,壓測場景會系統性欠採樣)
 	if (*captured)["path"] != "/api/search" {
 		t.Fatalf("應查 /api/search,實際 %q", (*captured)["path"])
 	}

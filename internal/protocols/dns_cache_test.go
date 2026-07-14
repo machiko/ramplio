@@ -18,8 +18,8 @@ func newTCPListener(t *testing.T) (host, port string) {
 	t.Cleanup(func() { _ = ln.Close() })
 	go func() {
 		for {
-			conn, err := ln.Accept()
-			if err != nil {
+			conn, acceptErr := ln.Accept()
+			if acceptErr != nil {
 				return
 			}
 			_ = conn.Close()

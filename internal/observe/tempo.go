@@ -45,7 +45,7 @@ func NewTempoSource(baseURL, service string, opts ...TempoOption) (*TempoSource,
 		return nil, fmt.Errorf("tempo source: service 名稱不可為空(TraceQL 過濾必要)")
 	}
 	// TraceQL 查詢是手刻字串:service 含特殊字元會破壞查詢語法
-	//(%q 是 Go 逸出,不是 TraceQL 逸出,不可依賴),直接拒絕。
+	// (%q 是 Go 逸出,不是 TraceQL 逸出,不可依賴),直接拒絕。
 	if strings.ContainsAny(service, `"{}\`) {
 		return nil, fmt.Errorf(`tempo source: service 名稱 %q 含 TraceQL 特殊字元(" { } \),不支援`, service)
 	}
