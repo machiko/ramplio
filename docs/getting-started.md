@@ -24,27 +24,55 @@ ramplio --version
 
 ## Quickstart: One-liner load test
 
-Hit any URL with 10 virtual users for 30 seconds:
+Hit a URL with 10 virtual users for 30 seconds. Point it at your own service,
+or use the built-in mock server for a zero-dependency first run:
 
 ```bash
-ramplio run --url https://httpbin.org/get --vus 10 --duration 30s
+ramplio mock-server --port 8080 --latency 20ms &   # or use your own URL below
+ramplio run --url http://localhost:8080/ --vus 10 --duration 30s
 ```
 
-Sample output:
+Sample output (abridged):
 
 ```
-Running 10 VUs for 30s → GET https://httpbin.org/get
+✓ 預檢通過：http://localhost:8080/（HTTP 200，總共 32ms）
+Running 10 VUs for 30s → GET http://localhost:8080/
 
- Requests  │ 1 420
- Errors    │ 0  (0.00%)
- RPS       │ 47.3
- Mean      │ 210ms
- p50       │ 195ms
- p90       │ 340ms
- p95       │ 410ms
- p99       │ 520ms
- Duration  │ 30.01s
+測試結果
+────────────
+  總請求數：                6772
+  測試時長：                30.00s
+  每秒請求：                225.7
+
+延遲分佈
+────────────
+  平均：                  22ms
+  p50：                 21ms
+  p90：                 23ms
+  p95：                 24ms
+  p99：                 26ms
+
+回應狀態
+────────────
+  成功 (2xx)：            6772 (100.0%)
+  失敗：                  0 (0.0%)
+
+量測可信度
+───────────────
+  ✓ 高：量測過程中產生器沒有丟樣本、GC 干擾也很低，數字可信。
+
+測試結果說明
+──────────────────
+  整體結論：✓ 網站很健康，可以放心上線
+  ...
+  一句話總結：整體來說，網站又快又穩，可以放心。
 ```
+
+Every run ends with a plain-language verdict (overall conclusion, speed,
+stability, capacity headroom) and a **measurement confidence** section that
+tells you whether the numbers themselves can be trusted — if the load
+generator dropped samples or was disturbed by GC, Ramplio says so instead of
+letting you read a distorted result.
 
 ---
 
@@ -65,7 +93,7 @@ stages:
 steps:
   - name: GET homepage
     method: GET
-    url: https://httpbin.org/get
+    url: http://localhost:8080/    # swap in your service URL
     assertions:
       status: 200
 
