@@ -75,20 +75,27 @@ func TestDNSCacheDialerExpiredEntryTriggersLookup(t *testing.T) {
 	host, port := newTCPListener(t)
 	d := newDNSCacheDialer(time.Minute)
 
-	// 塞一筆已過期的假快取:過期即失效,必須重新解析,而 .invalid 保證解析失敗。
+	// 塞一筆已過期的假快取:過期即失效,必須重新解析,而 .invalid 保證解析失敗
+	// (RFC 2606)。註:此測試依賴真實 DNS 解析路徑;帶顯式逾時,
+	// 避免無網路出口的環境等 OS 層 DNS 重試而掛住。
 	d.cache["fake.invalid"] = dnsCacheEntry{
 		addrs:  []string{host},
 		expiry: time.Now().Add(-time.Second),
 	}
 
-	_, err := d.DialContext(context.Background(), "tcp", net.JoinHostPort("fake.invalid", port))
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	_, err := d.DialContext(ctx, "tcp", net.JoinHostPort("fake.invalid", port))
 	require.Error(t, err, "過期條目不可再用,真實解析 .invalid 必失敗")
 	assert.Contains(t, err.Error(), "DNS lookup", "錯誤應來自重新解析")
 }
 
 func TestDNSCacheDialerResolveCachesLocalhost(t *testing.T) {
 	d := newDNSCacheDialer(time.Minute)
-	ctx := context.Background()
+	// localhost 解析走真實 resolver;帶顯式逾時避免異常環境掛住。
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
 
 	addrs, err := d.resolve(ctx, "localhost")
 	require.NoError(t, err)
@@ -127,13 +134,29 @@ func TestDNSCacheDialerFIFOEviction(t *testing.T) {
 	seed("a.example")
 	seed("b.example")
 
-	_, err := d.resolve(context.Background(), "localhost")
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_, err := d.resolve(ctx, "localhost")
 	require.NoError(t, err)
 
 	assert.NotContains(t, d.cache, "a.example", "超出上限應淘汰最舊條目")
 	assert.Contains(t, d.cache, "b.example")
 	assert.Contains(t, d.cache, "localhost")
 	assert.Len(t, d.cache, 2)
+}
+
+func TestDNSCacheDialerNoAddressesResolved(t *testing.T) {
+	d := newDNSCacheDialer(time.Minute)
+
+	// 塞一筆位址為空的快取:迴圈零次、無 lastErr,走「no addresses resolved」分支。
+	d.cache["empty.invalid"] = dnsCacheEntry{
+		addrs:  []string{},
+		expiry: time.Now().Add(time.Minute),
+	}
+
+	_, err := d.DialContext(context.Background(), "tcp", net.JoinHostPort("empty.invalid", "80"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no addresses resolved", "空位址清單應回報專屬錯誤")
 }
 
 func TestDNSCacheDialerAllAddrsFailReturnsLastErr(t *testing.T) {
