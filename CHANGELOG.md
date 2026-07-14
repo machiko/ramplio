@@ -5,7 +5,7 @@ Ramplio 的所有重要變更都記錄於此。
 
 ---
 
-## [Unreleased]
+## [v3.2.0] — WebSocket 測得快也測得準 (2026-07-14)
 
 ### 新增
 - **WebSocket 持久連線模式**: 場景步驟可宣告 `ws_mode: persistent`,同一 VU 生命週期內重用連線(比照 HTTP per-VU cookie jar 的 session 設計)。本地 A/B 實測單次 exchange ~180µs → ~24µs(去除逐次握手成本),並避免高速率下的 ephemeral port 耗盡。斷線以錯誤如實回報並於下次 exchange 自動重撥;`ws_expect` 不符屬應用層失敗,不棄置健康連線。預設 `per_request` 行為不變。
@@ -16,6 +16,10 @@ Ramplio 的所有重要變更都記錄於此。
 - **WebSocket 斷線誤分類為「斷言失敗」**: 握手成功後的傳輸失敗保留 101 狀態碼,使錯誤分類誤判為斷言失敗;現歸零狀態碼走連線層分類,斷線的診斷方向不再誤導。
 - **WebSocket 阻塞讀寫不可中斷**: 對端握手後沉默(黑洞/掛起)會讓 VU 永久卡住、測試無法收工;現於 ctx 取消時主動關閉連線中斷阻塞 I/O。
 - **`protocol` 欄位大小寫不一致**: `protocol: WebSocket` 會通過驗證卻被引擎靜默當 HTTP 執行;解析期正規化為小寫。
+- **GUI 上傳場景遺失 WebSocket 欄位**: 網頁儀表板的場景轉換與 CLI 是兩份漂移的實作,`ws_message`/`ws_expect` 經 GUI 上傳靜默遺失;已收斂為單一來源,dashboard 與 CLI 的場景行為不再分歧(`ws_mode` 亦同步生效)。
+
+### 內部
+- **dashcontrol 依職責拆檔**: 738 行單檔拆為 run 生命週期/場景載入/基準比較/容量探測四檔;`internal/dashboard` 職責界線文件化(只管傳輸與快照型別)。
 
 ---
 
