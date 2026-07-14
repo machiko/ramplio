@@ -101,6 +101,12 @@ ramplio run --scenario smoke.yaml
 | `--dashboard` | `false` | Open live web dashboard |
 | `--dashboard-port` | `9999` | Dashboard HTTP port |
 | `--prometheus` | — | Expose Prometheus metrics — e.g. `:9100` |
+| `--rps` | — | Target requests per second — rate mode (mutually exclusive with `--vus`) |
+| `--save-baseline` | — | Save this run's result as a baseline snapshot for `ramplio compare` |
+| `--observe` | — | Pull traces from the target's APM after the run for bottleneck correlation — e.g. `jaeger://localhost:16686?service=checkout` (rate mode only) |
+| `--strict-trust` | `false` | Treat untrustworthy observation (fetch failure / truncation / insufficient correlation) as failure; requires `--observe` |
+| `--trace-context` | `false` | Inject a W3C `traceparent` header into every request so the target's APM can tag load-test traffic (~63ns per request, opt-in) |
+| `--sink` | — | Push results to an external sink (repeatable): `csv:<file>`, `influxdb://…`, `loki://…`, `otel://host:4318` |
 
 ### `ramplio validate`
 
@@ -156,6 +162,111 @@ suitable for CI/CD gates:
 
 If `error_rate_pct` or `p99_ms` thresholds are breached, the step fails and
 the pipeline stops.
+
+---
+
+## Capacity regression gate (`--save-baseline` + `compare`)
+
+Thresholds catch absolute failures; the regression gate catches *relative*
+ones — "did this change make us slower than last release?". Save a snapshot
+from a known-good run, then compare every subsequent run against it:
+
+```bash
+# On the known-good build: save a baseline snapshot (git-friendly JSON)
+ramplio run --url http://localhost:8080/ --rps 100 --duration 60s --save-baseline base.json
+
+# After your change: run again, then compare
+ramplio run --url http://localhost:8080/ --rps 100 --duration 60s --save-baseline after.json
+ramplio compare base.json after.json
+```
+
+Sample output:
+
+```
+容量回歸比較(本次 vs 基準)
+────────────────────────────
+  ✓ p50（伺服器處理）     22ms → 22ms(-0.2%,持平)
+  ✓ p99（伺服器處理）     24ms → 22ms(-7.1%,持平)
+  ✓ 錯誤率            0.0% → 0.0%(+0.0%,持平)
+  ✓ 每秒請求           15 → 15(-0.0%,持平)
+  ✓ p99（使用者實感）     25ms → 26ms(+1.8%,持平)
+
+  結論:✓ 沒有超出容差的退步,整體持平或更好。
+```
+
+`compare` exits `1` on any regression, so it slots straight into CI as a
+merge gate. Verdicts use a **dual-threshold tolerance** (relative % *and* an
+absolute floor must both be exceeded) so normal run-to-run noise does not
+produce false alarms; tighten with `--rel-tolerance-pct`. If either snapshot's
+measurement is questionable (dropped samples, generator at its worker cap),
+warnings are always printed — add `--strict-trust` to make questionable
+measurements fail the gate outright.
+
+`discover` also supports `--save-baseline`, so you can gate on discovered
+capacity (`safe_limit_rps` / `breaking_point_rps`) instead of a fixed-rate run.
+
+---
+
+## Bottleneck correlation (`--observe`)
+
+A load test tells you *that* the target slowed down; `--observe` asks the
+target's own tracing backend *where*. After a rate-mode run, Ramplio pulls
+traces from Jaeger or Tempo, compares per-operation p95 between the ramp-up
+window (baseline) and the sustained window (stress), and names the operation
+that degraded most:
+
+```bash
+ramplio run --url http://localhost:8080/checkout --rps 200 --duration 2m \
+  --observe "jaeger://localhost:16686?service=checkout"
+
+# Grafana Tempo works the same way:
+#   --observe "tempo://localhost:3200?service=checkout"
+# (jaegers:// / tempos:// for HTTPS)
+```
+
+Honesty rules, by design: with insufficient samples it reports "correlation
+insufficient" instead of guessing; operations excluded from comparison are
+listed by name; when everything slows down uniformly it reports "suspected
+resource saturation" rather than blaming a single operation; truncated
+sampling is always disclosed. Requires `--rps` (the rate profile provides the
+comparison windows).
+
+Pair it with `--trace-context` to inject W3C `traceparent` headers so the
+APM can tag which traces came from the load test. To export the final
+metrics to an OpenTelemetry collector, add `--sink otel://localhost:4318`.
+
+---
+
+## Prove the tool itself (`verify`)
+
+Why trust Ramplio's numbers at all? `verify` stresses a built-in mock server
+with a *known* injected latency distribution and checks that the measured
+percentiles land within tolerance of that ground truth — no external target,
+no comparing against other tools:
+
+```bash
+ramplio verify
+ramplio verify --latency 100ms --tolerance 30ms
+ramplio verify --latency-fast 10ms --latency-slow 200ms --slow-pct 10   # bimodal tail
+```
+
+Sample output:
+
+```
+  量測自證 — 對已知延遲分佈施壓，反推 Ramplio 量得準不準
+  注入分佈：固定 50ms    施壓：10 VU × 3s    容差：±20ms
+
+  量測結果（注入值 → 量到值）
+    p50            50ms → 50ms    ✓
+    p99            50ms → 53ms    ✓
+
+  ✓ 量測準確：所有百分位都落在注入值 +0~20ms 內。
+```
+
+Measured values can only be ≥ the injected value (local round-trip adds
+overhead) — a measurement *below* it would mean Ramplio under-reports
+latency, which is a bug. Exits `0` when accurate, `1` otherwise, so you can
+run it in CI before trusting any load-test result.
 
 ---
 
