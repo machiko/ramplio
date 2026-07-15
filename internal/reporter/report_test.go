@@ -28,6 +28,27 @@ func richSummary() metrics.Summary {
 	}
 }
 
+// TestPrintSummary_RPMForSlowEndpoint proves the per-minute conversion surfaces in
+// both the technical summary line and the plain-language 承受能力 card when rps < 1,
+// and stays absent once throughput reaches 1/s where per-second framing is fine.
+func TestPrintSummary_RPMForSlowEndpoint(t *testing.T) {
+	// 21 reqs / 210s ≈ 0.1 rps ≈ 6 RPM — the exact slow-endpoint case from the RAG run.
+	slow := metrics.Summary{Total: 21, WallTime: 210 * time.Second, P99: 60 * time.Second}
+	var buf bytes.Buffer
+	reporter.PrintSummary(&buf, slow)
+	out := buf.String()
+	assert.Contains(t, out, "RPM", "技術摘要行應附 RPM 換算")
+	assert.Contains(t, out, "每分鐘", "白話卡片應附每分鐘換算")
+
+	// 100 reqs / 10s = 10 rps — fast enough that RPM framing adds nothing.
+	fast := metrics.Summary{Total: 100, WallTime: 10 * time.Second, P99: 50 * time.Millisecond}
+	buf.Reset()
+	reporter.PrintSummary(&buf, fast)
+	fastOut := buf.String()
+	assert.NotContains(t, fastOut, "RPM", "≥1 rps 不應顯示 RPM")
+	assert.NotContains(t, fastOut, "每分鐘", "≥1 rps 不應顯示每分鐘換算")
+}
+
 // ── JSON reporter ─────────────────────────────────────────────────────────────
 
 func TestWriteJSON_ValidOutput(t *testing.T) {

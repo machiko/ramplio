@@ -26,7 +26,11 @@ func PrintSummary(w io.Writer, sum metrics.Summary) {
 	section("測試結果")
 	line("總請求數：", fmt.Sprintf("%d", sum.Total))
 	line("測試時長：", fmt.Sprintf("%.2fs", sum.WallTime.Seconds()))
-	line("每秒請求：", fmt.Sprintf("%.1f", sum.RPS()))
+	rpsValue := fmt.Sprintf("%.1f", sum.RPS())
+	if rpm := capacityRPM(sum.RPS()); rpm != "" {
+		rpsValue += fmt.Sprintf("（≈ %s RPM）", rpm)
+	}
+	line("每秒請求：", rpsValue)
 
 	section("延遲分佈")
 	if sum.HasCorrected {
@@ -179,7 +183,11 @@ func printInterpretation(w io.Writer, sum metrics.Summary) {
 	fmt.Fprintf(w, "\n  穩定度　  %s %s\n", in.Stability.Icon, in.Stability.Label)
 	fmt.Fprintf(w, "      %s\n", in.Stability.Note)
 
-	fmt.Fprintf(w, "\n  承受能力  每秒約 %s 個請求\n", in.Capacity.Value)
+	capacity := fmt.Sprintf("每秒約 %s 個請求", in.Capacity.Value)
+	if in.Capacity.RPM != "" {
+		capacity += fmt.Sprintf("（≈ 每分鐘 %s 個）", in.Capacity.RPM)
+	}
+	fmt.Fprintf(w, "\n  承受能力  %s\n", capacity)
 	fmt.Fprintf(w, "      %s\n", in.Capacity.Note)
 
 	if in.Bottleneck != "" {

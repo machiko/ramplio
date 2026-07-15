@@ -46,7 +46,8 @@ type StabilityReading struct {
 }
 
 type CapacityReading struct {
-	Value string `json:"value"` // requests/sec: one decimal under 10 rps, else thousands-separated integer
+	Value string `json:"value"`         // requests/sec: one decimal under 10 rps, else thousands-separated integer
+	RPM   string `json:"rpm,omitempty"` // per-minute conversion, populated only for sub-1 rps where rps alone reads awkwardly
 	Note  string `json:"note"`
 }
 
@@ -115,7 +116,8 @@ func ReadingsFor(p99 time.Duration, errRate, rps float64, total, errors int64, b
 	in.Stability = StabilityReading{Icon: ti, Label: tl, Note: tn}
 
 	in.Capacity = CapacityReading{
-		Value: humanizeRPS(rps),
+		Value: humanizeRate(rps),
+		RPM:   capacityRPM(rps),
 		Note:  capacityNote(errRate),
 	}
 
@@ -190,22 +192,46 @@ func humanizeDuration(d time.Duration) string {
 	return fmt.Sprintf("%.1f 秒", float64(ms)/1000)
 }
 
-// rpsDecimalThreshold is the rate below which we keep one decimal place. Slow
+// rateDecimalThreshold is the rate below which we keep one decimal place. Slow
 // endpoints (LLM, batch APIs) commonly sit under 1 rps, where integer rounding
 // would collapse a real value like 0.3 to a misleading "0". Above the threshold
 // the fractional part is noise, so we round to a thousands-separated integer.
-const rpsDecimalThreshold = 10.0
+// humanizeRate applies this to both RPS and the RPM conversion — the same
+// "two digits in, drop the decimal" cutoff reads well for either unit.
+const rateDecimalThreshold = 10.0
 
-// humanizeRPS formats throughput for the 承受能力卡片: one decimal under the
-// threshold, a thousands-separated integer at or above it. We round to one
-// decimal *before* the threshold check so a value like 9.96 reads "10" (matching
-// exact 10.0) instead of an inconsistent "10.0".
-func humanizeRPS(rps float64) string {
-	rounded := math.Round(rps*10) / 10
-	if rounded < rpsDecimalThreshold {
+// rpmThreshold is the rps at or above which per-minute framing adds nothing —
+// below it (slow endpoints) the RPM conversion reads far better than "0.x 個請求".
+const rpmThreshold = 1.0
+
+// humanizeRate formats any per-time-unit rate for the 承受能力卡片: one decimal
+// under the threshold, a thousands-separated integer at or above it. We round to
+// one decimal *before* the threshold check so a value like 9.96 reads "10"
+// (matching exact 10.0) instead of an inconsistent "10.0".
+func humanizeRate(v float64) string {
+	rounded := math.Round(v*10) / 10
+	if rounded < rateDecimalThreshold {
 		return fmt.Sprintf("%.1f", rounded)
 	}
 	return humanizeInt(int64(rounded + 0.5))
+}
+
+// capacityRPM returns the requests-per-minute conversion for sub-1 rps, where
+// per-second framing is unhelpful (LLM/batch endpoints, and how providers state
+// rate limits). Returns "" so callers can omit it in two cases: no traffic at all
+// (RPM would be meaningless noise), and any rate whose *displayed* per-second value
+// rounds to ≥1 — gating on the rounded value (not the raw rps) avoids a
+// self-contradictory "每秒約 1.0 個（≈ 每分鐘 58 個）". The RPM itself is computed
+// from the raw rps on purpose, so a rate that displays as "0.0" still yields a
+// meaningful "≈ 2.4 RPM" — the whole reason slow endpoints want this framing.
+func capacityRPM(rps float64) string {
+	if rps <= 0 {
+		return ""
+	}
+	if math.Round(rps*10)/10 >= rpmThreshold {
+		return ""
+	}
+	return humanizeRate(rps * 60)
 }
 
 // humanizeInt formats an integer with thousands separators (e.g. 20046 → 20,046).

@@ -130,6 +130,41 @@ func TestReadingsFor_CapacityValueFormat(t *testing.T) {
 	}
 }
 
+// TestReadingsFor_CapacityRPM verifies the per-minute conversion shown only for
+// sub-1 rps — slow endpoints (LLM, batch APIs) where "0.1 個請求" reads worse than
+// "≈ 每分鐘 6 個", matching how providers express rate limits (RPM/TPM).
+func TestReadingsFor_CapacityRPM(t *testing.T) {
+	tests := []struct {
+		name string
+		rps  float64
+		want string
+	}{
+		{"慢端點顯示每分鐘換算", 0.105, "6.3"},
+		{"極慢時 rps 顯示 0 但 RPM 仍有意義", 0.04, "2.4"},
+		{"半 rps 換算成 30", 0.5, "30"},
+		{"接近 1 rps 仍顯示換算", 0.9, "54"},
+		{"顯示值四捨五入到 1.0 即不顯示 RPM", 0.96, ""},
+		{"達 1 rps 起不再顯示 RPM", 1.0, ""},
+		{"高吞吐不顯示 RPM", 50, ""},
+		{"零流量不顯示 RPM", 0, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			in := reporter.ReadingsFor(50*time.Millisecond, 0, tt.rps, 1000, 0, "")
+			assert.Equal(t, tt.want, in.Capacity.RPM)
+		})
+	}
+}
+
+// TestReadingsFor_CapacityNoContradiction pins the boundary the reviewer flagged:
+// a rate that *displays* as "1.0 個請求" must not also show an RPM (which would
+// read as a self-contradictory "1.0 個（≈ 每分鐘 58 個）").
+func TestReadingsFor_CapacityNoContradiction(t *testing.T) {
+	in := reporter.ReadingsFor(50*time.Millisecond, 0, 0.96, 1000, 0, "")
+	assert.Equal(t, "1.0", in.Capacity.Value, "0.96 rps 顯示四捨五入為 1.0")
+	assert.Equal(t, "", in.Capacity.RPM, "顯示為 1.0 時不得再附 RPM,避免與 ×60 對不上")
+}
+
 // TestOutputsShareWording proves the terminal and JSON outputs render the exact
 // same plain-language verdict — the whole point of the shared Interpret source.
 func TestOutputsShareWording(t *testing.T) {
