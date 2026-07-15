@@ -2,6 +2,7 @@ package reporter
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -45,7 +46,7 @@ type StabilityReading struct {
 }
 
 type CapacityReading struct {
-	Value string `json:"value"` // requests/sec with thousands separator
+	Value string `json:"value"` // requests/sec: one decimal under 10 rps, else thousands-separated integer
 	Note  string `json:"note"`
 }
 
@@ -114,7 +115,7 @@ func ReadingsFor(p99 time.Duration, errRate, rps float64, total, errors int64, b
 	in.Stability = StabilityReading{Icon: ti, Label: tl, Note: tn}
 
 	in.Capacity = CapacityReading{
-		Value: humanizeInt(int64(rps + 0.5)),
+		Value: humanizeRPS(rps),
 		Note:  capacityNote(errRate),
 	}
 
@@ -187,6 +188,24 @@ func humanizeDuration(d time.Duration) string {
 		return fmt.Sprintf("%d 毫秒", ms)
 	}
 	return fmt.Sprintf("%.1f 秒", float64(ms)/1000)
+}
+
+// rpsDecimalThreshold is the rate below which we keep one decimal place. Slow
+// endpoints (LLM, batch APIs) commonly sit under 1 rps, where integer rounding
+// would collapse a real value like 0.3 to a misleading "0". Above the threshold
+// the fractional part is noise, so we round to a thousands-separated integer.
+const rpsDecimalThreshold = 10.0
+
+// humanizeRPS formats throughput for the 承受能力卡片: one decimal under the
+// threshold, a thousands-separated integer at or above it. We round to one
+// decimal *before* the threshold check so a value like 9.96 reads "10" (matching
+// exact 10.0) instead of an inconsistent "10.0".
+func humanizeRPS(rps float64) string {
+	rounded := math.Round(rps*10) / 10
+	if rounded < rpsDecimalThreshold {
+		return fmt.Sprintf("%.1f", rounded)
+	}
+	return humanizeInt(int64(rounded + 0.5))
 }
 
 // humanizeInt formats an integer with thousands separators (e.g. 20046 → 20,046).

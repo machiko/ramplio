@@ -105,6 +105,31 @@ func TestReadingsFor_Standalone(t *testing.T) {
 	assert.Contains(t, withBottleneck.Bottleneck, "x")
 }
 
+// TestReadingsFor_CapacityValueFormat verifies the容量卡片 keeps one decimal for
+// sub-10 throughput (slow endpoints like LLM sit at <1 rps) and switches to
+// thousands-separated integers once the rate is large enough that decimals are noise.
+func TestReadingsFor_CapacityValueFormat(t *testing.T) {
+	tests := []struct {
+		name string
+		rps  float64
+		want string
+	}{
+		{"慢端點 sub-1 不可歸零", 0.33, "0.3"},
+		{"接近半數不進位成 0", 0.45, "0.5"},
+		{"個位數保留一位小數", 4.5, "4.5"},
+		{"低於門檻仍顯示小數", 9.6, "9.6"},
+		{"四捨五入後達門檻與整數 10 顯示一致", 9.96, "10"},
+		{"達門檻取整數", 10, "10"},
+		{"高吞吐取整數不帶小數", 1234.7, "1,235"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			in := reporter.ReadingsFor(50*time.Millisecond, 0, tt.rps, 1000, 0, "")
+			assert.Equal(t, tt.want, in.Capacity.Value)
+		})
+	}
+}
+
 // TestOutputsShareWording proves the terminal and JSON outputs render the exact
 // same plain-language verdict — the whole point of the shared Interpret source.
 func TestOutputsShareWording(t *testing.T) {
