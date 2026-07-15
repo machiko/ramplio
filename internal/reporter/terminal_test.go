@@ -96,3 +96,63 @@ func TestHumanizeInt_ThousandsSeparator(t *testing.T) {
 	reporter.PrintSummary(&buf, metrics.Summary{Total: 1234567, WallTime: time.Second})
 	assert.Contains(t, buf.String(), "1,234,567")
 }
+
+// 串流場景:TTFT(開始回應)與完整回應並陳——串流體感由 TTFT 決定,
+// 但兩個數字都要給,不可只留一個。非串流場景該段落缺席。
+func TestPrintSummary_TTFTShownWhenPresent(t *testing.T) {
+	sum := metrics.Summary{
+		Total: 100, WallTime: 10 * time.Second,
+		P50: 400 * time.Millisecond, P99: 900 * time.Millisecond,
+		HasTTFT: true,
+		TTFTP50: 80 * time.Millisecond, TTFTP99: 200 * time.Millisecond,
+	}
+	var buf bytes.Buffer
+	reporter.PrintSummary(&buf, sum)
+	out := buf.String()
+
+	for _, want := range []string{"開始回應", "80ms", "200ms"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("輸出應包含 %q\n%s", want, out)
+		}
+	}
+}
+
+func TestPrintSummary_NoTTFTNoSection(t *testing.T) {
+	sum := metrics.Summary{Total: 100, WallTime: 10 * time.Second, P99: 100 * time.Millisecond}
+	var buf bytes.Buffer
+	reporter.PrintSummary(&buf, sum)
+
+	if strings.Contains(buf.String(), "開始回應") {
+		t.Error("無 TTFT 樣本時不應顯示串流段落")
+	}
+}
+
+// 複審發現(HIGH):rate 模式下 TTFT 是 CO 修正值(含排隊),
+// 「完整回應」若用原始 P50/P99 會出現「開始回應比完整回應慢」的倒掛
+// 矛盾——兩邊基準必須一致:有 CO 修正時完整回應也用使用者實感值。
+func TestPrintSummary_TTFTBaselineConsistentUnderCO(t *testing.T) {
+	sum := metrics.Summary{
+		Total: 100, WallTime: 10 * time.Second,
+		P50: 100 * time.Millisecond, P99: 150 * time.Millisecond,
+		HasCorrected: true,
+		CorrectedP50: 320 * time.Millisecond, CorrectedP99: 480 * time.Millisecond,
+		HasTTFT: true,
+		TTFTP50: 250 * time.Millisecond, TTFTP99: 300 * time.Millisecond,
+	}
+	var buf bytes.Buffer
+	reporter.PrintSummary(&buf, sum)
+	out := buf.String()
+
+	// 完整回應應顯示 corrected 值(320/480ms),不可顯示原始 100/150ms
+	// 造成「開始回應 250ms > 完整回應 100ms」的矛盾。
+	streamSection := out[strings.Index(out, "串流回應"):]
+	if end := strings.Index(streamSection, "回應狀態"); end > 0 {
+		streamSection = streamSection[:end]
+	}
+	if !strings.Contains(streamSection, "320ms") || !strings.Contains(streamSection, "480ms") {
+		t.Errorf("rate 模式下完整回應應用使用者實感值(320/480ms)\n%s", streamSection)
+	}
+	if strings.Contains(streamSection, "100ms") {
+		t.Errorf("完整回應不應顯示原始值 100ms(與修正後 TTFT 基準不一致)\n%s", streamSection)
+	}
+}

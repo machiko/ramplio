@@ -119,6 +119,11 @@ type Step struct {
 	// "persistent" reuses one connection per VU for the VU's lifetime.
 	WSMode string `yaml:"ws_mode,omitempty"`
 
+	// Stream marks the response as a stream to measure: "sse" enables
+	// streaming reads with TTFT (time to first token/chunk) recorded
+	// alongside total latency. HTTP steps only.
+	Stream string `yaml:"stream,omitempty"`
+
 	// If is a template expression; the step is skipped when it evaluates to false.
 	// Supported forms: `{{capture.X}} == ""`, `{{capture.X}} != ""`, `{{capture.X}} == "value"`
 	If string `yaml:"if,omitempty"`
@@ -166,12 +171,15 @@ type StepThresholds struct {
 }
 
 type Thresholds struct {
-	ErrorRatePct  *float64                   `yaml:"error_rate_pct,omitempty"`
-	P50Ms         *float64                   `yaml:"p50_ms,omitempty"`
-	P90Ms         *float64                   `yaml:"p90_ms,omitempty"`
-	P95Ms         *float64                   `yaml:"p95_ms,omitempty"`
-	P99Ms         *float64                   `yaml:"p99_ms,omitempty"`
-	MaxMs         *float64                   `yaml:"max_ms,omitempty"`
+	ErrorRatePct *float64 `yaml:"error_rate_pct,omitempty"`
+	P50Ms        *float64 `yaml:"p50_ms,omitempty"`
+	P90Ms        *float64 `yaml:"p90_ms,omitempty"`
+	P95Ms        *float64 `yaml:"p95_ms,omitempty"`
+	P99Ms        *float64 `yaml:"p99_ms,omitempty"`
+	MaxMs        *float64 `yaml:"max_ms,omitempty"`
+	// TTFTP95Ms 守門串流首 chunk 到達的 p95(僅場景含 stream 步驟時可判定;
+	// 設了門檻但無 stream 樣本視為設定錯誤,不靜默通過)。
+	TTFTP95Ms     *float64                   `yaml:"ttft_p95_ms,omitempty"`
 	ThroughputRps *float64                   `yaml:"throughput_rps,omitempty"`
 	Steps         map[string]*StepThresholds `yaml:"steps,omitempty"`
 }

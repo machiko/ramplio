@@ -140,3 +140,80 @@ func TestCollector_LivePercentiles_ConcurrentSafety(t *testing.T) {
 	sum := c.Stop()
 	assert.Equal(t, int64(n), sum.Total)
 }
+
+// TTFT(串流首 chunk 到達)獨立 histogram:有 TTFT 樣本才出現,
+// 非串流測試 HasTTFT 恆 false(不適用時缺席,比照 CO 修正慣例)。
+func TestCollector_TTFTPercentiles(t *testing.T) {
+	c := NewCollector(10)
+	c.Add(Sample{Latency: 200 * time.Millisecond, TTFT: 50 * time.Millisecond, StatusCode: 200})
+	c.Add(Sample{Latency: 300 * time.Millisecond, TTFT: 60 * time.Millisecond, StatusCode: 200})
+	c.Add(Sample{Latency: 400 * time.Millisecond, TTFT: 70 * time.Millisecond, StatusCode: 200})
+
+	sum := c.Stop()
+
+	assert.True(t, sum.HasTTFT)
+	assert.InDelta(t, 60, sum.TTFTP50.Milliseconds(), 5)
+	assert.InDelta(t, 70, sum.TTFTP99.Milliseconds(), 5)
+	// TTFT 必然 ≤ 總延遲的對應百分位
+	assert.Less(t, sum.TTFTP99, sum.P99)
+}
+
+func TestCollector_NoTTFTSamplesNoTTFT(t *testing.T) {
+	c := NewCollector(10)
+	c.Add(Sample{Latency: 10 * time.Millisecond, StatusCode: 200})
+
+	sum := c.Stop()
+
+	assert.False(t, sum.HasTTFT, "無 TTFT 樣本時 HasTTFT 應為 false")
+}
+
+// 混合場景(部分步驟串流):TTFT histogram 只收串流樣本。
+func TestCollector_MixedStreamAndPlain(t *testing.T) {
+	c := NewCollector(10)
+	c.Add(Sample{Latency: 100 * time.Millisecond, TTFT: 40 * time.Millisecond, StatusCode: 200})
+	c.Add(Sample{Latency: 10 * time.Millisecond, StatusCode: 200}) // 非串流
+
+	sum := c.Stop()
+
+	assert.True(t, sum.HasTTFT)
+	assert.InDelta(t, 40, sum.TTFTP50.Milliseconds(), 5)
+}
+
+// 審查關發現(HIGH):rate 模式下 generator 追不上排程時,TTFT 若從實際
+// 發送起算會系統性低報——corrected_latency 飆高而 ttft 看似健康,兩數字
+// 互相矛盾。修正:rate 模式 TTFT 從排定時刻起算(與 CO 修正同一模型)。
+func TestCollector_TTFTCoordinatedOmissionCorrection(t *testing.T) {
+	c := NewCollector(10)
+	now := time.Now()
+	// 排定 200ms 前就該送出:排隊 200ms 後才實際發送,
+	// 發送後 50ms 首 chunk、總耗時 100ms(At = 完成時刻)。
+	c.Add(Sample{
+		Latency:     100 * time.Millisecond,
+		TTFT:        50 * time.Millisecond,
+		StatusCode:  200,
+		At:          now,
+		ScheduledAt: now.Add(-300 * time.Millisecond), // 排隊 200ms + 服務 100ms
+	})
+
+	sum := c.Stop()
+
+	if !sum.HasTTFT {
+		t.Fatal("HasTTFT 應為 true")
+	}
+	// 使用者實感的「開始回應」= 排隊 200ms + 首 chunk 50ms = 250ms
+	assert.InDelta(t, 250, sum.TTFTP50.Milliseconds(), 10,
+		"rate 模式 TTFT 應含排隊等待(從排定時刻起算)")
+}
+
+// VU 模式(無 ScheduledAt):TTFT 維持原始值,不受影響。
+func TestCollector_TTFTNoScheduleNoCorrection(t *testing.T) {
+	c := NewCollector(10)
+	c.Add(Sample{Latency: 100 * time.Millisecond, TTFT: 50 * time.Millisecond, StatusCode: 200, At: time.Now()})
+
+	sum := c.Stop()
+
+	if !sum.HasTTFT {
+		t.Fatal("HasTTFT 應為 true")
+	}
+	assert.InDelta(t, 50, sum.TTFTP50.Milliseconds(), 5)
+}

@@ -28,6 +28,15 @@ type Summary struct {
 	CorrectedP99 time.Duration `json:"-"`
 	HasCorrected bool          `json:"-"`
 
+	// TTFT(time to first token)percentiles:串流回應首個 body chunk 到達
+	// 的分佈——串流情境的使用者體感由它決定,與完整回應時間並陳。
+	// 僅在場景含 stream 步驟時填入;HasTTFT 為 false 時不適用。
+	TTFTP50 time.Duration `json:"-"`
+	TTFTP90 time.Duration `json:"-"`
+	TTFTP95 time.Duration `json:"-"`
+	TTFTP99 time.Duration `json:"-"`
+	HasTTFT bool          `json:"-"`
+
 	// Per-step breakdown; nil when no step names were recorded (single URL mode).
 	Steps []StepSummary `json:"-"`
 	// Per-group breakdown; nil when no group names were recorded.

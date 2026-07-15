@@ -717,6 +717,16 @@ func checkThresholds(sum metrics.Summary, t *scenarios.Thresholds) string {
 	if t.MaxMs != nil && float64(sum.MaxLatency.Milliseconds()) > *t.MaxMs {
 		return fmt.Sprintf("max %dms > %.0fms", sum.MaxLatency.Milliseconds(), *t.MaxMs)
 	}
+	if t.TTFTP95Ms != nil {
+		// 設了 TTFT 門檻但沒有 stream 樣本 = 設定錯誤:靜默通過是
+		// 危險的假陰性(門檻形同虛設),大聲失敗。
+		if !sum.HasTTFT {
+			return "ttft_p95_ms 門檻已設定,但場景沒有 stream 步驟(無 TTFT 樣本可判定)"
+		}
+		if float64(sum.TTFTP95.Milliseconds()) > *t.TTFTP95Ms {
+			return fmt.Sprintf("ttft_p95 %dms > %.0fms", sum.TTFTP95.Milliseconds(), *t.TTFTP95Ms)
+		}
+	}
 	if t.ThroughputRps != nil && sum.RPS() < *t.ThroughputRps {
 		return fmt.Sprintf("throughput %.2f rps < %.2f rps", sum.RPS(), *t.ThroughputRps)
 	}
@@ -778,6 +788,7 @@ func scenarioStepsToRamp(steps []scenarios.Step) []engine.RampStep {
 			Group:      s.Group,
 			Protocol:   s.Protocol,
 			WSMode:     s.WSMode,
+			Stream:     s.Stream,
 			If:         s.If,
 			Loop:       s.Loop,
 		}

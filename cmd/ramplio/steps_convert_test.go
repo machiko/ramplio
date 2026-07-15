@@ -23,3 +23,12 @@ func TestScenarioStepsToRamp_CarriesWSMode(t *testing.T) {
 		t.Errorf("WSMode 遺失:得到 %q", steps[0].WSMode)
 	}
 }
+
+func TestScenarioStepsToRamp_CarriesStream(t *testing.T) {
+	steps := scenarioStepsToRamp([]scenarios.Step{{
+		Name: "sse", Method: "POST", URL: "https://x/chat", Stream: "sse",
+	}})
+	if steps[0].Stream != "sse" {
+		t.Errorf("Stream 遺失:得到 %q", steps[0].Stream)
+	}
+}

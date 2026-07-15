@@ -106,7 +106,15 @@ func (e *HTTPExecutor) Execute(ctx context.Context, req Request) Result {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	// 非 stream 走既有整讀路徑(hot path 零改動);stream 分塊讀以量測
+	// 首 chunk 到達時刻(TTFT),兩者共用同一個 1MiB body 上限契約。
+	var body []byte
+	var ttft time.Duration
+	if req.Stream {
+		body, ttft = readStreaming(io.LimitReader(resp.Body, 1<<20), start)
+	} else {
+		body, _ = io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	}
 	latency := time.Since(start)
 
 	headers := make(map[string]string, len(resp.Header))
@@ -123,5 +131,26 @@ func (e *HTTPExecutor) Execute(ctx context.Context, req Request) Result {
 		Body:            body,
 		ResponseHeaders: headers,
 		RawSetCookies:   resp.Header["Set-Cookie"],
+		TTFT:            ttft,
+	}
+}
+
+// readStreaming 分塊讀取回應:第一個非空 chunk 到達即記下 TTFT,
+// 之後繼續讀到結束(或上限)。回傳完整 body 與 TTFT。
+func readStreaming(r io.Reader, start time.Time) ([]byte, time.Duration) {
+	var body []byte
+	var ttft time.Duration
+	buf := make([]byte, 32*1024)
+	for {
+		n, err := r.Read(buf)
+		if n > 0 {
+			if ttft == 0 {
+				ttft = time.Since(start)
+			}
+			body = append(body, buf[:n]...)
+		}
+		if err != nil {
+			return body, ttft
+		}
 	}
 }

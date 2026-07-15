@@ -106,6 +106,15 @@ func validate(sc *Scenario) error {
 		if step.WSMode != "" && !strings.EqualFold(step.Protocol, "websocket") {
 			return fmt.Errorf("step %d (%q): ws_mode 僅適用於 protocol: websocket 的步驟", i, step.Name)
 		}
+		// stream 同屬設定錯誤,解析期擋下(比照 ws_mode 慣例)。
+		switch step.Stream {
+		case "", "sse":
+		default:
+			return fmt.Errorf("step %d (%q): stream 目前僅支援 sse,得到 %q", i, step.Name, step.Stream)
+		}
+		if step.Stream != "" && strings.EqualFold(step.Protocol, "websocket") {
+			return fmt.Errorf("step %d (%q): stream 僅適用於 HTTP 步驟", i, step.Name)
+		}
 	}
 	return nil
 }

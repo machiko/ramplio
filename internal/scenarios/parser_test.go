@@ -263,3 +263,57 @@ steps:
 	require.NoError(t, err)
 	assert.Equal(t, "websocket", sc.Steps[0].Protocol, "Protocol 應正規化為小寫")
 }
+
+// stream: sse 宣告串流量測(TTFT);僅 HTTP 步驟適用,
+// 非法值在解析期擋下(比照 ws_mode 慣例)。
+func TestParse_StreamSSE(t *testing.T) {
+	yaml := `
+name: sse stream
+stages:
+  - duration: 10s
+    target: 2
+steps:
+  - name: rag query
+    method: POST
+    url: https://example.com/chat
+    stream: sse
+`
+	sc, err := scenarios.Parse(strings.NewReader(yaml))
+	require.NoError(t, err)
+	assert.Equal(t, "sse", sc.Steps[0].Stream)
+}
+
+func TestParse_StreamRejectsUnknownValue(t *testing.T) {
+	yaml := `
+name: bad stream
+stages:
+  - duration: 10s
+    target: 1
+steps:
+  - name: s
+    method: GET
+    url: https://example.com/
+    stream: chunked
+`
+	_, err := scenarios.Parse(strings.NewReader(yaml))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "stream")
+}
+
+func TestParse_StreamRejectsWebsocketStep(t *testing.T) {
+	yaml := `
+name: stream on ws
+stages:
+  - duration: 10s
+    target: 1
+steps:
+  - name: ws
+    method: GET
+    url: ws://example.com/
+    protocol: websocket
+    stream: sse
+`
+	_, err := scenarios.Parse(strings.NewReader(yaml))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "stream")
+}

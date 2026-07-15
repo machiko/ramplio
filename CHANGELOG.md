@@ -5,6 +5,13 @@ Ramplio 的所有重要變更都記錄於此。
 
 ---
 
+## [Unreleased]
+
+### 新增
+- **SSE 串流 TTFT 量測**: 步驟宣告 `stream: sse` 後以串流方式讀取回應,量測 **TTFT(首個 body chunk 到達)** 並與完整回應時間並陳——LLM/RAG 類串流 API 的使用者體感由 TTFT 決定,兩個數字都要看。terminal/JSON 報告新增「開始回應 vs 完整回應」區段;`thresholds.ttft_p95_ms` 可守門(設了門檻但場景無 stream 步驟視為設定錯誤,大聲失敗不靜默通過);分散式模式 TTFT histogram 跨 worker 正確合併;rate 模式 TTFT 與 corrected_latency 同一模型做 CO 修正(從排定時刻起算,排隊等待計入「開始回應」,不因 generator 落後而低報)。TTFT 以假 SSE server 注入已知首段延遲做 ground-truth 自證。明確界線:TTFT ≠ TTFB(HTTP header 到達);非 stream 步驟量測路徑零改動。
+
+---
+
 ## [v3.2.0] — WebSocket 測得快也測得準 (2026-07-14)
 
 ### 新增

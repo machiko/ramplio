@@ -50,6 +50,7 @@ type Collector struct {
 	sum       Summary
 	hist      *hdrhistogram.Histogram
 	corrHist  *hdrhistogram.Histogram // coordinated-omission-corrected latency (rate mode only)
+	ttftHist  *hdrhistogram.Histogram // time-to-first-token (stream steps only)
 	once      sync.Once
 	startedAt time.Time
 	dropped   atomic.Int64 // samples discarded due to full channel
@@ -77,6 +78,7 @@ func NewCollector(maxVUs int) *Collector {
 		stopped:    make(chan struct{}),
 		hist:       hdrhistogram.New(histMinNs, histMaxNs, histSigFigs),
 		corrHist:   hdrhistogram.New(histMinNs, histMaxNs, histSigFigs),
+		ttftHist:   hdrhistogram.New(histMinNs, histMaxNs, histSigFigs),
 		startedAt:  time.Now(),
 		stepHists:  make(map[string]*hdrhistogram.Histogram),
 		stepSums:   make(map[string]Summary),
@@ -123,6 +125,13 @@ func (c *Collector) Stop() Summary {
 		c.sum.CorrectedP90 = nsToD(c.corrHist.ValueAtQuantile(90))
 		c.sum.CorrectedP95 = nsToD(c.corrHist.ValueAtQuantile(95))
 		c.sum.CorrectedP99 = nsToD(c.corrHist.ValueAtQuantile(99))
+	}
+	if c.ttftHist.TotalCount() > 0 {
+		c.sum.HasTTFT = true
+		c.sum.TTFTP50 = nsToD(c.ttftHist.ValueAtQuantile(50))
+		c.sum.TTFTP90 = nsToD(c.ttftHist.ValueAtQuantile(90))
+		c.sum.TTFTP95 = nsToD(c.ttftHist.ValueAtQuantile(95))
+		c.sum.TTFTP99 = nsToD(c.ttftHist.ValueAtQuantile(99))
 	}
 	if len(c.stepOrder) > 0 {
 		steps := make([]StepSummary, 0, len(c.stepOrder))
@@ -238,6 +247,22 @@ func (c *Collector) recordSample(s Sample) {
 		}
 		if ns := int64(corrected); ns > 0 {
 			_ = c.corrHist.RecordValue(ns)
+		}
+	}
+	// TTFT(串流首 chunk 到達)只在 stream 步驟的樣本上出現。
+	// rate 模式做與 corrHist 同一模型的 CO 修正:generator 追不上排程時,
+	// 使用者從「請求應送出」就開始等——TTFT 若只從實際發送起算會系統性
+	// 低報,corrected_latency 飆高而 ttft 看似健康,兩數字互相矛盾。
+	// 排隊等待 = (At - ScheduledAt) - Latency,floor 0 防時鐘偏移。
+	if s.TTFT > 0 {
+		ttft := s.TTFT
+		if !s.ScheduledAt.IsZero() {
+			if queueDelay := s.At.Sub(s.ScheduledAt) - s.Latency; queueDelay > 0 {
+				ttft += queueDelay
+			}
+		}
+		if ns := int64(ttft); ns > 0 {
+			_ = c.ttftHist.RecordValue(ns)
 		}
 	}
 	if s.StepName != "" {

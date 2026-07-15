@@ -47,7 +47,10 @@ type HistogramExport struct {
 	Hist    HistEnvelope `json:"hist"`
 	// CorrHist is the coordinated-omission-corrected latency histogram (rate mode).
 	// Empty in VU mode; merged across workers like Hist.
-	CorrHist HistEnvelope  `json:"corr_hist,omitempty"`
+	CorrHist HistEnvelope `json:"corr_hist,omitempty"`
+	// TTFTHist is the time-to-first-token histogram (stream steps only).
+	// Empty when the scenario has no stream steps; merged across workers like Hist.
+	TTFTHist HistEnvelope  `json:"ttft_hist,omitempty"`
 	Steps    []StepExport  `json:"steps,omitempty"`
 	Groups   []GroupExport `json:"groups,omitempty"`
 	// ErrorBreakdown carries per-cause failure counts so the coordinator can
@@ -100,6 +103,9 @@ func (c *Collector) Export() HistogramExport {
 	if c.corrHist.TotalCount() > 0 {
 		exp.CorrHist = exportHist(c.corrHist)
 	}
+	if c.ttftHist.TotalCount() > 0 {
+		exp.TTFTHist = exportHist(c.ttftHist)
+	}
 	if len(c.sum.ErrorBreakdown) > 0 {
 		exp.ErrorBreakdown = make(map[ErrorKind]int64, len(c.sum.ErrorBreakdown))
 		for k, v := range c.sum.ErrorBreakdown {
@@ -138,6 +144,7 @@ func MergeExports(exports []HistogramExport) Summary {
 
 	merged := hdrhistogram.New(histMinNs, histMaxNs, histSigFigs)
 	mergedCorr := hdrhistogram.New(histMinNs, histMaxNs, histSigFigs)
+	mergedTTFT := hdrhistogram.New(histMinNs, histMaxNs, histSigFigs)
 
 	stepHists := make(map[string]*hdrhistogram.Histogram)
 	stepSums := make(map[string]*StepSummary)
@@ -177,6 +184,9 @@ func MergeExports(exports []HistogramExport) Summary {
 		}
 		if h := e.CorrHist.toHist(); h != nil {
 			mergedCorr.Merge(h)
+		}
+		if h := e.TTFTHist.toHist(); h != nil {
+			mergedTTFT.Merge(h)
 		}
 
 		for _, st := range e.Steps {
@@ -218,6 +228,13 @@ func MergeExports(exports []HistogramExport) Summary {
 		sum.CorrectedP90 = nsToD(mergedCorr.ValueAtQuantile(90))
 		sum.CorrectedP95 = nsToD(mergedCorr.ValueAtQuantile(95))
 		sum.CorrectedP99 = nsToD(mergedCorr.ValueAtQuantile(99))
+	}
+	if mergedTTFT.TotalCount() > 0 {
+		sum.HasTTFT = true
+		sum.TTFTP50 = nsToD(mergedTTFT.ValueAtQuantile(50))
+		sum.TTFTP90 = nsToD(mergedTTFT.ValueAtQuantile(90))
+		sum.TTFTP95 = nsToD(mergedTTFT.ValueAtQuantile(95))
+		sum.TTFTP99 = nsToD(mergedTTFT.ValueAtQuantile(99))
 	}
 
 	if len(stepOrder) > 0 {

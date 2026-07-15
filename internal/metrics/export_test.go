@@ -114,3 +114,42 @@ func TestExportRoundTripsThroughJSON(t *testing.T) {
 	assert.Equal(t, direct.P99, viaJSON.P99)
 	assert.Equal(t, direct.Total, viaJSON.Total)
 }
+
+// TTFT histogram 必須通過 export→JSON→merge 全鏈——漏了任何一站,
+// 分散式模式會靜默丟掉 TTFT 指標(v31-2 教訓:契約對照實作驗證)。
+func TestMergeExportsCarriesTTFT(t *testing.T) {
+	mk := func(ttftMs int64) HistogramExport {
+		c := NewCollector(4)
+		c.Add(Sample{Latency: 200 * time.Millisecond, TTFT: time.Duration(ttftMs) * time.Millisecond, StatusCode: 200})
+		c.Add(Sample{Latency: 250 * time.Millisecond, TTFT: time.Duration(ttftMs+10) * time.Millisecond, StatusCode: 200})
+		_ = c.Stop()
+		return c.Export()
+	}
+	e1, e2 := mk(40), mk(80)
+
+	// 模擬跨節點傳輸:JSON 往返後合併
+	raw1, err := json.Marshal(e1)
+	require.NoError(t, err)
+	raw2, err := json.Marshal(e2)
+	require.NoError(t, err)
+	var d1, d2 HistogramExport
+	require.NoError(t, json.Unmarshal(raw1, &d1))
+	require.NoError(t, json.Unmarshal(raw2, &d2))
+
+	sum := MergeExports([]HistogramExport{d1, d2})
+
+	require.True(t, sum.HasTTFT, "合併後 TTFT 不可靜默消失")
+	assert.InDelta(t, 40, sum.TTFTP50.Milliseconds(), 15, "p50 應落在兩節點分佈內")
+	assert.InDelta(t, 90, sum.TTFTP99.Milliseconds(), 10)
+}
+
+// 無 TTFT 的 worker 匯出:合併結果 HasTTFT 維持 false。
+func TestMergeExportsNoTTFT(t *testing.T) {
+	c := NewCollector(4)
+	c.Add(Sample{Latency: 10 * time.Millisecond, StatusCode: 200})
+	_ = c.Stop()
+
+	sum := MergeExports([]HistogramExport{c.Export()})
+
+	assert.False(t, sum.HasTTFT)
+}

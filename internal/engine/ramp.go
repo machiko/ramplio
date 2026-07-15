@@ -39,6 +39,9 @@ type RampStep struct {
 	// WSMode is the websocket connection strategy: "" / "per_request" opens a
 	// fresh connection per exchange; "persistent" reuses one per VU lifetime.
 	WSMode string
+	// Stream marks the response as a measured stream: "sse" enables streaming
+	// reads with TTFT recorded alongside total latency (HTTP steps only).
+	Stream string
 	// If is evaluated before executing; the step is skipped when false.
 	If   string
 	Loop int // 0/1 = once, N = repeat N times per VU iteration
@@ -636,6 +639,7 @@ func (e *RampEngine) runRateWorker(ctx context.Context, jobs <-chan time.Time, i
 				ScheduledAt: scheduledAt,
 				StepName:    step.Name,
 				Group:       step.Group,
+				TTFT:        result.TTFT,
 			})
 
 			if result.Error != nil {
@@ -743,6 +747,7 @@ func (e *RampEngine) runVU(ctx context.Context) {
 					At:         time.Now(),
 					StepName:   step.Name,
 					Group:      step.Group,
+					TTFT:       result.TTFT,
 				})
 
 				if result.Error != nil {
@@ -887,6 +892,7 @@ func renderRequest(step RampStep, ctx *scenarios.VarContext) (protocols.Request,
 		URL:     url,
 		Headers: headers,
 		Body:    body,
+		Stream:  step.Stream == "sse",
 	}, nil
 }
 

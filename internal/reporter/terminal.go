@@ -55,6 +55,23 @@ func PrintSummary(w io.Writer, sum metrics.Summary) {
 		}
 	}
 
+	// 串流回應(stream: sse):使用者體感由「開始回應」決定——
+	// 0.5 秒開始吐字與 10 秒收完全文是兩種體驗,兩個數字並陳不可只留一個。
+	// 基準一致性:rate 模式下 TTFT 是 CO 修正值(含排隊等待),完整回應
+	// 必須同用使用者實感值(CorrectedP*),否則會印出「開始回應比完整
+	// 回應慢」的倒掛矛盾;VU 模式兩者皆原始值,天然一致。
+	if sum.HasTTFT {
+		section("串流回應(開始回應 vs 完整回應)")
+		fullP50, fullP99 := sum.P50, sum.P99
+		if sum.HasCorrected {
+			fullP50, fullP99 = sum.CorrectedP50, sum.CorrectedP99
+		}
+		line("p50（開始回應）：", formatDuration(sum.TTFTP50))
+		line("p99（開始回應）：", formatDuration(sum.TTFTP99))
+		line("p50（完整回應）：", formatDuration(fullP50))
+		line("p99（完整回應）：", formatDuration(fullP99))
+	}
+
 	section("回應狀態")
 	success := sum.Total - sum.Errors
 	if sum.Total > 0 {

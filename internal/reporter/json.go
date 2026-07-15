@@ -23,7 +23,11 @@ type Report struct {
 	// only): what the user actually waits, counted from each request's scheduled
 	// dispatch time. Nil in VU mode, where there is no schedule to omit against.
 	CorrectedLatency *CorrectedLatencyMs `json:"corrected_latency,omitempty"`
-	Steps            []StepReport        `json:"steps,omitempty"`
+	// TTFT is the time-to-first-token distribution for stream steps (stream: sse):
+	// when the response *starts* arriving, as opposed to Latency which measures
+	// the full response. Nil when the scenario has no stream steps.
+	TTFT  *TTFTMs      `json:"ttft,omitempty"`
+	Steps []StepReport `json:"steps,omitempty"`
 	// ErrorBreakdown lists failed requests grouped by plain-language cause.
 	ErrorBreakdown []ErrorBreakdownRow `json:"error_breakdown,omitempty"`
 	Verdict        Interpretation      `json:"verdict"`
@@ -43,6 +47,16 @@ type LatencyMs struct {
 
 // CorrectedLatencyMs holds coordinated-omission-corrected percentiles in ms.
 type CorrectedLatencyMs struct {
+	P50Ms int64 `json:"p50_ms"`
+	P90Ms int64 `json:"p90_ms"`
+	P95Ms int64 `json:"p95_ms"`
+	P99Ms int64 `json:"p99_ms"`
+}
+
+// TTFTMs holds time-to-first-token percentiles in ms (stream steps only).
+// rate 模式下為 CO 修正值(從排定時刻起算,含排隊等待),與
+// corrected_latency 同基準可直接比較;VU 模式為原始量測值。
+type TTFTMs struct {
 	P50Ms int64 `json:"p50_ms"`
 	P90Ms int64 `json:"p90_ms"`
 	P95Ms int64 `json:"p95_ms"`
@@ -86,6 +100,14 @@ func SummaryToReport(sum metrics.Summary) Report {
 			P90Ms: sum.CorrectedP90.Milliseconds(),
 			P95Ms: sum.CorrectedP95.Milliseconds(),
 			P99Ms: sum.CorrectedP99.Milliseconds(),
+		}
+	}
+	if sum.HasTTFT {
+		r.TTFT = &TTFTMs{
+			P50Ms: sum.TTFTP50.Milliseconds(),
+			P90Ms: sum.TTFTP90.Milliseconds(),
+			P95Ms: sum.TTFTP95.Milliseconds(),
+			P99Ms: sum.TTFTP99.Milliseconds(),
 		}
 	}
 	for _, s := range sum.Steps {

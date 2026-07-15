@@ -129,6 +129,45 @@ always use per-request connections: they run once and have no VU lifetime.
 
 ---
 
+## 串流回應與 TTFT(stream: sse)
+
+LLM/RAG 類 API 常以 SSE 串流輸出。宣告 `stream: sse` 後,該步驟改以串流方式
+讀取回應,並量測 **TTFT(time to first token)——首個 body chunk 到達的耗時**,
+與完整回應時間並陳:
+
+```yaml
+steps:
+  - name: RAG query
+    method: POST
+    url: https://api.example.com/chat
+    stream: sse               # 啟用串流量測(TTFT)
+    body: '{"query": "{{data.question}}"}'
+
+thresholds:
+  ttft_p95_ms: 800            # 守門「開始回應」的 p95
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `stream` | string | no | `sse` 啟用串流讀取與 TTFT 量測;僅 HTTP 步驟適用。 |
+| `thresholds.ttft_p95_ms` | number | no | TTFT p95 上限(ms);設定後場景必須含 stream 步驟,否則視為設定錯誤以失敗結束(門檻不可形同虛設)。 |
+
+誠實邊界:
+
+- **TTFT ≠ TTFB**:TTFB 是 HTTP header 到達,TTFT 是第一段回應內容到達——
+  串流體感由後者決定,ramplio 量的是後者。
+- **rate 模式含 CO 修正**:generator 追不上排程時,使用者從「請求應送出」
+  就開始等——TTFT 與 `corrected_latency` 同一模型,從排定時刻起算,
+  排隊等待計入「開始回應」。VU 模式無排程概念,為原始量測值。
+  JSON 報告的 `ttft` 區段同此基準:rate 模式下與 `corrected_latency`
+  直接可比,不要拿去跟原始 `latency` 對照(基準不同)。
+- 報告顯示「開始回應(TTFT)/完整回應」兩組數字,不可只看其一:0.5 秒開始
+  吐字與 10 秒收完全文是兩個不同的問題。
+- 回應 body 上限與非串流一致(1 MiB);超過上限時只統計讀到的部分。
+- 非 stream 步驟的量測路徑完全不變。
+
+---
+
 ## Capture
 
 Extract values from a response and store them in the VU's variable context.

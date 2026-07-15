@@ -10,6 +10,9 @@ type Sample struct {
 	At         time.Time
 	StepName   string // "" = URL mode; non-empty enables per-step bucketing
 	Group      string // optional group name for aggregate group reporting
+	// TTFT 是串流回應首個 body chunk 到達的耗時(stream: sse 步驟才有);
+	// 0 = 不適用。收進獨立 histogram,與總延遲並陳。
+	TTFT time.Duration
 	// ScheduledAt is the time this request was *due* to be dispatched per the
 	// target rate. Set only in rate (open) mode. The collector uses At-ScheduledAt
 	// as the coordinated-omission-corrected latency: when the generator can't keep
