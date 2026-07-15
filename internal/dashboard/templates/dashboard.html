@@ -733,6 +733,22 @@
     .compare-conclusion.regressed { color: var(--red); }
     .compare-conclusion.ok        { color: var(--green); }
 
+    /* 串流回應(stream: sse)TTFT 結果卡片 */
+    .ttft-section { padding: 14px 24px 0; }
+    .ttft-card {
+      padding: 12px 16px;
+      border-radius: 8px;
+      border-left: 3px solid var(--accent2);
+      background: var(--card);
+    }
+    .ttft-grid {
+      display: grid; grid-template-columns: auto 1fr 1fr; gap: 4px 18px;
+      font-size: 12px; color: var(--text); line-height: 1.8;
+      font-variant-numeric: tabular-nums;
+    }
+    .ttft-grid .ttft-head { color: var(--muted); font-weight: 600; }
+    .ttft-note { font-size: 11px; color: var(--muted); margin-top: 8px; opacity: .85; }
+
     /* 目標系統觀測（--observe trace 關聯）結果卡片 */
     .observe-section { padding: 14px 24px 0; }
     .observe-card {
@@ -2316,6 +2332,27 @@
       </div>
     </div>
 
+    <!-- 串流回應(stream: sse):文案與 terminal 同源;
+         完整回應數字由後端配對好基準(rate 模式=使用者實感值),前端不自行對照 -->
+    <div v-if="finalResult?.ttft" class="ttft-section">
+      <div class="diag-section-title">串流回應（開始回應 vs 完整回應）</div>
+      <div class="ttft-card">
+        <div class="ttft-grid">
+          <span class="ttft-head"></span><span class="ttft-head">p50</span><span class="ttft-head">p99</span>
+          <span>開始回應</span>
+          <span>{{ finalResult.ttft.p50_ms }}ms</span>
+          <span>{{ finalResult.ttft.p99_ms }}ms</span>
+          <span>完整回應</span>
+          <span>{{ finalResult.ttft.full_p50_ms }}ms</span>
+          <span>{{ finalResult.ttft.full_p99_ms }}ms</span>
+        </div>
+        <div class="ttft-note">
+          串流體感由「開始回應」決定——0.5 秒開始吐字與 10 秒收完全文是兩種體驗，兩個數字都要看。
+          <template v-if="finalResult?.corrected_p99_ms">本卡片為壓力下使用者實感值（含排隊等待），與上方「p99 Latency（伺服器處理）」基準不同，數字不同是正常的。</template>
+        </div>
+      </div>
+    </div>
+
     <!-- 容量回歸比較：文案與 CLI renderComparison 同源 -->
     <div v-if="finalResult?.compare" class="compare-section">
       <div class="diag-section-title">容量回歸比較（本次 vs 基準）</div>
@@ -2380,7 +2417,7 @@
       </div>
       <div class="kpi">
         <div class="kpi-label-row">
-          <div class="kpi-label">p99 Latency</div>
+          <div class="kpi-label">{{ finalResult?.corrected_p99_ms ? 'p99 Latency（伺服器處理）' : 'p99 Latency' }}</div>
           <div class="tip-wrap">
             <div class="tip-icon">?</div>
             <div class="tip-box">
@@ -2398,6 +2435,10 @@
         <div class="kpi-footer">
           <div class="kpi-sub">p50 {{ finalResult?.p50_ms ?? 0 }}ms · Mean {{ finalResult?.mean_ms ?? 0 }}ms</div>
           <div class="kpi-health" :class="latClass(finalResult?.p99_ms)">{{ finalResult?.verdict?.speed?.label || latLabel(finalResult?.p99_ms) }}</div>
+        </div>
+        <!-- rate 模式:另列使用者實感值(CO 修正,與 TTFT 卡「完整回應」同基準) -->
+        <div v-if="finalResult?.corrected_p99_ms" class="kpi-footer">
+          <div class="kpi-sub">使用者實感 p99 {{ finalResult.corrected_p99_ms }}ms · p50 {{ finalResult.corrected_p50_ms }}ms</div>
         </div>
       </div>
       <div class="kpi">

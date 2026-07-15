@@ -514,3 +514,50 @@ func TestServer_Token_WSWithQueryParam(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotEmpty(t, msg)
 }
+
+// TTFT 快照的 JSON 契約:鍵名釘死(前端讀取依據)、omitempty 缺席語意。
+func TestServer_WebSocket_IncludesTTFTSnap(t *testing.T) {
+	res := &dashboard.RunResult{
+		Total: 100,
+		TTFT:  &dashboard.TTFTSnap{P50Ms: 80, P99Ms: 200, FullP50Ms: 400, FullP99Ms: 900},
+	}
+	ctrl := &mockController{state: dashboard.StateDone, result: res}
+	srv, _ := newTestServer(t, ctrl)
+
+	wsURL := url.URL{Scheme: "ws", Host: srv.Addr(), Path: "/ws"}
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL.String(), nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { conn.Close() })
+
+	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	_, msg, err := conn.ReadMessage()
+	require.NoError(t, err)
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(msg, &payload))
+	result := payload["result"].(map[string]any)
+	ttft, ok := result["ttft"].(map[string]any)
+	require.True(t, ok, "ttft 快照應隨結果送達")
+	assert.Equal(t, float64(80), ttft["p50_ms"])
+	assert.Equal(t, float64(400), ttft["full_p50_ms"])
+}
+
+func TestServer_WebSocket_OmitsTTFTWhenNil(t *testing.T) {
+	ctrl := &mockController{state: dashboard.StateDone, result: &dashboard.RunResult{Total: 100}}
+	srv, _ := newTestServer(t, ctrl)
+
+	wsURL := url.URL{Scheme: "ws", Host: srv.Addr(), Path: "/ws"}
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL.String(), nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { conn.Close() })
+
+	conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	_, msg, err := conn.ReadMessage()
+	require.NoError(t, err)
+
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(msg, &payload))
+	result := payload["result"].(map[string]any)
+	_, present := result["ttft"]
+	assert.False(t, present, "非串流場景 ttft 鍵應缺席")
+}

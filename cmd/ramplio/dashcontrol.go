@@ -386,12 +386,20 @@ func (c *dashController) runLoop(
 				WallSec:  sum.WallTime.Seconds(),
 				Verdict:  reporter.Interpret(sum),
 			}
+			// rate 模式透傳使用者實感延遲,前端據此標示 headline 為
+			// 「伺服器處理」並另列實感值(與 TTFT 卡同基準,不衝突)。
+			if sum.HasCorrected {
+				result.CorrectedP50Ms = sum.CorrectedP50.Milliseconds()
+				result.CorrectedP99Ms = sum.CorrectedP99.Milliseconds()
+			}
 			if c.lastProfile != nil {
 				verdict := dashboard.InterpretResult(*c.lastProfile, *result)
 				result.GuidedVerdict = &verdict
 				c.lastProfile = nil
 			}
 			result.Observe = obsSnap
+			// 串流量測快照(非串流場景為 nil,卡片缺席)。
+			result.TTFT = dashboard.TTFTSnapFrom(sum)
 			// 與已上傳基準比較(純計算,鎖內安全)。失敗只警告不掛卡片——
 			// 比較是結果的補充,不可污染主流程(比照 observe/sink 慣例)。
 			if c.pendingBaseline != nil {

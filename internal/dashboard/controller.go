@@ -46,6 +46,12 @@ type RunResult struct {
 	MeanMs   int64   `json:"mean_ms"`
 	RPS      float64 `json:"rps"`
 	WallSec  float64 `json:"wall_sec"`
+	// CorrectedP50Ms/P99Ms 是 rate 模式的使用者實感延遲(CO 修正,含排隊
+	// 等待);零值 = VU 模式不適用。前端據此把 headline 延遲標示為
+	// 「伺服器處理」並另列實感值——與 TTFT 卡的「完整回應」同基準,
+	// 否則同屏兩個 p99(原始 vs 實感)互相衝突。
+	CorrectedP50Ms int64 `json:"corrected_p50_ms,omitempty"`
+	CorrectedP99Ms int64 `json:"corrected_p99_ms,omitempty"`
 	// Verdict is the shared plain-language reading (same source as the terminal,
 	// JSON and HTML outputs) so the browser speaks identical wording to the CLI.
 	Verdict       reporter.Interpretation `json:"verdict"`
@@ -54,6 +60,8 @@ type RunResult struct {
 	Observe *ObserveSnap `json:"observe,omitempty"`
 	// Compare 是與已上傳基準的容量回歸比較(有載入 baseline 才有)。
 	Compare *CompareSnap `json:"compare,omitempty"`
+	// TTFT 是串流回應量測(場景含 stream: sse 步驟才有)。
+	TTFT *TTFTSnap `json:"ttft,omitempty"`
 }
 
 // ScenarioMeta holds display metadata for a YAML scenario loaded via --scenario flag.
