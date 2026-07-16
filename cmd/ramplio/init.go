@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -98,7 +99,13 @@ func runWizard() error {
 		}
 	}
 
-	// ── 3. 測試步驟 ──────────────────────────────────────────
+	// ── 3. 變動參數 / 資料檔 ────────────────────────────────
+	// Collected before the test steps so the user knows which {{data.X}} fields
+	// exist while writing paths and bodies (a data reference the user cannot
+	// foresee is a reference they will not write).
+	dataCols, dataFileName, dataRows := promptDataFileConfig(sc, auth)
+
+	// ── 4. 測試步驟 ──────────────────────────────────────────
 	fmt.Println()
 	fmt.Println("【測試步驟】")
 	fmt.Println("  設定要測試的頁面或 API（可加入多個）")
@@ -148,7 +155,13 @@ func runWizard() error {
 		}
 	}
 
-	// ── 4. 負載設定 ──────────────────────────────────────────
+	// 交叉檢查：步驟引用的 {{data.X}} 與宣告的變動參數欄位是否對得起來，
+	// 讓打錯字或宣告了卻沒引用的情況在產生時就浮現，而非拖到 run 才失敗。
+	for _, w := range dataParamWarnings(steps, dataCols) {
+		fmt.Println("  ⚠  " + w)
+	}
+
+	// ── 5. 負載設定 ──────────────────────────────────────────
 	fmt.Println()
 	fmt.Println("【負載設定】")
 
@@ -167,7 +180,7 @@ func runWizard() error {
 	shapeMap := map[string]string{"1": "steady", "2": "spike", "3": "soak"}
 	shape := shapeMap[wChoice(sc, "  請輸入 1-3", []string{"1", "2", "3"}, "1")]
 
-	// ── 5. 閾值設定 ──────────────────────────────────────────
+	// ── 6. 閾值設定 ──────────────────────────────────────────
 	fmt.Println()
 	fmt.Println("【通過 / 失敗標準（可選）】")
 	fmt.Println("  設定後，壓測結果超標時 ramplio 會以 exit code 1 退出（可整合 CI）")
@@ -175,18 +188,29 @@ func runWizard() error {
 	errPctStr := wPrompt(sc, "錯誤率超過多少 % 算失敗？（例如 1，直接按 Enter 略過）", "")
 	p95Str := wPrompt(sc, "p95 回應時間超過多少毫秒算失敗？（例如 500，直接按 Enter 略過）", "")
 
-	// ── 6. 輸出 ──────────────────────────────────────────────
+	// ── 7. 輸出 ──────────────────────────────────────────────
 	fmt.Println()
 	outputFile := wPrompt(sc, "要把 scenario 存成哪個檔名？", "scenario.yaml")
 	if !strings.HasSuffix(outputFile, ".yaml") && !strings.HasSuffix(outputFile, ".yml") {
 		outputFile += ".yaml"
 	}
 
-	// ── 7. 產生 YAML ─────────────────────────────────────────
-	yaml := generateYAML(name, baseURL, auth, steps, vus, durationStr, shape, errPctStr, p95Str)
+	// ── 8. 產生 YAML ─────────────────────────────────────────
+	yaml := generateYAML(name, baseURL, auth, steps, vus, durationStr, shape, errPctStr, p95Str, dataFileName)
 
 	if err := os.WriteFile(outputFile, []byte(yaml), 0644); err != nil {
 		return fmt.Errorf("寫入檔案失敗：%w", err)
+	}
+
+	// 產生配套的資料檔（若有定義變動參數）
+	if len(dataCols) > 0 && dataFileName != "" {
+		csvContent, err := generateCSV(dataCols, dataRows)
+		if err != nil {
+			return fmt.Errorf("產生資料檔失敗：%w", err)
+		}
+		if err := os.WriteFile(dataFileName, []byte(csvContent), 0644); err != nil {
+			return fmt.Errorf("寫入資料檔失敗：%w", err)
+		}
 	}
 
 	fmt.Println()
@@ -204,6 +228,168 @@ func runWizard() error {
 	return nil
 }
 
+// maxDataRows caps generated data-file rows so a mistyped count (e.g. an extra
+// zero) cannot try to materialize an unreasonably large file.
+const maxDataRows = 1_000_000
+
+// defaultDataRows is the row count used when the user accepts the default or
+// enters an unparseable / non-positive value.
+const defaultDataRows = 100
+
+// promptDataFileConfig gathers optional data-driven parameters and returns the
+// columns, the output CSV filename, and the row count. Empty results mean the
+// user opted out, or that cookie auth already owns vars_from (which a data file
+// would otherwise conflict with — a scenario has a single vars_from source).
+func promptDataFileConfig(sc *bufio.Scanner, auth wizardAuth) ([]dataColumn, string, int) {
+	fmt.Println()
+	fmt.Println("【變動參數 / 資料檔（可選）】")
+	if auth.kind == "cookie" {
+		fmt.Println("  ⓘ  目前使用登入 session 資料檔，此版本尚不支援再疊加變動參數，略過。")
+		return nil, "", 0
+	}
+
+	fmt.Println("  讓每個虛擬用戶帶不同的參數值（例如不同 user_id、搜尋關鍵字）。")
+	fmt.Println("  接下來設定測試步驟時，在路徑或 body 中用 {{data.欄位名}} 引用，ramplio 會自動生成資料檔。")
+	if !wYN(sc, "要設定變動參數嗎？", false) {
+		return nil, "", 0
+	}
+
+	// collectDataColumns always returns at least one column (the first field name
+	// is required), so no empty-result guard is needed here.
+	cols := collectDataColumns(sc)
+
+	rows := defaultDataRows
+	rowsStr := wPrompt(sc, "要產生幾列資料？（建議 >= 虛擬用戶數）", strconv.Itoa(defaultDataRows))
+	if v, err := strconv.Atoi(strings.TrimSpace(rowsStr)); err == nil && v > 0 {
+		rows = v
+	}
+	if rows > maxDataRows {
+		fmt.Printf("  ⚠  列數上限為 %d，已自動調整。\n", maxDataRows)
+		rows = maxDataRows
+	}
+
+	fileName := wPrompt(sc, "資料檔要存成哪個檔名？", "data.csv")
+	if !strings.HasSuffix(strings.ToLower(fileName), ".csv") {
+		fileName += ".csv"
+	}
+	return cols, fileName, rows
+}
+
+// collectDataColumns interactively gathers the variable-parameter columns the
+// user wants in the generated data file. Value generation itself lives in
+// generateCSV; this only maps answers to dataColumn declarations.
+func collectDataColumns(sc *bufio.Scanner) []dataColumn {
+	var cols []dataColumn
+	for {
+		name := wRequired(sc, "  參數欄位名稱？（例如 user_id、keyword）")
+		if dataColumnNamed(cols, name) {
+			fmt.Printf("  ⚠  已經有一個叫 %q 的欄位了，請換一個名稱。\n", name)
+			continue
+		}
+
+		fmt.Println("  這個欄位的值怎麼產生？")
+		fmt.Println("  [1] 遞增數字（1, 2, 3…，適合 ID）")
+		fmt.Println("  [2] 隨機 UUID")
+		fmt.Println("  [3] Email（loadtest+1@example.com…）")
+		fmt.Println("  [4] 自訂清單（從你提供的值中循環挑選）")
+		fmt.Println("  [5] 留空範本（產生 <欄名> 佔位，之後自己填真實資料）")
+		choice := wChoice(sc, "  請輸入 1-5", []string{"1", "2", "3", "4", "5"}, "1")
+
+		col := dataColumn{name: name}
+		switch choice {
+		case "1":
+			col.kind = colIntSeq
+			col.startSet = true
+			startStr := wPrompt(sc, "  從哪個數字開始？", "1")
+			if v, err := strconv.Atoi(strings.TrimSpace(startStr)); err == nil {
+				col.start = v
+			} else {
+				col.start = 1
+			}
+		case "2":
+			col.kind = colUUID
+		case "3":
+			col.kind = colEmail
+		case "4":
+			col.kind = colList
+			for {
+				raw := wRequired(sc, "  請輸入清單值，用逗號分隔（例如 apple,banana,cherry）")
+				for _, v := range strings.Split(raw, ",") {
+					if t := strings.TrimSpace(v); t != "" {
+						col.listValues = append(col.listValues, t)
+					}
+				}
+				if len(col.listValues) > 0 {
+					break
+				}
+				fmt.Println("  ⚠  至少要提供一個值。")
+			}
+		case "5":
+			col.kind = colPlaceholder
+		}
+		cols = append(cols, col)
+
+		if !wYN(sc, "  還有其他參數欄位嗎？", false) {
+			break
+		}
+	}
+	return cols
+}
+
+// dataColumnNamed reports whether cols already contains a column called name.
+func dataColumnNamed(cols []dataColumn, name string) bool {
+	for _, c := range cols {
+		if c.name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// dataTokenRE matches {{data.KEY}} references in step paths and bodies, mirroring
+// the runtime template contract in internal/scenarios/template.go.
+var dataTokenRE = regexp.MustCompile(`\{\{\s*data\.([^}\s]+)\s*\}\}`)
+
+// dataParamWarnings cross-checks the declared data columns against the {{data.X}}
+// tokens actually referenced in the steps. It surfaces two silent failure modes
+// at generation time: a reference to an undeclared column (which fails at run
+// time on every request) and a declared column that no step uses (which makes
+// the whole data file a no-op). Warnings are advisory, never blocking.
+func dataParamWarnings(steps []wizardStep, cols []dataColumn) []string {
+	declared := make(map[string]bool, len(cols))
+	for _, c := range cols {
+		declared[c.name] = true
+	}
+
+	referenced := make(map[string]bool)
+	var refOrder []string
+	for _, s := range steps {
+		for _, src := range []string{s.path, s.body} {
+			for _, m := range dataTokenRE.FindAllStringSubmatch(src, -1) {
+				if key := m[1]; !referenced[key] {
+					referenced[key] = true
+					refOrder = append(refOrder, key)
+				}
+			}
+		}
+	}
+
+	var warnings []string
+	for _, key := range refOrder {
+		if !declared[key] {
+			warnings = append(warnings, fmt.Sprintf(
+				"步驟中引用了 {{data.%s}}，但沒有宣告這個變動參數欄位——執行時每個 request 都會失敗。", key))
+		}
+	}
+	for _, c := range cols {
+		if !referenced[c.name] {
+			warnings = append(warnings, fmt.Sprintf(
+				"宣告了變動參數欄位 %q，但沒有任何步驟引用 {{data.%s}}——這個欄位不會有效果。", c.name, c.name))
+		}
+	}
+	return warnings
+}
+
 func generateYAML(
 	name, baseURL string,
 	auth wizardAuth,
@@ -211,6 +397,7 @@ func generateYAML(
 	vus int,
 	duration, shape string,
 	errPctStr, p95Str string,
+	dataFile string,
 ) string {
 	var b strings.Builder
 
@@ -218,10 +405,18 @@ func generateYAML(
 	b.WriteString("vars:\n")
 	b.WriteString("  base_url: " + yq(baseURL) + "\n")
 
-	if auth.kind == "cookie" {
+	// Cookie auth owns vars_from (session CSV). When it is absent, a generated
+	// data file can claim vars_from for data-driven parameters instead — the two
+	// never coexist, since a scenario has a single vars_from source.
+	switch {
+	case auth.kind == "cookie":
 		b.WriteString("\nvars_from:\n")
 		b.WriteString("  file: " + auth.csvFile + "\n")
 		b.WriteString("  mode: sequential\n")
+	case dataFile != "":
+		b.WriteString("\nvars_from:\n")
+		b.WriteString("  file: " + dataFile + "\n")
+		b.WriteString("  mode: random\n")
 	}
 
 	b.WriteString("\n")
