@@ -191,7 +191,8 @@ func runWizard() error {
 	// ── 7. 輸出 ──────────────────────────────────────────────
 	fmt.Println()
 	outputFile := wPrompt(sc, "要把 scenario 存成哪個檔名？", "scenario.yaml")
-	if !strings.HasSuffix(outputFile, ".yaml") && !strings.HasSuffix(outputFile, ".yml") {
+	lowerOut := strings.ToLower(outputFile)
+	if !strings.HasSuffix(lowerOut, ".yaml") && !strings.HasSuffix(lowerOut, ".yml") {
 		outputFile += ".yaml"
 	}
 
