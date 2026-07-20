@@ -1,4 +1,4 @@
-package main
+package scenariogen
 
 import (
 	"encoding/csv"
@@ -18,7 +18,7 @@ func parseCSV(t *testing.T, content string) [][]string {
 }
 
 func TestGenerateCSV_IntSeqDefaultStart(t *testing.T) {
-	out, err := generateCSV([]dataColumn{{name: "id", kind: colIntSeq}}, 3)
+	out, err := GenerateCSV([]DataColumn{{Name: "id", Kind: KindIntSeq}}, 3)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -28,7 +28,7 @@ func TestGenerateCSV_IntSeqDefaultStart(t *testing.T) {
 }
 
 func TestGenerateCSV_IntSeqCustomStart(t *testing.T) {
-	out, err := generateCSV([]dataColumn{{name: "uid", kind: colIntSeq, start: 100, startSet: true}}, 2)
+	out, err := GenerateCSV([]DataColumn{{Name: "uid", Kind: KindIntSeq, Start: 100, StartSet: true}}, 2)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -40,7 +40,7 @@ func TestGenerateCSV_IntSeqCustomStart(t *testing.T) {
 // An explicit start of 0 must be honored, not silently coerced to 1 — otherwise
 // zero-based IDs (array indices, pagination offsets) are impossible to express.
 func TestGenerateCSV_IntSeqStartZero(t *testing.T) {
-	out, err := generateCSV([]dataColumn{{name: "idx", kind: colIntSeq, start: 0, startSet: true}}, 3)
+	out, err := GenerateCSV([]DataColumn{{Name: "idx", Kind: KindIntSeq, Start: 0, StartSet: true}}, 3)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -50,11 +50,11 @@ func TestGenerateCSV_IntSeqStartZero(t *testing.T) {
 }
 
 // Duplicate column names produce a duplicate CSV header, which LoadDataFile
-// resolves by silently overwriting — so generateCSV must reject them outright.
+// resolves by silently overwriting — so GenerateCSV must reject them outright.
 func TestGenerateCSV_DuplicateColumnName(t *testing.T) {
-	_, err := generateCSV([]dataColumn{
-		{name: "id", kind: colIntSeq, startSet: true},
-		{name: "id", kind: colEmail},
+	_, err := GenerateCSV([]DataColumn{
+		{Name: "id", Kind: KindIntSeq, StartSet: true},
+		{Name: "id", Kind: KindEmail},
 	}, 2)
 	if err == nil {
 		t.Fatal("expected error for duplicate column name, got nil")
@@ -62,7 +62,7 @@ func TestGenerateCSV_DuplicateColumnName(t *testing.T) {
 }
 
 func TestGenerateCSV_Email(t *testing.T) {
-	out, err := generateCSV([]dataColumn{{name: "email", kind: colEmail}}, 2)
+	out, err := GenerateCSV([]DataColumn{{Name: "email", Kind: KindEmail}}, 2)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -76,8 +76,8 @@ func TestGenerateCSV_Email(t *testing.T) {
 }
 
 func TestGenerateCSV_ListCycles(t *testing.T) {
-	out, err := generateCSV([]dataColumn{
-		{name: "kw", kind: colList, listValues: []string{"a", "b"}},
+	out, err := GenerateCSV([]DataColumn{
+		{Name: "kw", Kind: KindList, ListValues: []string{"a", "b"}},
 	}, 3)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -88,7 +88,7 @@ func TestGenerateCSV_ListCycles(t *testing.T) {
 }
 
 func TestGenerateCSV_Placeholder(t *testing.T) {
-	out, err := generateCSV([]dataColumn{{name: "token", kind: colPlaceholder}}, 2)
+	out, err := GenerateCSV([]DataColumn{{Name: "token", Kind: KindPlaceholder}}, 2)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestGenerateCSV_Placeholder(t *testing.T) {
 }
 
 func TestGenerateCSV_UUIDFormatAndUniqueness(t *testing.T) {
-	out, err := generateCSV([]dataColumn{{name: "req_id", kind: colUUID}}, 5)
+	out, err := GenerateCSV([]DataColumn{{Name: "req_id", Kind: KindUUID}}, 5)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -120,9 +120,9 @@ func TestGenerateCSV_UUIDFormatAndUniqueness(t *testing.T) {
 }
 
 func TestGenerateCSV_MultipleColumns(t *testing.T) {
-	out, err := generateCSV([]dataColumn{
-		{name: "id", kind: colIntSeq},
-		{name: "email", kind: colEmail},
+	out, err := GenerateCSV([]DataColumn{
+		{Name: "id", Kind: KindIntSeq},
+		{Name: "email", Kind: KindEmail},
 	}, 2)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -138,8 +138,8 @@ func TestGenerateCSV_MultipleColumns(t *testing.T) {
 
 func TestGenerateCSV_EscapesSpecialChars(t *testing.T) {
 	// A list value containing a comma must survive the CSV round-trip intact.
-	out, err := generateCSV([]dataColumn{
-		{name: "q", kind: colList, listValues: []string{"a,b", "c"}},
+	out, err := GenerateCSV([]DataColumn{
+		{Name: "q", Kind: KindList, ListValues: []string{"a,b", "c"}},
 	}, 2)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -152,18 +152,18 @@ func TestGenerateCSV_EscapesSpecialChars(t *testing.T) {
 func TestGenerateCSV_Errors(t *testing.T) {
 	tests := []struct {
 		name string
-		cols []dataColumn
+		cols []DataColumn
 		rows int
 	}{
 		{"no columns", nil, 3},
-		{"zero rows", []dataColumn{{name: "id", kind: colIntSeq}}, 0},
-		{"negative rows", []dataColumn{{name: "id", kind: colIntSeq}}, -1},
-		{"empty list values", []dataColumn{{name: "kw", kind: colList}}, 2},
-		{"blank column name", []dataColumn{{name: "", kind: colIntSeq}}, 2},
+		{"zero rows", []DataColumn{{Name: "id", Kind: KindIntSeq}}, 0},
+		{"negative rows", []DataColumn{{Name: "id", Kind: KindIntSeq}}, -1},
+		{"empty list values", []DataColumn{{Name: "kw", Kind: KindList}}, 2},
+		{"blank column name", []DataColumn{{Name: "", Kind: KindIntSeq}}, 2},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, err := generateCSV(tt.cols, tt.rows); err == nil {
+			if _, err := GenerateCSV(tt.cols, tt.rows); err == nil {
 				t.Errorf("expected error for %s, got nil", tt.name)
 			}
 		})

@@ -4,10 +4,10 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"regexp"
 	"strconv"
 	"strings"
 
+	"github.com/machiko/ramplio/v3/internal/scenariogen"
 	"github.com/spf13/cobra"
 )
 
@@ -20,27 +20,6 @@ func newInitCmd() *cobra.Command {
 			return runWizard()
 		},
 	}
-}
-
-type wizardAuth struct {
-	kind          string // "cookie" | "jwt" | ""
-	csvFile       string
-	cookieName    string
-	loginPath     string
-	emailField    string
-	passwordField string
-	loginEmail    string
-	loginPass     string
-	tokenPath     string
-}
-
-type wizardStep struct {
-	name       string
-	path       string
-	method     string
-	body       string
-	statusCode string
-	pauseMs    int
 }
 
 func runWizard() error {
@@ -64,7 +43,7 @@ func runWizard() error {
 	fmt.Println("【登入設定】")
 	needsLogin := wYN(sc, "這個網站需要登入才能進入主要頁面嗎？", false)
 
-	var auth wizardAuth
+	var auth scenariogen.Auth
 
 	if needsLogin {
 		fmt.Println()
@@ -74,7 +53,7 @@ func runWizard() error {
 		choice := wChoice(sc, "請輸入 1 或 2", []string{"1", "2"}, "1")
 
 		if choice == "1" {
-			auth.kind = "cookie"
+			auth.Kind = "cookie"
 			fmt.Println()
 			fmt.Println("  ── Session Cookie 設定 ──")
 			fmt.Println("  你需要先用以下指令預先登入，取得 session cookie：")
@@ -84,18 +63,18 @@ func runWizard() error {
 			fmt.Println("    COUNT=200 \\")
 			fmt.Println("    ./scripts/generate_sessions.sh")
 			fmt.Println()
-			auth.csvFile = wPrompt(sc, "sessions.csv 的路徑？", "sessions.csv")
-			auth.cookieName = wPrompt(sc, "Cookie 的名稱是什麼？（在 DevTools → Application → Cookies 可以看到）", "session")
+			auth.CSVFile = wPrompt(sc, "sessions.csv 的路徑？", "sessions.csv")
+			auth.CookieName = wPrompt(sc, "Cookie 的名稱是什麼？（在 DevTools → Application → Cookies 可以看到）", "session")
 		} else {
-			auth.kind = "jwt"
+			auth.Kind = "jwt"
 			fmt.Println()
 			fmt.Println("  ── JWT Token 設定 ──")
-			auth.loginPath = wPrompt(sc, "登入 API 的路徑？（例如 /auth/login）", "/auth/login")
-			auth.emailField = wPrompt(sc, "帳號欄位名稱？（例如 email、username）", "email")
-			auth.passwordField = wPrompt(sc, "密碼欄位名稱？", "password")
-			auth.loginEmail = wRequired(sc, "測試用帳號？（例如 loadtest@example.com）")
-			auth.loginPass = wRequired(sc, "測試用密碼？")
-			auth.tokenPath = wPrompt(sc, "JWT token 在回應 JSON 的哪個欄位？（例如 $.access_token）", "$.access_token")
+			auth.LoginPath = wPrompt(sc, "登入 API 的路徑？（例如 /auth/login）", "/auth/login")
+			auth.EmailField = wPrompt(sc, "帳號欄位名稱？（例如 email、username）", "email")
+			auth.PasswordField = wPrompt(sc, "密碼欄位名稱？", "password")
+			auth.LoginEmail = wRequired(sc, "測試用帳號？（例如 loadtest@example.com）")
+			auth.LoginPass = wRequired(sc, "測試用密碼？")
+			auth.TokenPath = wPrompt(sc, "JWT token 在回應 JSON 的哪個欄位？（例如 $.access_token）", "$.access_token")
 		}
 	}
 
@@ -110,7 +89,7 @@ func runWizard() error {
 	fmt.Println("【測試步驟】")
 	fmt.Println("  設定要測試的頁面或 API（可加入多個）")
 
-	var steps []wizardStep
+	var steps []scenariogen.Step
 
 	for {
 		fmt.Println()
@@ -141,13 +120,13 @@ func runWizard() error {
 			}
 		}
 
-		steps = append(steps, wizardStep{
-			name:       method + " " + path,
-			path:       path,
-			method:     method,
-			body:       body,
-			statusCode: status,
-			pauseMs:    pauseMs,
+		steps = append(steps, scenariogen.Step{
+			Name:       method + " " + path,
+			Path:       path,
+			Method:     method,
+			Body:       body,
+			StatusCode: status,
+			PauseMs:    pauseMs,
 		})
 
 		if !wYN(sc, "  還有其他要測試的頁面或 API 嗎？", false) {
@@ -157,7 +136,7 @@ func runWizard() error {
 
 	// 交叉檢查：步驟引用的 {{data.X}} 與宣告的變動參數欄位是否對得起來，
 	// 讓打錯字或宣告了卻沒引用的情況在產生時就浮現，而非拖到 run 才失敗。
-	for _, w := range dataParamWarnings(steps, dataCols) {
+	for _, w := range scenariogen.DataParamWarnings(steps, dataCols) {
 		fmt.Println("  ⚠  " + w)
 	}
 
@@ -197,7 +176,7 @@ func runWizard() error {
 	}
 
 	// ── 8. 產生 YAML ─────────────────────────────────────────
-	yaml := generateYAML(name, baseURL, auth, steps, vus, durationStr, shape, errPctStr, p95Str, dataFileName)
+	yaml := scenariogen.GenerateYAML(name, baseURL, auth, steps, vus, durationStr, shape, errPctStr, p95Str, dataFileName)
 
 	if err := os.WriteFile(outputFile, []byte(yaml), 0644); err != nil {
 		return fmt.Errorf("寫入檔案失敗：%w", err)
@@ -205,7 +184,7 @@ func runWizard() error {
 
 	// 產生配套的資料檔（若有定義變動參數）
 	if len(dataCols) > 0 && dataFileName != "" {
-		csvContent, err := generateCSV(dataCols, dataRows)
+		csvContent, err := scenariogen.GenerateCSV(dataCols, dataRows)
 		if err != nil {
 			return fmt.Errorf("產生資料檔失敗：%w", err)
 		}
@@ -241,10 +220,10 @@ const defaultDataRows = 100
 // columns, the output CSV filename, and the row count. Empty results mean the
 // user opted out, or that cookie auth already owns vars_from (which a data file
 // would otherwise conflict with — a scenario has a single vars_from source).
-func promptDataFileConfig(sc *bufio.Scanner, auth wizardAuth) ([]dataColumn, string, int) {
+func promptDataFileConfig(sc *bufio.Scanner, auth scenariogen.Auth) ([]scenariogen.DataColumn, string, int) {
 	fmt.Println()
 	fmt.Println("【變動參數 / 資料檔（可選）】")
-	if auth.kind == "cookie" {
+	if auth.Kind == "cookie" {
 		fmt.Println("  ⓘ  目前使用登入 session 資料檔，此版本尚不支援再疊加變動參數，略過。")
 		return nil, "", 0
 	}
@@ -278,9 +257,9 @@ func promptDataFileConfig(sc *bufio.Scanner, auth wizardAuth) ([]dataColumn, str
 
 // collectDataColumns interactively gathers the variable-parameter columns the
 // user wants in the generated data file. Value generation itself lives in
-// generateCSV; this only maps answers to dataColumn declarations.
-func collectDataColumns(sc *bufio.Scanner) []dataColumn {
-	var cols []dataColumn
+// scenariogen.GenerateCSV; this only maps answers to DataColumn declarations.
+func collectDataColumns(sc *bufio.Scanner) []scenariogen.DataColumn {
+	var cols []scenariogen.DataColumn
 	for {
 		name := wRequired(sc, "  參數欄位名稱？（例如 user_id、keyword）")
 		if dataColumnNamed(cols, name) {
@@ -296,37 +275,37 @@ func collectDataColumns(sc *bufio.Scanner) []dataColumn {
 		fmt.Println("  [5] 留空範本（產生 <欄名> 佔位，之後自己填真實資料）")
 		choice := wChoice(sc, "  請輸入 1-5", []string{"1", "2", "3", "4", "5"}, "1")
 
-		col := dataColumn{name: name}
+		col := scenariogen.DataColumn{Name: name}
 		switch choice {
 		case "1":
-			col.kind = colIntSeq
-			col.startSet = true
+			col.Kind = scenariogen.KindIntSeq
+			col.StartSet = true
 			startStr := wPrompt(sc, "  從哪個數字開始？", "1")
 			if v, err := strconv.Atoi(strings.TrimSpace(startStr)); err == nil {
-				col.start = v
+				col.Start = v
 			} else {
-				col.start = 1
+				col.Start = 1
 			}
 		case "2":
-			col.kind = colUUID
+			col.Kind = scenariogen.KindUUID
 		case "3":
-			col.kind = colEmail
+			col.Kind = scenariogen.KindEmail
 		case "4":
-			col.kind = colList
+			col.Kind = scenariogen.KindList
 			for {
 				raw := wRequired(sc, "  請輸入清單值，用逗號分隔（例如 apple,banana,cherry）")
 				for _, v := range strings.Split(raw, ",") {
 					if t := strings.TrimSpace(v); t != "" {
-						col.listValues = append(col.listValues, t)
+						col.ListValues = append(col.ListValues, t)
 					}
 				}
-				if len(col.listValues) > 0 {
+				if len(col.ListValues) > 0 {
 					break
 				}
 				fmt.Println("  ⚠  至少要提供一個值。")
 			}
 		case "5":
-			col.kind = colPlaceholder
+			col.Kind = scenariogen.KindPlaceholder
 		}
 		cols = append(cols, col)
 
@@ -338,187 +317,13 @@ func collectDataColumns(sc *bufio.Scanner) []dataColumn {
 }
 
 // dataColumnNamed reports whether cols already contains a column called name.
-func dataColumnNamed(cols []dataColumn, name string) bool {
+func dataColumnNamed(cols []scenariogen.DataColumn, name string) bool {
 	for _, c := range cols {
-		if c.name == name {
+		if c.Name == name {
 			return true
 		}
 	}
 	return false
-}
-
-// dataTokenRE matches {{data.KEY}} references in step paths and bodies, mirroring
-// the runtime template contract in internal/scenarios/template.go.
-var dataTokenRE = regexp.MustCompile(`\{\{\s*data\.([^}\s]+)\s*\}\}`)
-
-// dataParamWarnings cross-checks the declared data columns against the {{data.X}}
-// tokens actually referenced in the steps. It surfaces two silent failure modes
-// at generation time: a reference to an undeclared column (which fails at run
-// time on every request) and a declared column that no step uses (which makes
-// the whole data file a no-op). Warnings are advisory, never blocking.
-func dataParamWarnings(steps []wizardStep, cols []dataColumn) []string {
-	declared := make(map[string]bool, len(cols))
-	for _, c := range cols {
-		declared[c.name] = true
-	}
-
-	referenced := make(map[string]bool)
-	var refOrder []string
-	for _, s := range steps {
-		for _, src := range []string{s.path, s.body} {
-			for _, m := range dataTokenRE.FindAllStringSubmatch(src, -1) {
-				if key := m[1]; !referenced[key] {
-					referenced[key] = true
-					refOrder = append(refOrder, key)
-				}
-			}
-		}
-	}
-
-	var warnings []string
-	for _, key := range refOrder {
-		if !declared[key] {
-			warnings = append(warnings, fmt.Sprintf(
-				"步驟中引用了 {{data.%s}}，但沒有宣告這個變動參數欄位——執行時每個 request 都會失敗。", key))
-		}
-	}
-	for _, c := range cols {
-		if !referenced[c.name] {
-			warnings = append(warnings, fmt.Sprintf(
-				"宣告了變動參數欄位 %q，但沒有任何步驟引用 {{data.%s}}——這個欄位不會有效果。", c.name, c.name))
-		}
-	}
-	return warnings
-}
-
-func generateYAML(
-	name, baseURL string,
-	auth wizardAuth,
-	steps []wizardStep,
-	vus int,
-	duration, shape string,
-	errPctStr, p95Str string,
-	dataFile string,
-) string {
-	var b strings.Builder
-
-	b.WriteString("name: " + yq(name) + "\n\n")
-	b.WriteString("vars:\n")
-	b.WriteString("  base_url: " + yq(baseURL) + "\n")
-
-	// Cookie auth owns vars_from (session CSV). When it is absent, a generated
-	// data file can claim vars_from for data-driven parameters instead — the two
-	// never coexist, since a scenario has a single vars_from source.
-	switch {
-	case auth.kind == "cookie":
-		b.WriteString("\nvars_from:\n")
-		b.WriteString("  file: " + auth.csvFile + "\n")
-		b.WriteString("  mode: sequential\n")
-	case dataFile != "":
-		b.WriteString("\nvars_from:\n")
-		b.WriteString("  file: " + dataFile + "\n")
-		b.WriteString("  mode: random\n")
-	}
-
-	b.WriteString("\n")
-	b.WriteString(stagesYAML(vus, duration, shape))
-
-	if auth.kind == "jwt" {
-		loginBody := fmt.Sprintf(`{%q: %q, %q: %q}`,
-			auth.emailField, auth.loginEmail, auth.passwordField, auth.loginPass)
-		b.WriteString("\nsetup:\n")
-		b.WriteString("  - name: 登入取得 JWT\n")
-		b.WriteString("    method: POST\n")
-		b.WriteString("    url: \"{{vars.base_url}}" + auth.loginPath + "\"\n")
-		b.WriteString("    headers:\n")
-		b.WriteString("      Content-Type: application/json\n")
-		b.WriteString("    body: '" + loginBody + "'\n")
-		b.WriteString("    assertions:\n")
-		b.WriteString("      status: 200\n")
-		b.WriteString("    capture:\n")
-		b.WriteString("      jwt: \"" + auth.tokenPath + "\"\n")
-	}
-
-	b.WriteString("\nsteps:\n")
-	for _, s := range steps {
-		b.WriteString("  - name: " + yq(s.name) + "\n")
-		b.WriteString("    method: " + s.method + "\n")
-		b.WriteString("    url: \"{{vars.base_url}}" + s.path + "\"\n")
-
-		switch auth.kind {
-		case "cookie":
-			b.WriteString("    headers:\n")
-			b.WriteString("      Cookie: \"{{data.session_cookie}}\"\n")
-			if s.body != "" {
-				b.WriteString("      Content-Type: application/json\n")
-			}
-		case "jwt":
-			b.WriteString("    auth:\n")
-			b.WriteString("      bearer: \"{{capture.jwt}}\"\n")
-			if s.body != "" {
-				b.WriteString("    headers:\n")
-				b.WriteString("      Content-Type: application/json\n")
-			}
-		default:
-			if s.body != "" {
-				b.WriteString("    headers:\n")
-				b.WriteString("      Content-Type: application/json\n")
-			}
-		}
-
-		if s.body != "" {
-			b.WriteString("    body: '" + s.body + "'\n")
-		}
-
-		b.WriteString("    assertions:\n")
-		b.WriteString("      status: " + s.statusCode + "\n")
-
-		if s.pauseMs > 0 {
-			fmt.Fprintf(&b, "    pause: %dms\n", s.pauseMs)
-		}
-	}
-
-	if errPctStr != "" || p95Str != "" {
-		b.WriteString("\nthresholds:\n")
-		if errPctStr != "" {
-			b.WriteString("  error_rate_pct: " + errPctStr + "\n")
-		}
-		if p95Str != "" {
-			b.WriteString("  p95_ms: " + p95Str + "\n")
-		}
-	}
-
-	return b.String()
-}
-
-func stagesYAML(vus int, duration, shape string) string {
-	var b strings.Builder
-	b.WriteString("stages:\n")
-	vuStr := strconv.Itoa(vus)
-
-	switch shape {
-	case "spike":
-		b.WriteString("  - duration: 10s\n    target: " + vuStr + "\n")
-		b.WriteString("  - duration: 30s\n    target: " + vuStr + "\n")
-		b.WriteString("  - duration: 20s\n    target: 0\n")
-	case "soak":
-		b.WriteString("  - duration: 1m\n    target: " + vuStr + "\n")
-		b.WriteString("  - duration: " + duration + "\n    target: " + vuStr + "\n")
-		b.WriteString("  - duration: 30s\n    target: 0\n")
-	default: // steady
-		b.WriteString("  - duration: 30s\n    target: " + vuStr + "\n")
-		b.WriteString("  - duration: " + duration + "\n    target: " + vuStr + "\n")
-		b.WriteString("  - duration: 30s\n    target: 0\n")
-	}
-	return b.String()
-}
-
-// yq wraps a YAML string value in quotes when it contains special characters.
-func yq(s string) string {
-	if strings.ContainsAny(s, `:#{}&*!|>'"%@`) || strings.Contains(s, "  ") {
-		return `"` + strings.ReplaceAll(s, `"`, `\"`) + `"`
-	}
-	return s
 }
 
 // ── 輸入輔助函數 ────────────────────────────────────────────
