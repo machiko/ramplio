@@ -10,27 +10,28 @@ import (
 	"strings"
 )
 
-// Auth describes how a generated scenario authenticates.
+// Auth describes how a generated scenario authenticates. The JSON tags let the
+// dashboard generator deserialize wizard input straight into this shared type.
 type Auth struct {
-	Kind          string // "cookie" | "jwt" | ""
-	CSVFile       string
-	CookieName    string
-	LoginPath     string
-	EmailField    string
-	PasswordField string
-	LoginEmail    string
-	LoginPass     string
-	TokenPath     string
+	Kind          string `json:"kind"` // "cookie" | "jwt" | ""
+	CSVFile       string `json:"csv_file,omitempty"`
+	CookieName    string `json:"cookie_name,omitempty"`
+	LoginPath     string `json:"login_path,omitempty"`
+	EmailField    string `json:"email_field,omitempty"`
+	PasswordField string `json:"password_field,omitempty"`
+	LoginEmail    string `json:"login_email,omitempty"`
+	LoginPass     string `json:"login_pass,omitempty"`
+	TokenPath     string `json:"token_path,omitempty"`
 }
 
 // Step declares one request step in a generated scenario.
 type Step struct {
-	Name       string
-	Path       string
-	Method     string
-	Body       string
-	StatusCode string
-	PauseMs    int
+	Name       string `json:"name"`
+	Path       string `json:"path"`
+	Method     string `json:"method"`
+	Body       string `json:"body,omitempty"`
+	StatusCode string `json:"status_code"`
+	PauseMs    int    `json:"pause_ms,omitempty"`
 }
 
 // GenerateYAML renders a complete scenario YAML document from the wizard inputs.

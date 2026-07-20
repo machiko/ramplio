@@ -41,3 +41,83 @@ steps:
 		t.Errorf("ws_message 應成為請求 body,得到 %q", got)
 	}
 }
+
+// LoadScenarioWithData 把記憶體 CSV 解析成資料列並存入,mode 取自 YAML 的
+// vars_from——瀏覽器產生的場景可直接開跑,資料檔不落磁碟。
+func TestLoadScenarioWithData_InMemoryRows(t *testing.T) {
+	yaml := []byte(`
+name: gen via dashboard
+vars_from:
+  file: data.csv
+  mode: random
+stages:
+  - duration: 10s
+    target: 2
+steps:
+  - name: get user
+    method: GET
+    url: https://example.com/users/{{data.user_id}}
+`)
+	c := newDashController(protocols.DefaultHTTPConfig(), nil)
+	if err := c.LoadScenarioWithData(yaml, "user_id\n1\n2\n3\n"); err != nil {
+		t.Fatalf("LoadScenarioWithData: %v", err)
+	}
+
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if len(c.pendingDataRows) != 3 {
+		t.Fatalf("應載入 3 筆資料列,得到 %d", len(c.pendingDataRows))
+	}
+	if got := c.pendingDataRows[0]["user_id"]; got != "1" {
+		t.Errorf("第一列 user_id 應為 1,得到 %q", got)
+	}
+	if c.pendingDataMode != "random" {
+		t.Errorf("dataMode 應取自 YAML 為 random,得到 %q", c.pendingDataMode)
+	}
+}
+
+// YAML 宣告了 vars_from 卻沒帶對應資料(例如 cookie 場景的 sessions.csv),
+// 必須大聲失敗——否則載入成功後每個 request 都會模板解析失敗。
+func TestLoadScenarioWithData_DeclaredButMissingDataErrors(t *testing.T) {
+	yaml := []byte(`
+name: cookie needs sessions
+vars_from:
+  file: sessions.csv
+  mode: sequential
+stages:
+  - duration: 10s
+    target: 2
+steps:
+  - name: dashboard
+    method: GET
+    url: https://example.com/dashboard
+`)
+	c := newDashController(protocols.DefaultHTTPConfig(), nil)
+	if err := c.LoadScenarioWithData(yaml, ""); err == nil {
+		t.Fatal("宣告 vars_from 卻無資料時應回錯,卻成功了")
+	}
+}
+
+// 無變動參數時,空 CSV 不應產生資料列,場景仍可載入。
+func TestLoadScenarioWithData_NoData(t *testing.T) {
+	yaml := []byte(`
+name: no data
+stages:
+  - duration: 10s
+    target: 2
+steps:
+  - name: home
+    method: GET
+    url: https://example.com/
+`)
+	c := newDashController(protocols.DefaultHTTPConfig(), nil)
+	if err := c.LoadScenarioWithData(yaml, ""); err != nil {
+		t.Fatalf("LoadScenarioWithData: %v", err)
+	}
+
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if len(c.pendingDataRows) != 0 {
+		t.Errorf("無資料檔時 pendingDataRows 應為空,得到 %d", len(c.pendingDataRows))
+	}
+}

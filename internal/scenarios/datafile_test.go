@@ -3,11 +3,27 @@ package scenarios
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// ParseCSVRows shares the exact contract loadCSV relies on, so in-memory data
+// (e.g. a generated CSV loaded into the dashboard) matches a disk load row-for-row.
+func TestParseCSVRows_Basic(t *testing.T) {
+	rows, err := ParseCSVRows(strings.NewReader("id,email\n1,a@b.com\n2,c@d.com\n"))
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+	assert.Equal(t, "1", rows[0]["id"])
+	assert.Equal(t, "c@d.com", rows[1]["email"])
+}
+
+func TestParseCSVRows_HeaderOnlyIsError(t *testing.T) {
+	_, err := ParseCSVRows(strings.NewReader("id,email\n"))
+	assert.Error(t, err)
+}
 
 func writeTemp(t *testing.T, name, content string) string {
 	t.Helper()

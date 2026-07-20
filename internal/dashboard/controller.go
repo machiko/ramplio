@@ -123,6 +123,12 @@ type Controller interface {
 	// scenarioDir is used to resolve relative paths (e.g. vars_from file); pass "" for cwd.
 	// Returns an error if the YAML is invalid or a test is already running.
 	LoadScenario(yaml []byte, scenarioDir string) error
+	// LoadScenarioWithData loads a scenario whose companion data comes from an
+	// in-memory CSV string rather than a disk file, so a generated scenario can be
+	// run directly from the browser without the data file ever touching disk.
+	// An empty dataCSV means the scenario has no data-driven parameters.
+	// Returns an error if the YAML or CSV is invalid or a test is already running.
+	LoadScenarioWithData(yaml []byte, dataCSV string) error
 	// ActiveGuidedProfile returns the GuidedProfile for the currently running guided test,
 	// or nil when the test was not started via the wizard.
 	ActiveGuidedProfile() *GuidedProfile

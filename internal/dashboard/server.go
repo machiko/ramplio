@@ -128,12 +128,16 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/api/stop", s.requireToken(s.handleStop))
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/scenario", s.requireToken(s.handleScenario))
+	mux.HandleFunc("/api/generate", s.requireToken(s.handleGenerate))
 	mux.HandleFunc("/api/import-har", s.requireToken(s.handleImportHAR))
 	mux.HandleFunc("/api/report", s.handleReport)
 	mux.HandleFunc("/api/discover", s.requireToken(s.handleDiscover))
 	mux.HandleFunc("/api/baseline", s.requireToken(s.handleBaseline))
 
-	srv := &http.Server{Handler: mux}
+	// ReadHeaderTimeout guards against slowloris-style header stalls. Read/Write
+	// timeouts are deliberately omitted: /ws streams metrics on a long-lived
+	// connection that a WriteTimeout would sever.
+	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	s.ctx = ctx
 
 	ready := make(chan error, 1)

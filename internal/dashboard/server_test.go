@@ -31,6 +31,11 @@ type mockController struct {
 	loadBaselineRaw     []byte
 	loadBaselineErr     error
 	clearBaselineCalled bool
+
+	loadWithDataCalled bool
+	loadWithDataYAML   []byte
+	loadWithDataCSV    string
+	loadWithDataErr    error
 }
 
 func (m *mockController) LoadBaseline(raw []byte) (dashboard.BaselineInfo, error) {
@@ -48,11 +53,17 @@ func (m *mockController) ClearBaseline() { m.clearBaselineCalled = true }
 
 func (m *mockController) BaselineMeta() *dashboard.BaselineInfo { return m.baselineInfo }
 
-func (m *mockController) Snapshot() reporter.LiveSnapshot               { return m.snap }
-func (m *mockController) State() dashboard.State                        { return m.state }
-func (m *mockController) Result() *dashboard.RunResult                  { return m.result }
-func (m *mockController) ScenarioInfo() *dashboard.ScenarioMeta         { return nil }
-func (m *mockController) LoadScenario(_ []byte, _ string) error         { return nil }
+func (m *mockController) Snapshot() reporter.LiveSnapshot       { return m.snap }
+func (m *mockController) State() dashboard.State                { return m.state }
+func (m *mockController) Result() *dashboard.RunResult          { return m.result }
+func (m *mockController) ScenarioInfo() *dashboard.ScenarioMeta { return nil }
+func (m *mockController) LoadScenario(_ []byte, _ string) error { return nil }
+func (m *mockController) LoadScenarioWithData(yaml []byte, dataCSV string) error {
+	m.loadWithDataCalled = true
+	m.loadWithDataYAML = yaml
+	m.loadWithDataCSV = dataCSV
+	return m.loadWithDataErr
+}
 func (m *mockController) ActiveGuidedProfile() *dashboard.GuidedProfile { return nil }
 func (m *mockController) Stop()                                         { m.stopCalled = true }
 func (m *mockController) WriteReport(w io.Writer) error {

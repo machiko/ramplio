@@ -4,6 +4,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,14 +35,28 @@ func loadCSV(path string) ([]map[string]string, error) {
 	}
 	defer func() { _ = f.Close() }()
 
-	r := csv.NewReader(f)
-	r.FieldsPerRecord = -1 // allow rows with varying column counts
-	records, err := r.ReadAll()
+	rows, err := ParseCSVRows(f)
+	if err != nil {
+		return nil, fmt.Errorf("CSV %q: %w", path, err)
+	}
+	return rows, nil
+}
+
+// ParseCSVRows reads CSV content (a header row followed by data rows) into
+// key-value maps, the in-memory counterpart to loading a .csv data file from
+// disk. It shares the exact parsing contract used at run time, so data injected
+// into the dashboard from a generated CSV behaves identically to a disk load.
+//
+// Data values are accessed in templates as {{data.column_name}}.
+func ParseCSVRows(r io.Reader) ([]map[string]string, error) {
+	cr := csv.NewReader(r)
+	cr.FieldsPerRecord = -1 // allow rows with varying column counts
+	records, err := cr.ReadAll()
 	if err != nil {
 		return nil, fmt.Errorf("reading CSV: %w", err)
 	}
 	if len(records) < 2 {
-		return nil, fmt.Errorf("CSV %q must have a header row and at least one data row", path)
+		return nil, fmt.Errorf("must have a header row and at least one data row")
 	}
 
 	headers := records[0]

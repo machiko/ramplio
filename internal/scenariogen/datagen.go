@@ -20,13 +20,14 @@ const (
 	KindPlaceholder DataColumnKind = "placeholder" // "<name>" for the user to fill in
 )
 
-// DataColumn declares one column of a generated data file.
+// DataColumn declares one column of a generated data file. The JSON tags let the
+// dashboard generator deserialize wizard input straight into this shared type.
 type DataColumn struct {
-	Name       string
-	Kind       DataColumnKind
-	ListValues []string // KindList only
-	Start      int      // KindIntSeq only; honored only when StartSet is true
-	StartSet   bool     // KindIntSeq only; distinguishes an explicit start (incl. 0) from unset
+	Name       string         `json:"name"`
+	Kind       DataColumnKind `json:"kind"`
+	ListValues []string       `json:"list_values,omitempty"` // KindList only
+	Start      int            `json:"start,omitempty"`       // KindIntSeq only; honored only when StartSet is true
+	StartSet   bool           `json:"start_set,omitempty"`   // KindIntSeq only; distinguishes an explicit start (incl. 0) from unset
 }
 
 // GenerateCSV produces CSV content: a header row of column names followed by
