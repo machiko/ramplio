@@ -992,6 +992,63 @@
     }
     .btn-clear-scenario:hover { border-color: var(--accent2); color: var(--accent2); }
 
+    /* ── Generate mode (情境產生精靈) ── */
+    .gen-section-label {
+      font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+      color: var(--accent2); margin: 22px 0 10px; padding-bottom: 6px;
+      border-bottom: 1px solid var(--border);
+    }
+    .gen-section-label:first-child { margin-top: 4px; }
+    .gen-hint { font-size: 12px; color: var(--muted); margin-bottom: 10px; line-height: 1.5; }
+    .gen-hint code { color: var(--accent2); background: rgba(255,255,255,.05); padding: 1px 5px; border-radius: 4px; }
+    .gen-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+    .gen-row-name { flex: 1.4; }
+    .gen-row select { flex: 1; }
+    .gen-row-extra { flex: 1.2; }
+    .gen-row-del {
+      flex: 0 0 auto; width: 32px; height: 32px; border-radius: 8px;
+      border: 1px solid var(--border); background: transparent; color: var(--muted);
+      cursor: pointer; font-size: 13px; line-height: 1; transition: all .15s;
+    }
+    .gen-row-del:hover { border-color: var(--red); color: var(--red); }
+    .gen-add {
+      background: transparent; border: 1px dashed var(--border); color: var(--accent2);
+      padding: 9px 14px; border-radius: 9px; cursor: pointer; font-size: 13px; font-weight: 500;
+      width: 100%; transition: all .15s;
+    }
+    .gen-add:hover { border-color: var(--accent2); background: rgba(255,255,255,.03); }
+    .gen-step {
+      border: 1px solid var(--border); border-radius: 12px; padding: 14px;
+      margin-bottom: 10px; background: rgba(255,255,255,.015);
+    }
+    .gen-step-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+    .gen-step-num { font-size: 12px; font-weight: 600; color: var(--muted); }
+    .gen-result-title {
+      display: flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 600;
+      color: var(--green); margin-bottom: 14px;
+    }
+    .gen-warnings { margin-bottom: 12px; }
+    .gen-warning {
+      font-size: 12px; color: var(--amber); background: rgba(253,214,99,.1);
+      border: 1px solid rgba(253,214,99,.25); border-radius: 8px; padding: 8px 10px;
+      margin-bottom: 6px; line-height: 1.5;
+    }
+    .gen-yaml {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+      padding: 14px; font-size: 12px; line-height: 1.55; color: var(--text);
+      max-height: 320px; overflow: auto; white-space: pre; margin-bottom: 12px;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    }
+    .gen-dl-row { display: flex; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+    .btn-dl {
+      display: inline-flex; align-items: center; gap: 6px; flex: 1; justify-content: center;
+      background: transparent; border: 1px solid var(--border); color: var(--text);
+      padding: 10px 14px; border-radius: 9px; cursor: pointer; font-size: 13px; font-weight: 500;
+      transition: all .15s;
+    }
+    .btn-dl:hover { border-color: var(--accent); color: var(--accent); }
+    .btn-dl .material-symbols-outlined { font-size: 18px; }
+
     /* ── Scenario settings ──────────────────────────── */
     .scenario-settings {
       margin: 12px 0 4px;
@@ -1732,6 +1789,9 @@
     <button class="home-discover-link" @click="pickMode('scenario')">
       <span class="material-symbols-outlined">upload_file</span> 進階：上傳 HAR 或 YAML 情境（多步驟、登入流程）→
     </button>
+    <button class="home-discover-link" @click="pickMode('generate')">
+      <span class="material-symbols-outlined">edit_note</span> 進階：用精靈產生情境檔（變動參數、逐步設定）→
+    </button>
   </div>
 
   <!-- ── Setup View ─────────────────────────────────── -->
@@ -2083,6 +2143,131 @@
             <button class="btn-clear-scenario" @click="clearScenario">↺  換一個檔案</button>
             <div v-if="formError" class="error-msg">{{ formError }}</div>
           </template>
+        </div>
+      </template>
+
+      <!-- ── Generate mode (情境產生精靈) ── -->
+      <template v-else-if="setupMode === 'generate'">
+        <div class="setup-subtitle">回答幾個設定，產生可重複使用的情境檔（scenario.yaml + 資料檔），可下載或直接開跑。</div>
+        <div class="setup-form-box">
+
+          <!-- Result panel -->
+          <template v-if="genResult">
+            <div class="gen-result-title"><span class="material-symbols-outlined">check_circle</span> 已產生情境檔</div>
+            <div v-if="genResult.warnings && genResult.warnings.length" class="gen-warnings">
+              <div v-for="(w, i) in genResult.warnings" :key="i" class="gen-warning">⚠ {{ w }}</div>
+            </div>
+            <pre class="gen-yaml">{{ genResult.yaml }}</pre>
+            <div class="gen-dl-row">
+              <button class="btn-dl" @click="downloadGen('yaml')"><span class="material-symbols-outlined">download</span> scenario.yaml</button>
+              <button v-if="genResult.csv" class="btn-dl" @click="downloadGen('csv')"><span class="material-symbols-outlined">download</span> {{ genResult.data_file || 'data.csv' }}</button>
+            </div>
+            <button class="btn-run" :disabled="submitting" @click="generateAndRun">
+              {{ submitting ? 'Starting…' : '▶  直接開跑' }}
+            </button>
+            <button class="btn-clear-scenario" @click="genResult = null">↺  修改設定</button>
+            <div v-if="genError" class="error-msg">{{ genError }}</div>
+          </template>
+
+          <!-- Form -->
+          <template v-else>
+            <div class="gen-section-label">基本設定</div>
+            <div class="field">
+              <div class="field-label-row"><label>這次壓測的名稱</label></div>
+              <input v-model="gen.name" type="text" placeholder="API 功能壓力測試" />
+            </div>
+            <div class="field">
+              <div class="field-label-row"><label>網站網址 *</label></div>
+              <input v-model="gen.base_url" type="url" placeholder="https://example.com" />
+            </div>
+
+            <div class="gen-section-label">登入設定</div>
+            <div class="chips-row">
+              <button type="button" class="chip" :class="{ active: gen.authKind === 'none' }" @click="gen.authKind = 'none'">不需要登入</button>
+              <button type="button" class="chip" :class="{ active: gen.authKind === 'jwt' }" @click="gen.authKind = 'jwt'">JWT / Token</button>
+            </div>
+            <template v-if="gen.authKind === 'jwt'">
+              <div class="field-row">
+                <div class="field"><div class="field-label-row"><label>登入路徑</label></div><input v-model="gen.jwt.login_path" placeholder="/auth/login" /></div>
+                <div class="field"><div class="field-label-row"><label>Token JSONPath</label></div><input v-model="gen.jwt.token_path" placeholder="$.access_token" /></div>
+              </div>
+              <div class="field-row">
+                <div class="field"><div class="field-label-row"><label>帳號欄位</label></div><input v-model="gen.jwt.email_field" placeholder="email" /></div>
+                <div class="field"><div class="field-label-row"><label>密碼欄位</label></div><input v-model="gen.jwt.password_field" placeholder="password" /></div>
+              </div>
+              <div class="field-row">
+                <div class="field"><div class="field-label-row"><label>測試帳號</label></div><input v-model="gen.jwt.login_email" placeholder="loadtest@example.com" /></div>
+                <div class="field"><div class="field-label-row"><label>測試密碼</label></div><input v-model="gen.jwt.login_pass" type="password" /></div>
+              </div>
+            </template>
+
+            <div class="gen-section-label">變動參數 / 資料檔（可選）</div>
+            <div class="gen-hint">讓每個虛擬用戶帶不同的值。在下方步驟的路徑或 body 用 <code>{{ dataTokenExample }}</code> 引用。</div>
+            <div v-for="(col, i) in gen.columns" :key="i" class="gen-row">
+              <input class="gen-row-name" v-model="col.name" placeholder="欄位名（如 user_id）" />
+              <select v-model="col.kind">
+                <option value="int_seq">遞增數字</option>
+                <option value="uuid">隨機 UUID</option>
+                <option value="email">Email</option>
+                <option value="list">自訂清單</option>
+                <option value="placeholder">留空範本</option>
+              </select>
+              <input v-if="col.kind === 'int_seq'" class="gen-row-extra" v-model.number="col.start" type="number" placeholder="起始" />
+              <input v-else-if="col.kind === 'list'" class="gen-row-extra" v-model="col.listRaw" placeholder="值，逗號分隔：a,b,c" />
+              <button type="button" class="gen-row-del" @click="removeGenColumn(i)" title="移除">✕</button>
+            </div>
+            <button type="button" class="gen-add" @click="addGenColumn">+ 新增變動參數</button>
+            <div v-if="gen.columns.length" class="field-row" style="margin-top:12px">
+              <div class="field"><div class="field-label-row"><label>產生幾列</label></div><input type="number" v-model.number="gen.rows" min="1" /></div>
+              <div class="field"><div class="field-label-row"><label>資料檔名</label></div><input v-model="gen.data_file" placeholder="data.csv" /></div>
+            </div>
+
+            <div class="gen-section-label">測試步驟 *</div>
+            <div v-for="(s, i) in gen.steps" :key="i" class="gen-step">
+              <div class="gen-step-head">
+                <span class="gen-step-num">步驟 {{ i + 1 }}</span>
+                <button v-if="gen.steps.length > 1" type="button" class="gen-row-del" @click="removeGenStep(i)" title="移除">✕</button>
+              </div>
+              <div class="field-row">
+                <div class="field" style="flex:2"><div class="field-label-row"><label>路徑</label></div><input v-model="s.path" placeholder="/dashboard" /></div>
+                <div class="field"><div class="field-label-row"><label>方法</label></div>
+                  <select v-model="s.method"><option>GET</option><option>POST</option><option>PUT</option><option>DELETE</option></select>
+                </div>
+                <div class="field"><div class="field-label-row"><label>狀態碼</label></div><input v-model="s.status_code" placeholder="200" /></div>
+              </div>
+              <div v-if="s.method === 'POST' || s.method === 'PUT'" class="field">
+                <div class="field-label-row"><label>Request body（JSON）</label></div>
+                <input v-model="s.body" placeholder='{"key":"value"}' />
+              </div>
+            </div>
+            <button type="button" class="gen-add" @click="addGenStep">+ 新增步驟</button>
+
+            <div class="gen-section-label">負載設定</div>
+            <div class="field-row">
+              <div class="field"><div class="field-label-row"><label>同時用戶數（VUs）</label></div><input type="number" v-model.number="gen.vus" min="1" /></div>
+              <div class="field"><div class="field-label-row"><label>持續時間</label></div><input v-model="gen.duration" placeholder="3m" /></div>
+            </div>
+            <div class="chips-row">
+              <button type="button" class="chip" :class="{ active: gen.shape === 'steady' }" @click="gen.shape = 'steady'">平穩持載</button>
+              <button type="button" class="chip" :class="{ active: gen.shape === 'spike' }" @click="gen.shape = 'spike'">尖峰湧入</button>
+              <button type="button" class="chip" :class="{ active: gen.shape === 'soak' }" @click="gen.shape = 'soak'">長時間耐壓</button>
+            </div>
+
+            <div class="gen-section-label">通過 / 失敗標準（可選）</div>
+            <div class="field-row">
+              <div class="field"><div class="field-label-row"><label>錯誤率上限 %</label></div><input v-model="gen.err_pct" placeholder="例：1" /></div>
+              <div class="field"><div class="field-label-row"><label>p95 上限 ms</label></div><input v-model="gen.p95" placeholder="例：500" /></div>
+            </div>
+
+            <button class="btn-run" :disabled="genSubmitting || !genCanSubmit" @click="generateScenario">
+              {{ genSubmitting ? '產生中…' : '產生情境檔' }}
+            </button>
+            <div v-if="gen.authKind === 'jwt' && (!gen.jwt.login_email.trim() || !gen.jwt.login_pass.trim())" class="gen-hint" style="margin-top:8px">
+              JWT 模式需填測試帳號與密碼才能產生。
+            </div>
+            <div v-if="genError" class="error-msg">{{ genError }}</div>
+          </template>
+
         </div>
       </template>
 
@@ -2853,6 +3038,28 @@ createApp({
     });
     const activeGuidedProfile = ref(null); // received from WS while guided test runs
 
+    // Generate wizard state (產生情境檔精靈)
+    const gen = reactive({
+      name: '', base_url: '', authKind: 'none',
+      jwt: {
+        login_path: '/auth/login', email_field: 'email', password_field: 'password',
+        login_email: '', login_pass: '', token_path: '$.access_token',
+      },
+      columns: [], rows: 100, data_file: 'data.csv',
+      steps: [{ path: '', method: 'GET', body: '', status_code: '200', pause_ms: 0 }],
+      vus: 50, duration: '3m', shape: 'steady', err_pct: '', p95: '',
+    });
+    const genResult = ref(null);
+    const genError = ref('');
+    const genSubmitting = ref(false);
+    const dataTokenExample = '{{data.欄位名}}';
+    const hasValidStep = computed(() => gen.steps.some(s => s.path.trim() !== ''));
+    // JWT auth needs test credentials, mirroring the CLI wizard's required fields,
+    // so a directly-run scenario does not fail login on empty credentials.
+    const genCanSubmit = computed(() =>
+      gen.base_url.trim() !== '' && hasValidStep.value &&
+      (gen.authKind !== 'jwt' || (gen.jwt.login_email.trim() !== '' && gen.jwt.login_pass.trim() !== '')));
+
     const form = reactive({ url: '', method: 'GET', vus: 50, rps: 100, duration: '30s' });
 
     // Discover state
@@ -3300,10 +3507,109 @@ createApp({
 
     async function stopTest() { await fetch('/api/stop', { method: 'POST' }); }
     function resetSetup() { view.value = 'home'; formError.value = ''; }
+    // ── Generate wizard ────────────────────────────────
+    function addGenColumn() { gen.columns.push({ name: '', kind: 'int_seq', start: 1, listRaw: '' }); }
+    function removeGenColumn(i) { gen.columns.splice(i, 1); }
+    function addGenStep() { gen.steps.push({ path: '', method: 'GET', body: '', status_code: '200', pause_ms: 0 }); }
+    function removeGenStep(i) { gen.steps.splice(i, 1); }
+
+    // buildGenRequest maps the form into the /api/generate contract, mirroring the
+    // shared scenariogen types (only named fields with non-empty values are sent).
+    function buildGenRequest(run) {
+      const columns = gen.columns
+        .filter(c => c.name.trim() !== '')
+        .map(c => {
+          const col = { name: c.name.trim(), kind: c.kind };
+          if (c.kind === 'int_seq') { col.start = Number(c.start) || 0; col.start_set = true; }
+          if (c.kind === 'list') { col.list_values = (c.listRaw || '').split(',').map(v => v.trim()).filter(Boolean); }
+          return col;
+        });
+      const steps = gen.steps
+        .filter(s => s.path.trim() !== '')
+        .map(s => ({
+          name: s.method + ' ' + s.path.trim(),
+          path: s.path.trim(), method: s.method,
+          body: s.body || '', status_code: s.status_code || '200',
+          pause_ms: Number(s.pause_ms) || 0,
+        }));
+      const auth = gen.authKind === 'jwt'
+        ? {
+            kind: 'jwt', login_path: gen.jwt.login_path, email_field: gen.jwt.email_field,
+            password_field: gen.jwt.password_field, login_email: gen.jwt.login_email,
+            login_pass: gen.jwt.login_pass, token_path: gen.jwt.token_path,
+          }
+        : { kind: '' };
+      return {
+        name: gen.name || 'API 功能壓力測試',
+        base_url: gen.base_url, auth, steps,
+        vus: Number(gen.vus) || 50,
+        duration: gen.duration || '3m',
+        shape: gen.shape,
+        err_pct: gen.err_pct || '', p95: gen.p95 || '',
+        data_file: columns.length ? (gen.data_file || 'data.csv') : '',
+        columns, rows: Number(gen.rows) || 100,
+        run: !!run,
+      };
+    }
+
+    async function generateScenario() {
+      genSubmitting.value = true; genError.value = '';
+      try {
+        const res = await fetch('/api/generate', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(buildGenRequest(false)),
+        });
+        if (!res.ok) { genError.value = await res.text(); return; }
+        genResult.value = await res.json();
+      } catch (err) {
+        genError.value = err.message || 'Connection error';
+      } finally {
+        genSubmitting.value = false;
+      }
+    }
+
+    // generateAndRun loads the scenario into memory (run:true), then starts it via
+    // the same /api/run path a loaded scenario uses; the WS flips the view to live.
+    async function generateAndRun() {
+      submitting.value = true; genError.value = '';
+      try {
+        const res = await fetch('/api/generate', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(buildGenRequest(true)),
+        });
+        if (!res.ok) { genError.value = await res.text(); return; }
+        genResult.value = await res.json();
+        const runRes = await fetch('/api/run', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        });
+        if (!runRes.ok) { genError.value = await runRes.text(); return; }
+        testVUs.value = Number(gen.vus) || 0;
+      } catch (err) {
+        genError.value = err.message || 'Connection error';
+      } finally {
+        submitting.value = false;
+      }
+    }
+
+    function downloadGen(kind) {
+      if (!genResult.value) return;
+      const isYaml = kind === 'yaml';
+      const content = isYaml ? genResult.value.yaml : genResult.value.csv;
+      if (!content) return;
+      const name = isYaml ? 'scenario.yaml' : (genResult.value.data_file || 'data.csv');
+      const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = name; a.click();
+      URL.revokeObjectURL(url);
+    }
+
     function pickMode(mode) {
       setupMode.value = mode;
       if (mode === 'guided') wizardStep.value = 1;
       if (mode === 'scenario') clearScenario();
+      if (mode === 'generate') { genResult.value = null; genError.value = ''; }
       view.value = 'setup';
     }
     function goHome() { view.value = 'home'; }
@@ -3580,6 +3886,9 @@ createApp({
       triggerHarInput, handleHarFileChange, handleHarDrop,
       triggerScenarioInput, handleScenarioFileChange, handleScenarioDrop,
       startGuided, wizardNext, loadRetry, shapeLabel,
+      gen, genResult, genError, genSubmitting, dataTokenExample, hasValidStep, genCanSubmit,
+      addGenColumn, removeGenColumn, addGenStep, removeGenStep,
+      generateScenario, generateAndRun, downloadGen,
       fmt1, fmt2, pct,
       latClass, latLabel, errClass, errLabel,
       p99Color, tailRatio, ratioClass, ratioLabel, fmtElapsed,

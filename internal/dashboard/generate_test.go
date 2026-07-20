@@ -3,6 +3,7 @@ package dashboard_test
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"testing"
@@ -221,6 +222,31 @@ func TestServer_Generate_RejectsCookieRun(t *testing.T) {
 	defer resp.Body.Close()
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 	assert.False(t, ctrl.loadWithDataCalled)
+}
+
+// The served dashboard HTML must actually wire in the generate wizard UI, so a
+// browser reaches the form and its submit path. Guards against the template and
+// endpoint drifting apart (the browser E2E is not part of CI).
+func TestServer_ServesGenerateUI(t *testing.T) {
+	ctrl := &mockController{state: dashboard.StateIdle}
+	srv, _ := newTestServer(t, ctrl)
+
+	resp, err := http.Get(fmt.Sprintf("http://%s/", srv.Addr()))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	html := string(body)
+
+	for _, marker := range []string{
+		"pickMode('generate')",     // home entry
+		"setupMode === 'generate'", // form view
+		"generateScenario",         // submit handler
+		"generateAndRun",           // 直接開跑 handler
+		"/api/generate",            // endpoint wiring
+	} {
+		assert.Contains(t, html, marker, "served HTML missing generate-UI marker %q", marker)
+	}
 }
 
 func TestServer_Generate_RejectsInvalidMethod(t *testing.T) {
