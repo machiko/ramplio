@@ -97,6 +97,45 @@ func TestHumanizeInt_ThousandsSeparator(t *testing.T) {
 	assert.Contains(t, buf.String(), "1,234,567")
 }
 
+// rpsLine returns the trimmed value on the 每秒請求 line (the padded label is
+// stripped) so tests assert on the rendered rps value alone.
+func rpsLine(t *testing.T, sum metrics.Summary) string {
+	t.Helper()
+	var buf bytes.Buffer
+	reporter.PrintSummary(&buf, sum)
+	for _, ln := range strings.Split(buf.String(), "\n") {
+		if strings.Contains(ln, "每秒請求") {
+			return strings.TrimSpace(strings.SplitN(ln, "：", 2)[1])
+		}
+	}
+	t.Fatal("每秒請求 line not found")
+	return ""
+}
+
+// The terminal 每秒請求 line must round the rps the same way the 承受能力卡片 does
+// (math.Round via the shared source), so the same run never shows "0.2" here and
+// "0.3" on the card. rps = 1/4s = 0.25 sits on the x.x5 boundary where fmt's
+// round-half-to-even ("0.2") and the shared round-half-away ("0.3") diverge.
+func TestPrintSummary_RPSMatchesCapacityRounding(t *testing.T) {
+	got := rpsLine(t, metrics.Summary{Total: 1, WallTime: 4 * time.Second})
+	assert.True(t, strings.HasPrefix(got, "0.3"), "terminal rps 應與承受能力卡片同一套捨入(0.3)，得到 %q", got)
+}
+
+// The consistency fix must not change the fast-endpoint format: rps ≥ 10 keeps one
+// decimal in the terminal (承受能力卡片 drops it, by design — different surfaces).
+func TestPrintSummary_HighRPSKeepsOneDecimal(t *testing.T) {
+	got := rpsLine(t, metrics.Summary{Total: 14253, WallTime: 100 * time.Second})
+	assert.Equal(t, "142.5", got)
+}
+
+// rpm-1's no-contradiction boundary, pinned at the terminal surface: an rps that
+// rounds up to 1.0 must display "1.0" with no RPM annotation (a "1.0（≈ 58 RPM）"
+// would contradict the ×60 conversion). rps = 96/100s = 0.96 → roundRate → 1.0.
+func TestPrintSummary_RoundsToOneNoRPM(t *testing.T) {
+	got := rpsLine(t, metrics.Summary{Total: 96, WallTime: 100 * time.Second})
+	assert.Equal(t, "1.0", got, "顯示為 1.0 時不得再附 RPM")
+}
+
 // 串流場景:TTFT(開始回應)與完整回應並陳——串流體感由 TTFT 決定,
 // 但兩個數字都要給,不可只留一個。非串流場景該段落缺席。
 func TestPrintSummary_TTFTShownWhenPresent(t *testing.T) {

@@ -26,7 +26,10 @@ func PrintSummary(w io.Writer, sum metrics.Summary) {
 	section("測試結果")
 	line("總請求數：", fmt.Sprintf("%d", sum.Total))
 	line("測試時長：", fmt.Sprintf("%.2fs", sum.WallTime.Seconds()))
-	rpsValue := fmt.Sprintf("%.1f", sum.RPS())
+	// Round through the shared source so the displayed rps and the RPM gate below
+	// agree at float x.x5 boundaries (rpm-2); the one-decimal format is kept even
+	// for fast endpoints, unlike the 承受能力卡片 which drops it above 10.
+	rpsValue := fmt.Sprintf("%.1f", roundRate(sum.RPS()))
 	if rpm := capacityRPM(sum.RPS()); rpm != "" {
 		rpsValue += fmt.Sprintf("（≈ %s RPM）", rpm)
 	}

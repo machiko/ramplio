@@ -204,12 +204,20 @@ const rateDecimalThreshold = 10.0
 // below it (slow endpoints) the RPM conversion reads far better than "0.x 個請求".
 const rpmThreshold = 1.0
 
+// roundRate is the single rounding source for a rate's one-decimal value. Both
+// the displayed value and the RPM-gating threshold go through it so they can
+// never disagree at a float x.x5 boundary — where fmt's %.1f (round-half-to-even)
+// and this round-half-away-from-zero would otherwise diverge (e.g. 0.25 → "0.2"
+// vs "0.3"), letting the terminal and 承受能力卡片 show different values, or the
+// RPM annotation be suppressed for a value the terminal still shows as sub-1.
+func roundRate(v float64) float64 { return math.Round(v*10) / 10 }
+
 // humanizeRate formats any per-time-unit rate for the 承受能力卡片: one decimal
 // under the threshold, a thousands-separated integer at or above it. We round to
 // one decimal *before* the threshold check so a value like 9.96 reads "10"
 // (matching exact 10.0) instead of an inconsistent "10.0".
 func humanizeRate(v float64) string {
-	rounded := math.Round(v*10) / 10
+	rounded := roundRate(v)
 	if rounded < rateDecimalThreshold {
 		return fmt.Sprintf("%.1f", rounded)
 	}
@@ -228,7 +236,7 @@ func capacityRPM(rps float64) string {
 	if rps <= 0 {
 		return ""
 	}
-	if math.Round(rps*10)/10 >= rpmThreshold {
+	if roundRate(rps) >= rpmThreshold {
 		return ""
 	}
 	return humanizeRate(rps * 60)
