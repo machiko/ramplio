@@ -8,9 +8,9 @@
 
 | 欄位 | 值 |
 |------|-----|
-| 分析時間 | 2026-07-13 |
-| 分析基準 commit | `db2cd57` |
-| 完整 commit hash | `db2cd5781b34ffefa9e7fb3d3789c41ba7c9b624` |
+| 分析時間 | 2026-07-27 |
+| 分析基準 commit | `084a10a` |
+| 完整 commit hash | `084a10aa70881963526e1af5c0337d3b1f860686` |
 
 > 註:module path 已升 `github.com/machiko/ramplio/v3`,原始碼一律置於 `internal/`(下表模組路徑沿用簡寫,實際皆有 `internal/` 前綴)。
 
@@ -21,16 +21,16 @@
 | 模組 | 說明 |
 |------|------|
 | `engine/ramp.go` | 多階段負載引擎：VU 模式（線性插值）+ Ramping RPS（**單一 dispatcher + worker 池**，dispatcher 以 Reserve+capped sleep 排定每請求「應送時間戳」注入 buffered jobs channel，避免 rate 0 卡死並按 ramp 追隨速率）；Setup/Teardown lifecycle；Circuit Breaker（滑動時間窗口 ring buffer）；Step.If/Loop/Group/Pause/Retry；dataSource（sequential/random）；預編譯 regex capture cache |
-| `scenarios/scenario.go` | YAML 場景資料結構：Stage、Step（Protocol/Auth/Capture/Assertions/Retry）、Thresholds（per-step）、CircuitBreakerConfig（WindowSeconds）、VarsFrom、ScenarioHTTP |
-| `scenarios/parser.go` | YAML 解析與驗證（`Parse`/`ParseFile`）；VU/RPS 混用阻擋 |
+| `scenarios/scenario.go` | YAML 場景資料結構：Stage、Step（Protocol/Auth/Capture/Assertions/Retry、**`WSMode`(per_request/persistent)、`Stream`(sse)**）、Thresholds（per-step、**`TTFTP95Ms` 串流首 chunk 守門,設門檻但無 stream 樣本視為設定錯誤大聲失敗**）、CircuitBreakerConfig（WindowSeconds）、VarsFrom、ScenarioHTTP |
+| `scenarios/parser.go` | YAML 解析與驗證（`Parse`/`ParseFile`）；VU/RPS 混用阻擋；**`ws_mode`/`stream` 解析期驗證(值域、`ws_mode` 限 websocket 步驟、`stream` 限 HTTP 步驟)——設定錯誤不浪費一輪壓測** |
 | `scenarios/template.go` | `RenderString`/`RenderHeaders`/`EvalCondition`；支援 uuid/timestamp/env/vars/capture/data token；EvalCondition parse 失敗輸出 stderr 警告（不靜默） |
-| `scenarios/datafile.go` | CSV/JSON 資料檔載入（`LoadDataFile`） |
+| `scenarios/datafile.go` | CSV/JSON 資料檔載入（`LoadDataFile`）；**`ParseCSVRows(io.Reader)` 抽出:in-memory CSV 走與磁碟載入完全相同的解析契約,供 dashboard 直接餵產生的 CSV 不落磁碟** |
 | `scenarios/assertions.go` | 斷言評估：狀態碼/BodyContains/BodyMatches/BodyJSON/HeaderEquals |
-| `protocols/http.go` | HTTP 執行器：連線池/cookie jar/超時/DNS 快取；回傳 RawSetCookies |
-| `protocols/ws.go` | WebSocket 執行器：握手帶自訂 headers（排除標準 WS headers）；單次收發 |
-| `protocols/retry.go` | RetryingExecutor：count/onCodes/backoff 固定延遲 |
+| `protocols/http.go` | HTTP 執行器：連線池/cookie jar/超時/DNS 快取；回傳 RawSetCookies；**`Request.Stream` 時走 `readStreaming` 分塊讀,記首個非空 chunk 到達時刻為 TTFT(與非 stream 共用 1MiB body 上限,hot path 整讀路徑零改動)** |
+| `protocols/ws.go` | WebSocket 執行器：握手帶自訂 headers（排除標準 WS headers）；預設單次收發；**`WSSession`(ws_mode: persistent)per-VU 連線持有者比照 HTTP session,keyed by URL、傳輸失敗棄連重撥回報 status 0、`ws_expect` 不符保留健康連線;`exchangeWS` 以 `context.AfterFunc` 在 ctx 取消時關連線中斷阻塞 I/O** |
+| `protocols/retry.go` | RetryingExecutor：count/onCodes/backoff 固定延遲；**`shouldRetry` 對 101 豁免(「非 2xx=失敗」三複製點之一,漏改會假重試成功的 WS exchange)** |
 | `protocols/dns_cache.go` | DNS TTL 快取；FIFO 淘汰（maxEntries=1024）|
-| `protocols/executor.go` | Executor 介面；Request/Result（含 RawSetCookies） |
+| `protocols/executor.go` | Executor 介面；`Request`(含 `Stream`)/`Result`(含 RawSetCookies、`TTFT`——首個 body chunk 到達,≠ TTFB) |
 | `protocols/trace.go` | **新增** `ExecuteTraced`：httptrace 拆單發請求 DNS/TCP/TLS/TTFB/total + Reused 旗標；僅供診斷（pre-flight），hot path Execute 不受影響 |
 | `scenarios/eval_condition.go` | **新增** 條件運算式 Lexer/Parser/AST：支援 AND/OR/NOT、括號、`== != < <= > >=`；運算子優先序 NOT>AND>OR；`EvalCondition` 解析失敗時印警告並回傳 true（不跳過步驟） |
 | `distributed/coordinator.go` | **新增** 協調者：health check → VU 分配（整數最大餘數法）→ broadcast `/assign` → 輪詢 `/live`（1s）聚合 → 收集 `/result` → `mergePartials` 合併 |
@@ -38,15 +38,15 @@
 | `distributed/api.go` | **新增** 分散式 DTO：AssignRequest / PartialSummary / LiveMetricsResponse / StatusResponse |
 | `config/distributed.go` | **新增** DistributedConfig（Workers/ListenAddr/Secret/PollIntervalMs/AssignTimeoutSec）；Secret 與部分欄位定義但未被使用 |
 | `reporter/sink.go` | **新增** Sink 介面 + DetailedSink 選用介面（WriteDetailed 輸出 per-step/group 明細） |
-| `metrics/collector.go` | Channel 驅動聚集器；HDR 直方圖（service + **corrHist 協調遺漏修正**：`At−ScheduledAt` floor 於 service latency）；per-step/group；緩衝區滿計數 dropped 並在 Stop() 輸出警告 |
+| `metrics/collector.go` | Channel 驅動聚集器；HDR 直方圖（service + **corrHist 協調遺漏修正**：`At−ScheduledAt` floor 於 service latency + **`ttftHist` 串流首 chunk histogram**,stream 步驟才有,rate 模式 TTFT 同套 CO 修正從排定時刻起算避免低報）；per-step/group；緩衝區滿計數 dropped 並在 Stop() 輸出警告 |
 | `metrics/errorkind.go` | **新增** 失敗分類：`ClassifyError(err,status)→ErrorKind`（DNS/連線被拒/中斷/逾時/TLS/4xx/5xx/斷言/其他）；以 `errors.As` 拆 url→net→syscall/x509，status>0+err≠nil 判定為斷言失敗；`DominantErrorKind` 取主因與占比；`DisplayOrder` 穩定排序 |
-| `metrics/summary.go` | 聚集統計；`RPS() = Total/WallTime`；`MeanLatency`；`ErrorBreakdown map[ErrorKind]int64`（record() 失敗時懶初始化分類累加） |
-| `metrics/export.go` | 分散式 HDR 合併；`HistogramExport.ErrorBreakdown` 跨節點加總（`Export`/`MergeExports`） |
-| `metrics/sample.go` | 單一請求測量資料結構 |
+| `metrics/summary.go` | 聚集統計；`RPS() = Total/WallTime`；`MeanLatency`；`ErrorBreakdown map[ErrorKind]int64`（record() 失敗時懶初始化分類累加）；**`TTFTP50/90/95/99`+`HasTTFT` 串流首 chunk 百分位；`isError` 經 Sample** |
+| `metrics/export.go` | 分散式 HDR 合併；`HistogramExport.ErrorBreakdown` 跨節點加總（`Export`/`MergeExports`）；**`TTFTHist` 跨 worker 合併還原 TTFT 百分位** |
+| `metrics/sample.go` | 單一請求測量資料結構（含 `TTFT`、`ScheduledAt`）；`isError()` 對 101 豁免（WS 握手成功） |
 | `reporter/terminal.go` | 靜態摘要（繁中）；per-step/group 表格；**失敗原因分類小表**（`ErrorBreakdownRows`）；droppedSamples 警告；PrintInterpretation |
 | `reporter/html.go` | go:embed HTML 報告 |
 | `reporter/json.go` | Summary ↔ JSON；`error_breakdown` 失敗分類列；Verdict = `Interpret(sum)`（共用白話解讀）|
-| `reporter/interpret.go` | 單一來源白話解讀 `Interpret(sum)`：整體結論／反應速度／穩定度／承受能力／一句話總結；門檻統一（fail err≥5% 或 p99≥3s；warn err≥1% 或 p99≥1s）；**rate 模式整體結論改採 corrected p99（`verdictP99`）**，誠實反映使用者實感；終端／JSON／HTML 共用，Dashboard JS 鏡像同門檻與用語 |
+| `reporter/interpret.go` | 單一來源白話解讀 `Interpret(sum)`：整體結論／反應速度／穩定度／承受能力／一句話總結；門檻統一（fail err≥5% 或 p99≥3s；warn err≥1% 或 p99≥1s）；**rate 模式整體結論改採 corrected p99（`verdictP99`）**，誠實反映使用者實感；**承受能力慢端點換算:`roundRate` 單一捨入來源(顯示值與 RPM 門檻共用,避免 x.x5 浮點邊界分歧)、`capacityRPM` 對 <1 rps 附「≈ N RPM」框架(RPM 用原始 rps 算以保住 rps 顯示 0.0 仍給 RPM)**；終端／JSON／HTML 共用，Dashboard JS 鏡像同門檻與用語 |
 | `reporter/confidence.go` | **新增** `MeasurementConfidence`：依產生器自我健康度（丟樣本比例 / GC 佔測試時長）給高／中等／偏低三級可信度判語；供終端、JSON、診斷共用 |
 | `reporter/errorcause.go` | **新增** 失敗歸因白話：`errorCopyByKind` 單一來源（每類 Title/Cause/Action/Label）；`failureCauseFinding` 產最高優先 Finding（err≥1% 才出）；`reachabilityDominates` 抑制連線層失敗被誤判為「超出負荷」；`ErrorBreakdownRows` 表格列；`ExplainErrorKind`/`IsReachabilityFailure` 供 pre-flight 使用 |
 | `reporter/tui.go` | Bubbletea 即時終端儀表板 |
@@ -56,8 +56,10 @@
 | `reporter/sink_influx.go` | InfluxDB v2 Sink；支援 `influxdb://`（HTTP）與 `influxdbs://`（HTTPS）|
 | `reporter/sink_loki.go` | Grafana Loki Sink：`loki://`/`lokis://`；指標以 JSON log line 推送，stream label 低基數（job+scenario+使用者 labels），支援 `?labels=`/`?org=`/`?token=` |
 | `reporter/sink_factory.go` | `ParseSink(dsn)` 路由 |
-| `dashboard/server.go` | HTTP + WebSocket 儀表板伺服器；Bearer Token 保護（POST 端點 + WS `?token=`）；端點：`/api/run,stop,status,scenario,import-har,report,discover` |
-| `dashboard/controller.go` | Controller 介面；RunRequest/DiscoverRequest；Discover 回調型別 |
+| `dashboard/server.go` | HTTP + WebSocket 儀表板伺服器；Bearer Token 保護（POST 端點 + WS `?token=`）；端點：`/api/run,stop,status,scenario,import-har,report,discover,**generate**`；`ReadHeaderTimeout` 防 slowloris |
+| `dashboard/controller.go` | Controller 介面；RunRequest/DiscoverRequest；Discover 回調型別；`RunResult` 加 `CorrectedP50/99Ms`（實感延遲橋接）與 `TTFT *TTFTSnap`；**`LoadScenarioWithData(yaml, dataCSV)` in-memory 資料載入介面**（宣告 vars_from 卻無資料 → 大聲失敗） |
+| `dashboard/generate.go` | **新增** `POST /api/generate` 情境產生端點:反序列化直入共用 `scenariogen` 型別 → 產 YAML+CSV+`DataParamWarnings`;DoS 上限 `maxGenerateColumns 256`+`maxGenerateCells 2M`(限乘積本身,各維分別設限擋不住)+`maxGenerateBytes 1MB` body;`Run:true` 走 `LoadScenarioWithData` 直接開跑,cookie 認證(session CSV 只在磁碟)明確 400 擋下 |
+| `dashboard/ttft_snap.go` | **新增** 串流量測 GUI 快照 `TTFTSnap`(P50/99 + `FullP50/99Ms` 配對基準);rate 模式完整回應同用 `CorrectedP*` 使用者實感值,結構上排除「開始回應比完整回應慢」倒掛 |
 | `dashboard/guided.go` | PM 導向精靈：steady/spike/soak → RampPlan；GuidedVerdict |
 | `dashboard/embed.go` | go:embed `templates/dashboard.html`（Vue 3 SPA；4 分頁含 Discover） |
 | `internal/discover/prober.go` | 容量自動探測：幾何級數 RPS 序列；共享 HTTPExecutor；onProbeStart/onProbe 回調 |
@@ -68,11 +70,14 @@
 | `cmd/ramplio/run.go` | `run` 命令：URL/RPS/場景/儀表板/**分散式**五模式；`--worker`（可重複）；`--ignore-errors`；`--dashboard-token`；**開跑前 pre-flight 預檢**（`--no-preflight` 略過）|
 | `cmd/ramplio/preflight.go` | 開跑前單發探測：`preflightTarget`（URL 模式直用；場景取第一步、含 `{{` 模板則跳過）；`runPreflight` 僅在連線層硬錯（DNS/連線被拒/TLS）時白話中止，逾時/4xx/5xx 不擋；**連得上時印「連線分解」**（DNS/連線/TLS/TTFB，用 `ExecuteTraced`）|
 | `cmd/ramplio/worker.go` | **新增** `worker` 命令：啟動工作節點 HTTP server（`--addr`）；SIGINT/SIGTERM 優雅關閉 |
-| `cmd/ramplio/dashcontrol.go` | 儀表板 Controller 實作；Discover 狀態機；buildOverrideStages |
+| `cmd/ramplio/dashcontrol.go` | 儀表板 Controller 實作核心（run/stop/status/result 生命週期）；td-2 拆分後主檔 738→468 行 |
+| `cmd/ramplio/dashcontrol_scenario.go` | **新增（td-2 拆出）** 場景載入面:`LoadScenario`(磁碟 vars_from)/`LoadScenarioWithData`(in-memory CSV)/`applyScenario`;步驟轉換一律走 `scenarioStepsToRamp` 單一來源(曾有漂移內嵌實作致 WS 欄位經 GUI 上傳靜默遺失) |
+| `cmd/ramplio/dashcontrol_baseline.go` | **新增（td-2 拆出）** baseline 上傳/清除/查詢 Controller 方法 |
+| `cmd/ramplio/dashcontrol_discover.go` | **新增（td-2 拆出）** Discover 狀態機與 `buildOverrideStages` |
 | `cmd/ramplio/validate.go` | `validate` 命令：stages/steps/captures/vars/thresholds/circuit breaker 詳細輸出 |
 | `cmd/ramplio/stop.go` | `stop` 命令：SIGTERM → 5s 輪詢 → SIGKILL 升級 |
 | `cmd/ramplio/discover.go` | `discover` 命令；探測序列預估；即時列印每探測點 |
-| `cmd/ramplio/init.go` | `init` 引導精靈：cookie/JWT 認證；steady/spike/soak 流量模式 |
+| `cmd/ramplio/init.go` | `init` 引導精靈：cookie/JWT 認證；steady/spike/soak 流量模式；**變動參數(遞增數字/UUID/Email/清單循環/佔位範本)→ 產 CSV + 掛 `vars_from mode:random`,以 `{{data.欄位}}` 引用;宣告移到測試步驟「前」+ `dataParamWarnings` 交叉檢查(引用未宣告/宣告未引用皆警告);`startSet` 區分「從 0 開始」與未設定;產生邏輯全走共用 scenariogen(薄殼)**;輸出檔名副檔名判斷大小寫不敏感 |
 | `cmd/ramplio/import.go` | `import` 命令：HAR → YAML |
 | `cmd/ramplio/report.go` | `report` 命令：JSON → HTML |
 | `cmd/ramplio/mock.go` | 本地 mock HTTP 伺服器；**確定性延遲注入**（`--latency` 固定 / `--latency-fast`+`--latency-slow`+`--slow-pct` 雙峰）；`latencyProfile.pickLatency` 純函式可單測，作為 ground-truth 驗證標的 |
@@ -95,6 +100,9 @@
 | `cmd/ramplio/baselinesave.go` | **新增（v3）** `--save-baseline` 共用寫檔 helper:`writeBaselineFile` 不回傳 error——「失敗不中斷壓測」從人為紀律變型別層級保證,run/discover 消重複 |
 | `cmd/ramplio/rateprofile.go` | **新增（v3.1）** rate 模式三階段時長計算單一來源:`rateProfile`(¼爬升+½持平+¼收尾,爬升≥1s)、`rateStages`(組裝 stage,含負值鉗制——曾因 dashboard 缺此鉗制送負時長 stage)、`rateProfileLine`(揭露負載輪廓避免平均<目標誤讀);CLI runRPS 與 dashboard/observe 窗口共用不分歧 |
 | `cmd/ramplio/version.go` | **新增（v3）** 版本解析:ldflags 注入優先,否則 `ReadBuildInfo` 回退(vcs.modified 時回退 dev 避免舊 tag 被誤認正式版、pseudo-version 支援) |
+| `internal/scenariogen/scenariogen.go` | **新增（v3.2 後）** 情境產生單一來源:`GenerateYAML` 由結構化精靈輸入渲染完整場景 YAML(cookie/JWT 認證、stages shape、thresholds);CLI `init` 與 dashboard `/api/generate` 共用,兩介面同輸入產位元組相同輸出、永不漂移;`yq` YAML 特殊字元跳脫 |
+| `internal/scenariogen/datagen.go` | **新增** 變動參數資料檔產生:`GenerateCSV` 走 encoding/csv(可 round-trip 回 `LoadDataFile`);`DataColumn`/`DataColumnKind`(int_seq/uuid/email/list/placeholder);列唯一值避免快取扭曲;欄名空/重複/清單無值皆回錯,`StartSet` 區分顯式 0 |
+| `internal/scenariogen/warnings.go` | **新增** `DataParamWarnings` 交叉檢查:比對宣告欄位與步驟 `{{data.X}}` 引用,曝光「引用未宣告」(每 request 必炸)與「宣告未引用」(欄位無效)兩靜默失敗;產生時警告不擋 |
 
 ---
 
@@ -102,7 +110,6 @@
 
 | 優先度 | 項目 | 位置 |
 |--------|------|------|
-| MED | `dashboard/controller.go` 與 `dashcontrol.go` 職責重疊 | 兩者 |
 | LOW | HTML 報告無互動圖表 | reporter/html.go |
 | LOW | Setup 步驟執行結果不計入指標 | engine/ramp.go |
 | LOW | RetryExecutor 只支援固定 backoff（無指數退避/jitter）| protocols/retry.go |
@@ -117,6 +124,9 @@
 > 已解決（v3.0，2026-07-08）：~~版本公信力三支柱缺口~~——(1) **容量回歸守門**(`internal/baseline` 快照+雙門檻 compare、`--save-baseline`/`compare` 命令);(2) **APM 瓶頸關聯**(`internal/observe` Jaeger 後端+慢 span 歸因引擎、`--observe`、opt-in `--trace-context` W3C traceparent 注入);(3) **可觀測性匯出**(`sink_otel.go` OTLP/HTTP);(4) **一鍵量測自證**(`verify` 命令對已知分佈斷言百分位)。module path 升 `/v3`、golangci 遷 v2 格式、CI 收斂為單一 test workflow。
 > 已解決（td-1，2026-07-14）：~~WebSocket 每次請求開新連線~~（`ws_mode: persistent`:per-VU `WSSession` 比照 HTTP cookie jar session 先例,連線 keyed by URL、傳輸錯誤如實回報並棄連重撥、`ws_expect` 不符保留健康連線;A/B 實測單次 exchange ~180µs→~24µs、alloc 126→5）。**附帶修正既有 bug**:~~WS 101 被「非 2xx=錯誤」誤判~~——WebSocket 步驟錯誤率恆 100%,`isError()`/`ClassifyError` 對 101 豁免。
 > 已解決（v3.1，2026-07-09）：~~單機 `runScenario` 非 TTY 提早結束~~（比照分散式：非 TTY 或 `--no-tui` 走 `runHeadlessProgress`，整合測試以 go test 的 pipe stdout 直接重現並驗證跑滿）；新增 **Tempo trace 後端**(`tempo.go`,spanSets 契約修正+spss 欠採樣可見化)、**`--strict-trust`**(不可信量測在 CI 視同失敗)、**dashboard 觀測/比較卡片**(observe_snap/compare_snap,GUI 呈現瓶頸關聯與容量回歸);rate 三階段組裝收斂單一來源(`rateprofile.go`)消除 dashboard 負時長風險;lint 債清零(errcheck 129→0、其餘 110→0)。
+> 已解決（v3.2，2026-07-14）：~~WebSocket 每次請求開新連線~~(`ws_mode: persistent` per-VU `WSSession`,A/B ~180µs→~24µs)+附帶修 ~~WS 101 被誤判為錯誤~~(isError/ClassifyError/shouldRetry 三複製點同步豁免);~~`dashboard/controller.go` 與 `dashcontrol.go` 職責重疊~~(td-2:dashcontrol 依職責拆 scenario/baseline/discover 三檔,`internal/dashboard` 界線文件化不得 import engine;重構途中挖出並修好 GUI 上傳 WS 欄位靜默遺失的漂移 bug)。
+> 已解決（v3.3，2026-07-15）：新增 **SSE 串流 TTFT 量測**(`stream: sse` → `readStreaming` 量首 chunk → 獨立 `ttftHist` 全鏈含分散式合併與 rate 模式 CO 修正、`ttft_p95_ms` 守門、terminal/JSON/dashboard「開始回應 vs 完整回應」並陳,ground-truth 自證)。
+> 已解決（未發版,2026-07-16~21）：**CLI init 變動參數 + datagen**(遞增/UUID/Email/清單/佔位 → CSV + `vars_from`,`dataParamWarnings` 交叉檢查、宣告先於引用);**scenariogen 共用套件**(CLI init 與 dashboard 產生零漂移);**dashboard 情境產生精靈**(`POST /api/generate` 前後端全鏈,DoS 限乘積本身、in-memory CSV 不落磁碟直接開跑,v1 不含 cookie 模式);**慢端點承受能力顯示 RPM 換算**(rpm-1)+**terminal/RPM 捨入來源統一**(rpm-2,`roundRate` 單一來源)。
 
 ---
 
@@ -135,7 +145,9 @@
 | Web Dashboard + Guided Mode | - | - | - | ✓ |
 | JUnit XML / Prometheus | ✓ | ✓ | - | ✓ |
 | CSV / InfluxDB Sink（含 per-step 明細）| ✓ | ✓ | ✓ | ✓ |
-| WebSocket | ✓ | ✓ | - | △ |
+| WebSocket（含持久連線） | ✓ | ✓ | - | ✓ |
+| SSE 串流 TTFT 量測 | - | △ | - | ✓ |
+| 場景產生精靈（CLI + Dashboard） | - | - | - | ✓ |
 | gRPC | ✓ | ✓ | - | - |
 | Lifecycle Hooks（Setup/Teardown）| ✓ | ✓ | - | ✓ |
 | Groups / Transactions | ✓ | ✓ | - | ✓ |
