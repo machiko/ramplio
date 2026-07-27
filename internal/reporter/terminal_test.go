@@ -184,7 +184,11 @@ func TestPrintSummary_TTFTBaselineConsistentUnderCO(t *testing.T) {
 
 	// 完整回應應顯示 corrected 值(320/480ms),不可顯示原始 100/150ms
 	// 造成「開始回應 250ms > 完整回應 100ms」的矛盾。
-	streamSection := out[strings.Index(out, "串流回應"):]
+	start := strings.Index(out, "串流回應")
+	if start < 0 {
+		t.Fatalf("輸出缺少串流回應區段\n%s", out)
+	}
+	streamSection := out[start:]
 	if end := strings.Index(streamSection, "回應狀態"); end > 0 {
 		streamSection = streamSection[:end]
 	}
