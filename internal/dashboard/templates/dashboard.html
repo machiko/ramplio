@@ -2290,9 +2290,12 @@
             </div>
           </div>
         </div>
-        <div class="kpi-value accent">{{ fmt1(snap.rps) }}</div>
+        <!-- 吞吐量走伺服器 verdict.capacity 單一來源(與 terminal 同 roundRate 捨入,
+             rpm-1/rpm-2);verdict 尚未就緒(開跑首拍)才退回本地格式化 -->
+        <div class="kpi-value accent">{{ snap.verdict?.capacity?.value ?? fmt1(snap.rps) }}</div>
         <div class="kpi-footer">
           <div class="kpi-sub">{{ (snap.total ?? 0).toLocaleString() }} total</div>
+          <div v-if="snap.verdict?.capacity?.rpm" class="kpi-sub">≈ 每分鐘 {{ snap.verdict.capacity.rpm }} 個</div>
         </div>
       </div>
 
@@ -2595,9 +2598,12 @@
             </div>
           </div>
         </div>
-        <div class="kpi-value accent">{{ fmt1(finalResult?.rps) }}</div>
+        <!-- 同 live KPI:吞吐量消費伺服器 verdict.capacity 單一來源,
+             慢端點(rps < 1)附每分鐘換算,與 terminal 承受能力同句 -->
+        <div class="kpi-value accent">{{ finalResult?.verdict?.capacity?.value ?? fmt1(finalResult?.rps) }}</div>
         <div class="kpi-footer">
           <div class="kpi-sub">{{ (finalResult?.total ?? 0).toLocaleString() }} total requests</div>
+          <div v-if="finalResult?.verdict?.capacity?.rpm" class="kpi-sub">≈ 每分鐘 {{ finalResult.verdict.capacity.rpm }} 個</div>
         </div>
       </div>
       <div class="kpi">
