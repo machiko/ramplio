@@ -113,6 +113,102 @@ ramplio run --scenario smoke.yaml
 
 ---
 
+## Generate your first scenario (`ramplio init`)
+
+Don't want to hand-write YAML? The guided wizard asks a few questions and
+produces a ready-to-run scenario file — including login setup (session cookie
+or JWT), multiple steps, load shape, and pass/fail thresholds:
+
+```bash
+ramplio init
+```
+
+The wizard walks through: basic settings → login (optional) → **variable
+parameters** (optional) → test steps → load settings → thresholds → output.
+
+### Variable parameters: a different value per virtual user
+
+Real APIs behave differently when every request hits the same `user_id`
+(caches flatter your numbers). Declare a variable parameter in the wizard and
+Ramplio generates a companion data file, so each virtual user draws different
+values. Reference a column in any path or body as `{{data.column_name}}`:
+
+```
+【變動參數 / 資料檔（可選）】
+  讓每個虛擬用戶帶不同的參數值（例如不同 user_id、搜尋關鍵字）。
+  接下來設定測試步驟時，在路徑或 body 中用 {{data.欄位名}} 引用，ramplio 會自動生成資料檔。
+  要設定變動參數嗎？ [y/N]
+  > y
+    參數欄位名稱？（例如 user_id、keyword）
+  > user_id
+  這個欄位的值怎麼產生？
+  [1] 遞增數字（1, 2, 3…，適合 ID）
+  [2] 隨機 UUID
+  [3] Email（loadtest+1@example.com…）
+  [4] 自訂清單（從你提供的值中循環挑選）
+  [5] 留空範本（產生 <欄名> 佔位，之後自己填真實資料）
+```
+
+Answering `user_id` (遞增數字) and a step path of `/api/users/{{data.user_id}}`
+produces two files (real wizard output):
+
+```yaml
+# scenario.yaml
+name: 商品 API 煙霧測試
+
+vars:
+  base_url: "http://localhost:8080"
+
+vars_from:
+  file: data.csv
+  mode: random
+
+stages:
+  - duration: 30s
+    target: 20
+  - duration: 1m
+    target: 20
+  - duration: 30s
+    target: 0
+
+steps:
+  - name: "GET /api/users/{{data.user_id}}"
+    method: GET
+    url: "{{vars.base_url}}/api/users/{{data.user_id}}"
+    assertions:
+      status: 200
+```
+
+```csv
+# data.csv (200 rows generated)
+user_id
+1
+2
+3
+```
+
+The wizard cross-checks your declarations against your steps at generation
+time: referencing an undeclared `{{data.X}}` column (or declaring a column no
+step uses) prints a warning immediately, instead of every request failing at
+run time.
+
+Then validate and run as usual:
+
+```bash
+ramplio validate --scenario scenario.yaml
+ramplio run --scenario scenario.yaml
+```
+
+### Generate a scenario in the dashboard
+
+The same wizard lives in the web dashboard: start `ramplio run --dashboard`,
+pick **進階：用精靈產生情境檔** on the home screen, and fill in the form. You
+can download the generated `scenario.yaml` + `data.csv`, or press **直接開跑**
+to load them straight into memory and run — the data file never needs to touch
+the server's disk, so this also works against a remote dashboard.
+
+---
+
 ## CLI Reference
 
 ### `ramplio run`
@@ -161,6 +257,11 @@ ramplio run --scenario smoke.yaml --dashboard
 The dashboard shows RPS, latency percentiles (p50/p90/p99), error rate, and
 active VU count as time-series charts. No extra software required — it is served
 directly by the Ramplio binary.
+
+Besides running tests, the dashboard can also discover your capacity limit
+(探測容量上限), guide non-technical users through a test (帶我設定), and
+**generate scenario files** with the built-in wizard — see
+[Generate your first scenario](#generate-your-first-scenario-ramplio-init).
 
 ---
 
