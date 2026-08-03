@@ -8,9 +8,9 @@
 
 | 欄位 | 值 |
 |------|-----|
-| 分析時間 | 2026-07-27 |
-| 分析基準 commit | `084a10a` |
-| 完整 commit hash | `084a10aa70881963526e1af5c0337d3b1f860686` |
+| 分析時間 | 2026-08-03 |
+| 分析基準 commit | `a044582` |
+| 完整 commit hash | `a044582fce6c0c9a8fff14d15db4886cbd92eebe` |
 
 > 註:module path 已升 `github.com/machiko/ramplio/v3`,原始碼一律置於 `internal/`(下表模組路徑沿用簡寫,實際皆有 `internal/` 前綴)。
 
@@ -61,7 +61,7 @@
 | `dashboard/generate.go` | **新增** `POST /api/generate` 情境產生端點:反序列化直入共用 `scenariogen` 型別 → 產 YAML+CSV+`DataParamWarnings`;DoS 上限 `maxGenerateColumns 256`+`maxGenerateCells 2M`(限乘積本身,各維分別設限擋不住)+`maxGenerateBytes 1MB` body;`Run:true` 走 `LoadScenarioWithData` 直接開跑,cookie 認證(session CSV 只在磁碟)明確 400 擋下 |
 | `dashboard/ttft_snap.go` | **新增** 串流量測 GUI 快照 `TTFTSnap`(P50/99 + `FullP50/99Ms` 配對基準);rate 模式完整回應同用 `CorrectedP*` 使用者實感值,結構上排除「開始回應比完整回應慢」倒掛 |
 | `dashboard/guided.go` | PM 導向精靈：steady/spike/soak → RampPlan；GuidedVerdict |
-| `dashboard/embed.go` | go:embed `templates/dashboard.html`（Vue 3 SPA；4 分頁含 Discover） |
+| `dashboard/embed.go` | go:embed `templates/dashboard.html`（Vue 3 SPA；4 分頁含 Discover）；**吞吐量 KPI(live + 結果頁)渲染伺服器 `verdict.capacity.value` 單一來源(verdict 未就緒才退回前端 `fmt1`),慢端點附「≈ 每分鐘 N 個」與 terminal 承受能力同句——同頁不再有兩種捨入** |
 | `internal/discover/prober.go` | 容量自動探測：幾何級數 RPS 序列；共享 HTTPExecutor；onProbeStart/onProbe 回調 |
 | `importer/har.go` | HAR JSON 解析 |
 | `importer/converter.go` | HAR → YAML 場景；自動偵測認證/captures/JWT |
@@ -115,6 +115,10 @@
 | LOW | RetryExecutor 只支援固定 backoff（無指數退避/jitter）| protocols/retry.go |
 | LOW | `stop` 命令 Unix-only（lsof/kill）| cmd/ramplio/stop.go |
 | LOW | Discover 探測序列寫死（無法自訂步距）| discover/prober.go |
+| MED | `ramp.go` 937 行超過專案 800 行上限（`guard-file-size.py` 硬界線會擋寫入）；核心併發邏輯單檔過大，比照 td-2 依職責拆分 | engine/ramp.go |
+| MED | `internal/engine` 覆蓋率 64.5%（內部套件最低）：circuit breaker `failWindow` record/reset、`dataSource.next`、`RunSetup`/`RunTeardown`、`ActiveVUs`/`StageInfo` 皆 0%，`applyCaptures` 11% | engine/ramp.go |
+| LOW | `docs/roadmap.md` 版本時間軸停在 v2.1.1，v3.0–v3.4 五個版本未記 | docs/roadmap.md |
+| LOW | `nlSummary` computed 是未被模板渲染的死碼，內含獨立 `Math.round(rps)` 與手組 HTML 字串；若未來啟用必須改走 `verdict.capacity`，否則重新引入同頁兩種捨入 | dashboard/templates/dashboard.html:3753 |
 
 > 已解決（自 `72a7b52`）：~~分散式測試缺失~~、~~Sink per-step 明細~~、~~EvalCondition AND/OR~~。
 > 已解決（Phase 4）：~~分散式百分位合併錯誤~~（改用 HDR 直方圖序列化合併，`metrics.MergeExports`，含 step/group 明細）、~~repo 產物被追蹤~~（已移除並補 `.gitignore`）、~~Worker 端點無認證~~（shared secret + Bearer middleware）、~~分散式 Setup/Teardown stub~~（coordinator 集中執行 setup，captures 透過 `RampConfig.SeedCaptures` 廣播注入 worker）、~~worker 執行 context 隨 HTTP 請求取消導致 0 請求~~（改用 `context.WithoutCancel`）。
@@ -126,7 +130,7 @@
 > 已解決（v3.1，2026-07-09）：~~單機 `runScenario` 非 TTY 提早結束~~（比照分散式：非 TTY 或 `--no-tui` 走 `runHeadlessProgress`，整合測試以 go test 的 pipe stdout 直接重現並驗證跑滿）；新增 **Tempo trace 後端**(`tempo.go`,spanSets 契約修正+spss 欠採樣可見化)、**`--strict-trust`**(不可信量測在 CI 視同失敗)、**dashboard 觀測/比較卡片**(observe_snap/compare_snap,GUI 呈現瓶頸關聯與容量回歸);rate 三階段組裝收斂單一來源(`rateprofile.go`)消除 dashboard 負時長風險;lint 債清零(errcheck 129→0、其餘 110→0)。
 > 已解決（v3.2，2026-07-14）：~~WebSocket 每次請求開新連線~~(`ws_mode: persistent` per-VU `WSSession`,A/B ~180µs→~24µs)+附帶修 ~~WS 101 被誤判為錯誤~~(isError/ClassifyError/shouldRetry 三複製點同步豁免);~~`dashboard/controller.go` 與 `dashcontrol.go` 職責重疊~~(td-2:dashcontrol 依職責拆 scenario/baseline/discover 三檔,`internal/dashboard` 界線文件化不得 import engine;重構途中挖出並修好 GUI 上傳 WS 欄位靜默遺失的漂移 bug)。
 > 已解決（v3.3，2026-07-15）：新增 **SSE 串流 TTFT 量測**(`stream: sse` → `readStreaming` 量首 chunk → 獨立 `ttftHist` 全鏈含分散式合併與 rate 模式 CO 修正、`ttft_p95_ms` 守門、terminal/JSON/dashboard「開始回應 vs 完整回應」並陳,ground-truth 自證)。
-> 已解決（未發版,2026-07-16~21）：**CLI init 變動參數 + datagen**(遞增/UUID/Email/清單/佔位 → CSV + `vars_from`,`dataParamWarnings` 交叉檢查、宣告先於引用);**scenariogen 共用套件**(CLI init 與 dashboard 產生零漂移);**dashboard 情境產生精靈**(`POST /api/generate` 前後端全鏈,DoS 限乘積本身、in-memory CSV 不落磁碟直接開跑,v1 不含 cookie 模式);**慢端點承受能力顯示 RPM 換算**(rpm-1)+**terminal/RPM 捨入來源統一**(rpm-2,`roundRate` 單一來源)。
+> 已解決（v3.4.0「場景產生精靈」,2026-08-01 發版）：**CLI init 變動參數 + datagen**(遞增/UUID/Email/清單/佔位 → CSV + `vars_from`,`dataParamWarnings` 交叉檢查、宣告先於引用);**scenariogen 共用套件**(CLI init 與 dashboard 產生零漂移);**dashboard 情境產生精靈**(`POST /api/generate` 前後端全鏈,DoS 限乘積本身、in-memory CSV 不落磁碟直接開跑,v1 不含 cookie 模式);**慢端點承受能力顯示 RPM 換算**(rpm-1)+**terminal/RPM 捨入來源統一**(rpm-2,`roundRate` 單一來源)+**dashboard 吞吐量 KPI 改消費伺服器 `verdict.capacity`**(wr-2,消除 GUI 與 CLI 捨入分歧)。發版產物:5 平台 archives + checksums,Homebrew cask 仍 `skip_upload`(tap repo + PAT 待人工建立)。
 
 ---
 
