@@ -257,6 +257,12 @@ v1.0.0  Hardening          ── 生產就緒
 v2.0.0  企業級功能         ── Cookie/HAR/JUnit/discover 等企業功能
 v2.1.0  分散式測試         ── Coordinator-Worker + 發布管線
 v2.1.1  Module Path 統一   ── github.com/machiko/ramplio
+v3.0.0  瓶頸關聯與基準比較 ── compare 基準守門、OTel 匯出、trace 瓶頸關聯、module path 升 /v3
+v3.1.0  Dashboard 呈現 v3  ── 基準比較與觀測卡片、Tempo 後端、--strict-trust
+v3.2.0  WebSocket 測快測準 ── ws_mode: persistent 持久連線、修正 101 誤判為錯誤
+v3.3.0  串流時代的體感量測 ── SSE 串流 TTFT 量測、ttft_p95_ms 門檻
+v3.3.1  Dashboard 串流體感 ── 結果頁串流回應卡片、rate 模式使用者實感延遲
+v3.4.0  場景產生精靈       ── init 精靈支援變動參數、Dashboard 情境產生精靈
 ```
 
 ---
