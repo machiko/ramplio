@@ -67,6 +67,7 @@ type RampConfig struct {
 //   - step.go        步驟執行、請求渲染與 capture
 //   - breaker.go     熔斷器滑動窗口
 //   - datasource.go  資料檔列分配
+//   - convert.go     場景步驟 → RampStep 轉換(各入口唯一來源)
 type RampEngine struct {
 	cfg            RampConfig
 	collector      *metrics.Collector

@@ -444,7 +444,7 @@ func TestRenderRequest(t *testing.T) {
 
 // The step template is shared by every VU, so rendering must never write auth
 // into the template's own header map — whatever its shape. The empty non-nil
-// shape is the one scenarioStepsToRamp produces for every step without headers.
+// shape is what scenario conversion used to produce for steps without headers.
 func TestRenderRequest_AuthNeverWritesIntoTemplateHeaders(t *testing.T) {
 	templates := map[string]func() map[string]string{
 		"nil":       func() map[string]string { return nil },

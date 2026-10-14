@@ -9,6 +9,10 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// WSExpectHeader carries a websocket step's ws_expect from scenario conversion
+// to the executor; it is stripped from the handshake, never sent.
+const WSExpectHeader = "X-WS-Expect"
+
 // WSExecutor implements Executor for WebSocket endpoints.
 // Each Execute call opens a new connection, sends one text frame, reads one
 // frame back, then closes the connection.  This matches the request/response
@@ -83,7 +87,7 @@ func (s *WSSession) Close() error {
 func dialWS(ctx context.Context, req Request) (*websocket.Conn, int, error) {
 	reqHeader := make(http.Header, len(req.Headers))
 	for k, v := range req.Headers {
-		if k != "X-WS-Expect" {
+		if k != WSExpectHeader {
 			reqHeader.Set(k, v)
 		}
 	}
@@ -145,7 +149,7 @@ func exchangeWS(ctx context.Context, conn *websocket.Conn, req Request, start ti
 	}
 
 	// Validate ws_expect if set via the WSExpect request header (engine injects it).
-	if expect, ok := req.Headers["X-WS-Expect"]; ok && expect != "" {
+	if expect, ok := req.Headers[WSExpectHeader]; ok && expect != "" {
 		if !strings.Contains(string(msg), expect) {
 			return Result{
 				StatusCode: statusCode,

@@ -265,8 +265,8 @@ func TestRun_SeedCapturesWithoutSetup(t *testing.T) {
 	assert.Zero(t, srv.badAuth.Load())
 }
 
-// Regression for a shipped bug: scenario files give every step without headers
-// an *empty non-nil* map (scenarioStepsToRamp), shared by all VUs, and auth used
+// Regression for a shipped bug: the scenario conversion used to give every step
+// without headers an *empty non-nil* map, shared by all VUs, and auth used
 // to be written into it — a concurrent map write (-race reports it; the runtime
 // may abort with "concurrent map writes"). The sharedHeaders assertion catches a
 // regression deterministically. The mismatch check guards per-VU token
@@ -304,7 +304,7 @@ func TestRun_PerVUBearerTokensWithSharedEmptyHeaders(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	sharedHeaders := map[string]string{} // the shape scenarioStepsToRamp produces
+	sharedHeaders := map[string]string{} // the shape scenario conversion used to produce
 	api := bearerStep("api", srv.URL+"/api")
 	api.Request.Headers = sharedHeaders
 	login := loginStep(srv.URL)

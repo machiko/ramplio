@@ -1,8 +1,8 @@
 package main
 
 // dashController 的場景載入面:GUI 上傳/CLI 預載 YAML 場景的解析與暫存。
-// 步驟轉換一律走 scenarioStepsToRamp(與 CLI 單一來源)——這裡曾有一份
-// 漂移的內嵌實作,WS 欄位經 GUI 上傳會靜默遺失。
+// 步驟轉換一律走 engine.StepsFromScenario(與 CLI、分散式 worker 單一來源)——
+// 這裡曾有一份漂移的內嵌實作,WS 欄位經 GUI 上傳會靜默遺失。
 
 import (
 	"bytes"
@@ -132,9 +132,9 @@ func (c *dashController) parseForLoad(yaml []byte) (*scenarios.Scenario, error) 
 // applyScenario builds the display metadata and engine steps from a parsed
 // scenario and stores them for the next run, together with the resolved data.
 func (c *dashController) applyScenario(sc *scenarios.Scenario, dataRows []map[string]string, dataMode string) {
-	steps := scenarioStepsToRamp(sc.Steps)
-	setupSteps := scenarioStepsToRamp(sc.Setup)
-	teardownSteps := scenarioStepsToRamp(sc.Teardown)
+	steps := engine.StepsFromScenario(sc.Steps)
+	setupSteps := engine.StepsFromScenario(sc.Setup)
+	teardownSteps := engine.StepsFromScenario(sc.Teardown)
 	stepNames := make([]string, len(steps))
 	for i := range steps {
 		stepNames[i] = steps[i].Name

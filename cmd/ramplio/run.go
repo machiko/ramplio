@@ -10,7 +10,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strings"
 	"syscall"
@@ -418,9 +417,9 @@ func runScenario(path, promAddr string, httpCfg protocols.HTTPConfig, noTUI bool
 		}
 	}
 
-	steps := scenarioStepsToRamp(sc.Steps)
-	setupSteps := scenarioStepsToRamp(sc.Setup)
-	teardownSteps := scenarioStepsToRamp(sc.Teardown)
+	steps := engine.StepsFromScenario(sc.Steps)
+	setupSteps := engine.StepsFromScenario(sc.Setup)
+	teardownSteps := engine.StepsFromScenario(sc.Teardown)
 
 	var dataRows []map[string]string
 	var dataMode string
@@ -750,69 +749,6 @@ func checkThresholds(sum metrics.Summary, t *scenarios.Thresholds) string {
 		}
 	}
 	return ""
-}
-
-// scenarioStepsToRamp converts a slice of scenario steps to engine.RampStep values.
-func scenarioStepsToRamp(steps []scenarios.Step) []engine.RampStep {
-	out := make([]engine.RampStep, len(steps))
-	for i, s := range steps {
-		name := s.Name
-		if name == "" {
-			name = strings.ToUpper(s.Method) + " " + s.URL
-		}
-		hdrs := s.Headers
-		if hdrs == nil {
-			hdrs = make(map[string]string)
-		}
-		// Inject WS expect as a synthetic header so WSExecutor can check it.
-		if strings.EqualFold(s.Protocol, "websocket") && s.WSExpect != "" {
-			hdrs["X-WS-Expect"] = s.WSExpect
-		}
-		body := []byte(s.Body)
-		if strings.EqualFold(s.Protocol, "websocket") && s.WSMessage != "" && s.Body == "" {
-			body = []byte(s.WSMessage)
-		}
-		out[i] = engine.RampStep{
-			Name: name,
-			Request: protocols.Request{
-				Method:  strings.ToUpper(s.Method),
-				URL:     s.URL,
-				Headers: hdrs,
-				Body:    body,
-			},
-			Assertions: s.Assertions,
-			Auth:       s.Auth,
-			Capture:    s.Capture,
-			Retry:      s.Retry,
-			Pause:      s.Pause,
-			Group:      s.Group,
-			Protocol:   s.Protocol,
-			WSMode:     s.WSMode,
-			Stream:     s.Stream,
-			If:         s.If,
-			Loop:       s.Loop,
-		}
-		if s.Capture != nil {
-			if compiled := precompileRegexes(s.Capture.Values); len(compiled) > 0 {
-				out[i].CompiledRegexes = compiled
-			}
-		}
-	}
-	return out
-}
-
-// precompileRegexes builds a map of pattern → *regexp.Regexp for all regex: capture expressions.
-func precompileRegexes(values map[string]string) map[string]*regexp.Regexp {
-	out := make(map[string]*regexp.Regexp)
-	for _, expr := range values {
-		if strings.HasPrefix(expr, "regex:") {
-			pattern := strings.TrimPrefix(expr, "regex:")
-			if re, err := regexp.Compile(pattern); err == nil {
-				out[pattern] = re
-			}
-		}
-	}
-	return out
 }
 
 func parseHeaders(raw []string) map[string]string {

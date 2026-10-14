@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"math"
 	"net/http"
-	"regexp"
-	"strings"
 	"sync"
 	"time"
 
@@ -95,8 +93,8 @@ func (w *Worker) Assign(ctx context.Context, req *AssignRequest) error {
 
 	// Convert scenario steps to engine steps. Setup steps are intentionally
 	// not converted here — the coordinator runs setup centrally.
-	steps := scenarioStepsToEngineSteps(sc.Steps)
-	teardownSteps := scenarioStepsToEngineSteps(sc.Teardown)
+	steps := engine.StepsFromScenario(sc.Steps)
+	teardownSteps := engine.StepsFromScenario(sc.Teardown)
 
 	// Build engine config from scenario. The coordinator runs setup centrally
 	// and broadcasts the captured values, so workers seed those captures rather
@@ -334,65 +332,4 @@ func scaleScenario(sc *scenarios.Scenario, assignedVUs int) {
 			sc.Stages[i].Target = int(math.Round(float64(sc.Stages[i].Target) * ratio))
 		}
 	}
-}
-
-// scenarioStepsToEngineSteps converts scenario.Step to engine.RampStep
-func scenarioStepsToEngineSteps(steps []scenarios.Step) []engine.RampStep {
-	out := make([]engine.RampStep, len(steps))
-	for i, s := range steps {
-		name := s.Name
-		if name == "" {
-			name = strings.ToUpper(s.Method) + " " + s.URL
-		}
-		hdrs := s.Headers
-		if hdrs == nil {
-			hdrs = make(map[string]string)
-		}
-		// Inject WS expect as a synthetic header so WSExecutor can check it.
-		if strings.EqualFold(s.Protocol, "websocket") && s.WSExpect != "" {
-			hdrs["X-WS-Expect"] = s.WSExpect
-		}
-		body := []byte(s.Body)
-		if strings.EqualFold(s.Protocol, "websocket") && s.WSMessage != "" && s.Body == "" {
-			body = []byte(s.WSMessage)
-		}
-		out[i] = engine.RampStep{
-			Name: name,
-			Request: protocols.Request{
-				Method:  strings.ToUpper(s.Method),
-				URL:     s.URL,
-				Headers: hdrs,
-				Body:    body,
-			},
-			Assertions: s.Assertions,
-			Auth:       s.Auth,
-			Capture:    s.Capture,
-			Retry:      s.Retry,
-			Pause:      s.Pause,
-			Group:      s.Group,
-			Protocol:   s.Protocol,
-			If:         s.If,
-			Loop:       s.Loop,
-		}
-		if s.Capture != nil {
-			if compiled := precompileRegexes(s.Capture.Values); len(compiled) > 0 {
-				out[i].CompiledRegexes = compiled
-			}
-		}
-	}
-	return out
-}
-
-// precompileRegexes builds a map of pattern → *regexp.Regexp for all regex: capture expressions.
-func precompileRegexes(values map[string]string) map[string]*regexp.Regexp {
-	out := make(map[string]*regexp.Regexp)
-	for _, expr := range values {
-		if strings.HasPrefix(expr, "regex:") {
-			pattern := strings.TrimPrefix(expr, "regex:")
-			if re, err := regexp.Compile(pattern); err == nil {
-				out[expr] = re
-			}
-		}
-	}
-	return out
 }

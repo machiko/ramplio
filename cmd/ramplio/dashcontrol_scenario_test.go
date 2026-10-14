@@ -6,9 +6,9 @@ import (
 	"github.com/machiko/ramplio/v3/internal/protocols"
 )
 
-// td-2 審查前發現:LoadScenario 曾有一份與 scenarioStepsToRamp 漂移的
-// 轉換實作,WS 欄位(ws_message/ws_expect)經 GUI 上傳會靜默遺失。
-// 收斂為單一來源後,此測試釘住兩條路徑不可再分歧。
+// td-2 審查前發現:LoadScenario 曾有一份漂移的轉換實作,WS 欄位
+// (ws_message/ws_expect)經 GUI 上傳會靜默遺失。現在一律走
+// engine.StepsFromScenario;此測試釘住 dashboard 路徑確實經過它。
 func TestLoadScenarioCarriesWSFields(t *testing.T) {
 	yaml := []byte(`
 name: ws via dashboard
@@ -22,6 +22,7 @@ steps:
     protocol: websocket
     ws_message: ping
     ws_expect: pong
+    ws_mode: persistent
 `)
 	c := newDashController(protocols.DefaultHTTPConfig(), nil)
 	if err := c.LoadScenario(yaml, ""); err != nil {
@@ -34,11 +35,14 @@ steps:
 		t.Fatalf("應載入 1 步,得到 %d", len(c.pendingSteps))
 	}
 	step := c.pendingSteps[0]
-	if got := step.Request.Headers["X-WS-Expect"]; got != "pong" {
+	if got := step.Request.Headers[protocols.WSExpectHeader]; got != "pong" {
 		t.Errorf("ws_expect 應注入 X-WS-Expect header,得到 %q", got)
 	}
 	if got := string(step.Request.Body); got != "ping" {
 		t.Errorf("ws_message 應成為請求 body,得到 %q", got)
+	}
+	if step.WSMode != "persistent" {
+		t.Errorf("ws_mode 應帶入 engine,得到 %q", step.WSMode)
 	}
 }
 

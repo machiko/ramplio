@@ -501,7 +501,7 @@ func (c *Coordinator) runSetup(ctx context.Context) (map[string]string, error) {
 	col := metrics.NewCollector(1)
 	defer col.Stop()
 	eng := engine.NewRamp(engine.RampConfig{
-		SetupSteps: scenarioStepsToEngineSteps(c.cfg.Setup),
+		SetupSteps: engine.StepsFromScenario(c.cfg.Setup),
 		Vars:       c.cfg.Vars,
 		Executor:   protocols.NewHTTPExecutor(c.httpCfg),
 		WSExecutor: protocols.NewWSExecutor(),
@@ -518,7 +518,7 @@ func (c *Coordinator) runTeardown(ctx context.Context, setupCaptures map[string]
 	col := metrics.NewCollector(1)
 	defer col.Stop()
 	eng := engine.NewRamp(engine.RampConfig{
-		TeardownSteps: scenarioStepsToEngineSteps(c.cfg.Teardown),
+		TeardownSteps: engine.StepsFromScenario(c.cfg.Teardown),
 		Vars:          c.cfg.Vars,
 		Executor:      protocols.NewHTTPExecutor(c.httpCfg),
 		WSExecutor:    protocols.NewWSExecutor(),

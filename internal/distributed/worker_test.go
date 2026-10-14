@@ -296,51 +296,6 @@ func TestWorkerHandleLive(t *testing.T) {
 	assert.False(t, resp.Done)
 }
 
-// TestScenarioStepsToEngineSteps tests step conversion
-func TestScenarioStepsToEngineSteps(t *testing.T) {
-	steps := []scenarios.Step{
-		{
-			Name:   "GET homepage",
-			Method: "GET",
-			URL:    "http://example.com",
-			Headers: map[string]string{
-				"User-Agent": "test",
-			},
-		},
-		{
-			Name:   "POST data",
-			Method: "POST",
-			URL:    "http://example.com/api",
-			Body:   `{"key":"value"}`,
-		},
-	}
-
-	engineSteps := scenarioStepsToEngineSteps(steps)
-
-	assert.Equal(t, 2, len(engineSteps))
-	assert.Equal(t, "GET homepage", engineSteps[0].Name)
-	assert.Equal(t, "GET", engineSteps[0].Request.Method)
-	assert.Equal(t, "http://example.com", engineSteps[0].Request.URL)
-	assert.Equal(t, "POST data", engineSteps[1].Name)
-	assert.Equal(t, "POST", engineSteps[1].Request.Method)
-	assert.Equal(t, `{"key":"value"}`, string(engineSteps[1].Request.Body))
-}
-
-// TestScenarioStepsNameGeneration tests that step names are generated when empty
-func TestScenarioStepsNameGeneration(t *testing.T) {
-	steps := []scenarios.Step{
-		{
-			Method: "POST",
-			URL:    "http://example.com/api",
-		},
-	}
-
-	engineSteps := scenarioStepsToEngineSteps(steps)
-
-	assert.Equal(t, 1, len(engineSteps))
-	assert.Equal(t, "POST http://example.com/api", engineSteps[0].Name)
-}
-
 // TestWorkerAssignInvalidYAML tests assignment with invalid YAML
 func TestWorkerAssignInvalidYAML(t *testing.T) {
 	w := NewWorker("test-worker")
@@ -367,46 +322,6 @@ func TestWorkerGetLiveMetricsNoEngine(t *testing.T) {
 	assert.Equal(t, int64(0), metrics.Total)
 	assert.Equal(t, 0.0, metrics.RPS)
 	assert.False(t, metrics.Done)
-}
-
-// TestPrecompileRegexes tests regex compilation for capture patterns
-func TestPrecompileRegexes(t *testing.T) {
-	values := map[string]string{
-		"token":     `regex:\"token\": \"([^\"]+)\"`,
-		"user_id":   `$.user_id`,
-		"bad_regex": `regex:[invalid(`,
-	}
-
-	compiled := precompileRegexes(values)
-
-	// Should have compiled the valid regex
-	assert.Equal(t, 1, len(compiled))
-	assert.NotNil(t, compiled[`regex:\"token\": \"([^\"]+)\"`])
-
-	// Invalid regex and non-regex patterns should not be in the map
-	assert.Nil(t, compiled["user_id"])
-	assert.Nil(t, compiled["bad_regex"])
-}
-
-// TestWorkerWebSocketStepConversion tests WebSocket step conversion
-func TestWorkerWebSocketStepConversion(t *testing.T) {
-	steps := []scenarios.Step{
-		{
-			Name:      "WS connect",
-			Method:    "GET",
-			URL:       "ws://echo.websocket.org",
-			Protocol:  "websocket",
-			WSMessage: `{"msg":"hello"}`,
-			WSExpect:  "hello",
-		},
-	}
-
-	engineSteps := scenarioStepsToEngineSteps(steps)
-
-	assert.Equal(t, 1, len(engineSteps))
-	assert.Equal(t, "websocket", engineSteps[0].Protocol)
-	assert.Equal(t, `{"msg":"hello"}`, string(engineSteps[0].Request.Body))
-	assert.Equal(t, "hello", engineSteps[0].Request.Headers["X-WS-Expect"])
 }
 
 // TestScenarioVUScalingWithNoMaxTarget tests scaling when no positive target exists
