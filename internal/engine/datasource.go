@@ -1,5 +1,7 @@
 package engine
 
+// vars_from 資料檔的列分配:每個 VU(rate 模式為每個 worker)建立時取一列。
+
 import (
 	"sync/atomic"
 )

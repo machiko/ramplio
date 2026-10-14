@@ -1,5 +1,8 @@
 package engine
 
+// 兩種模式共用的步驟執行:executor 選擇、setup/teardown 的單步執行、
+// 請求渲染(模板與 auth)與回應 capture。
+
 import (
 	"context"
 	"encoding/base64"

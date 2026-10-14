@@ -59,6 +59,14 @@ type RampConfig struct {
 }
 
 // RampEngine runs multi-stage load with linear VU interpolation between stages.
+//
+// 依職責拆檔(wr-6):
+//   - ramp.go        型別、建構、即時讀數、Run/setup/teardown 生命週期
+//   - vu.go          VU 模式(封閉模型)
+//   - rate.go        rate 模式(開放模型:dispatcher + worker 池)
+//   - step.go        步驟執行、請求渲染與 capture
+//   - breaker.go     熔斷器滑動窗口
+//   - datasource.go  資料檔列分配
 type RampEngine struct {
 	cfg            RampConfig
 	collector      *metrics.Collector

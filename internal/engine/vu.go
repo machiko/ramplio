@@ -1,5 +1,8 @@
 package engine
 
+// RampEngine 的 VU 模式(封閉模型):每個 VU 一個 goroutine 循環執行步驟,
+// stage 迴圈以線性插值增減 VU 數。
+
 import (
 	"context"
 	"errors"

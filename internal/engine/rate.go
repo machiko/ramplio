@@ -1,5 +1,8 @@
 package engine
 
+// RampEngine 的 rate 模式(開放模型):單一 dispatcher 依 stage 目標 RPS 排定
+// 每個請求的應送時刻,交給按需成長的 worker 池;排隊時間即 CO 修正的來源。
+
 import (
 	"context"
 	"errors"

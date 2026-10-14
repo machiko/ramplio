@@ -1,5 +1,8 @@
 package engine
 
+// 熔斷器:滑動時間窗口內失敗達門檻即觸發並鎖存,所有 VU 與 dispatcher
+// 在每次請求前輪詢。
+
 import (
 	"sync"
 	"sync/atomic"
