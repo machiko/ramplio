@@ -13,7 +13,7 @@
 - **TDD 優先**：每個功能先寫測試（RED），再實作（GREEN），再整理（REFACTOR）
 - **Race Detector 必過**：`go test -race ./...` 在每個 Milestone 結束前全數通過
 - **每個 Milestone 可獨立執行**：CLI 在當下 Milestone 範圍內必須可用
-- **Semantic Versioning**：規劃當時以 `v0.x.0` 為 pre-release，`v1.0.0` 為第一個穩定版（現已演進至 v2.x，見文末時間軸）
+- **Semantic Versioning**：規劃當時以 `v0.x.0` 為 pre-release，`v1.0.0` 為第一個穩定版（現已演進至 v3.x，見文末時間軸）
 
 ---
 
