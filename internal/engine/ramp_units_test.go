@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"maps"
 	"regexp"
 	"sync"
 	"sync/atomic"
@@ -306,9 +307,16 @@ func TestRenderRequest(t *testing.T) {
 		want protocols.Request
 	}{
 		{
-			name: "plain request gets an empty header map and no body",
+			name: "plain request has no headers and no body",
 			step: RampStep{Request: protocols.Request{Method: "GET", URL: "http://api.test/health"}},
-			want: protocols.Request{Method: "GET", URL: "http://api.test/health", Headers: map[string]string{}},
+			want: protocols.Request{Method: "GET", URL: "http://api.test/health"},
+		},
+		{
+			// Executors only read headers, so without auth nothing is allocated —
+			// and the step's own (shared) empty map is never handed out either.
+			name: "empty template without auth yields no header map",
+			step: RampStep{Request: protocols.Request{Method: "GET", URL: "http://x", Headers: map[string]string{}}},
+			want: protocols.Request{Method: "GET", URL: "http://x"},
 		},
 		{
 			name: "templates resolve in url, headers and body",
@@ -328,12 +336,12 @@ func TestRenderRequest(t *testing.T) {
 		{
 			name: "sse stream flag",
 			step: RampStep{Request: protocols.Request{Method: "GET", URL: "http://x"}, Stream: "sse"},
-			want: protocols.Request{Method: "GET", URL: "http://x", Headers: map[string]string{}, Stream: true},
+			want: protocols.Request{Method: "GET", URL: "http://x", Stream: true},
 		},
 		{
 			name: "unknown stream kind is not streamed",
 			step: RampStep{Request: protocols.Request{Method: "GET", URL: "http://x"}, Stream: "ndjson"},
-			want: protocols.Request{Method: "GET", URL: "http://x", Headers: map[string]string{}},
+			want: protocols.Request{Method: "GET", URL: "http://x"},
 		},
 		{
 			name: "bearer auth from capture",
@@ -350,6 +358,11 @@ func TestRenderRequest(t *testing.T) {
 				Auth:    &scenarios.Auth{Basic: &scenarios.BasicAuth{Username: "{{vars.user}}", Password: "{{vars.pass}}"}},
 			},
 			want: protocols.Request{Method: "GET", URL: "http://x", Headers: map[string]string{"Authorization": "Basic YWxpY2U6czNjcmV0"}},
+		},
+		{
+			name: "auth block with neither kind adds nothing",
+			step: RampStep{Request: protocols.Request{Method: "GET", URL: "http://x"}, Auth: &scenarios.Auth{}},
+			want: protocols.Request{Method: "GET", URL: "http://x"},
 		},
 		{
 			// Current behaviour: the parser does not reject a step declaring both.
@@ -374,24 +387,39 @@ func TestRenderRequest(t *testing.T) {
 }
 
 // The step template is shared by every VU, so rendering must never write auth
-// into the template's own header map.
-//
-// Known gap, deliberately not locked in here: an *empty non-nil* template map —
-// which scenarioStepsToRamp produces for every step without headers — is
-// returned as-is by RenderHeaders, so Authorization is written into the shared
-// map (a data race across VUs). Only the non-empty shape is safe today.
-func TestRenderRequest_AuthDoesNotLeakIntoNonEmptyTemplateHeaders(t *testing.T) {
-	tmpl := map[string]string{"Accept": "application/json"}
-	step := RampStep{
-		Request: protocols.Request{Method: "GET", URL: "http://x", Headers: tmpl},
-		Auth:    &scenarios.Auth{Bearer: strPtr("t")},
+// into the template's own header map — whatever its shape. The empty non-nil
+// shape is the one scenarioStepsToRamp produces for every step without headers.
+func TestRenderRequest_AuthNeverWritesIntoTemplateHeaders(t *testing.T) {
+	templates := map[string]func() map[string]string{
+		"nil":       func() map[string]string { return nil },
+		"empty":     func() map[string]string { return map[string]string{} },
+		"non-empty": func() map[string]string { return map[string]string{"Accept": "application/json"} },
 	}
+	auths := map[string]struct {
+		auth *scenarios.Auth
+		want string
+	}{
+		"bearer": {&scenarios.Auth{Bearer: strPtr("t")}, "Bearer t"},
+		"basic":  {&scenarios.Auth{Basic: &scenarios.BasicAuth{Username: "u", Password: "p"}}, "Basic dTpw"},
+	}
+	for tmplName, newTmpl := range templates {
+		for authName, a := range auths {
+			t.Run(tmplName+"/"+authName, func(t *testing.T) {
+				tmpl := newTmpl()
+				before := maps.Clone(tmpl)
+				step := RampStep{
+					Request: protocols.Request{Method: "GET", URL: "http://x", Headers: tmpl},
+					Auth:    a.auth,
+				}
 
-	got, err := renderRequest(step, &scenarios.VarContext{})
-	require.NoError(t, err)
+				got, err := renderRequest(step, &scenarios.VarContext{})
+				require.NoError(t, err)
 
-	assert.Equal(t, "Bearer t", got.Headers["Authorization"])
-	assert.Equal(t, map[string]string{"Accept": "application/json"}, tmpl)
+				assert.Equal(t, a.want, got.Headers["Authorization"])
+				assert.Equal(t, before, tmpl, "the shared template must be left untouched")
+			})
+		}
+	}
 }
 
 func TestRenderRequest_Errors(t *testing.T) {
@@ -538,4 +566,35 @@ func TestExecuteSingleStep(t *testing.T) {
 		assert.Equal(t, int32(1), exec.calls.Load())
 		assert.Empty(t, vc.Captures)
 	})
+}
+
+// BenchmarkRenderRequest covers the header shapes renderRequest sees on the hot
+// path; "empty" is what scenario files produce for steps without headers.
+func BenchmarkRenderRequest(b *testing.B) {
+	bearer := &scenarios.Auth{Bearer: strPtr("{{capture.token}}")}
+	vc := &scenarios.VarContext{Captures: map[string]string{"token": "tok"}}
+	cases := []struct {
+		name    string
+		headers map[string]string
+		auth    *scenarios.Auth
+	}{
+		{"nil", nil, nil},
+		{"empty", map[string]string{}, nil},
+		{"empty+bearer", map[string]string{}, bearer},
+		{"one+bearer", map[string]string{"Accept": "application/json"}, bearer},
+	}
+	for _, c := range cases {
+		step := RampStep{
+			Request: protocols.Request{Method: "GET", URL: "http://x/items", Headers: c.headers},
+			Auth:    c.auth,
+		}
+		b.Run(c.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				if _, err := renderRequest(step, vc); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
 }

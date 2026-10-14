@@ -139,10 +139,12 @@ func EvalCondition(expr string, ctx *VarContext) bool {
 	return result
 }
 
-// RenderHeaders renders all header values in the map, returning a new map.
+// RenderHeaders renders all header values into a new map, or returns nil when
+// there are none. The input is never returned: callers write to the result (the
+// engine adds auth headers) while the input is a step template shared by every VU.
 func RenderHeaders(headers map[string]string, ctx *VarContext) (map[string]string, error) {
 	if len(headers) == 0 {
-		return headers, nil
+		return nil, nil
 	}
 	out := make(map[string]string, len(headers))
 	for k, v := range headers {

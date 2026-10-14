@@ -265,6 +265,65 @@ func TestRun_SeedCapturesWithoutSetup(t *testing.T) {
 	assert.Zero(t, srv.badAuth.Load())
 }
 
+// Regression for a shipped bug: scenario files give every step without headers
+// an *empty non-nil* map (scenarioStepsToRamp), shared by all VUs, and auth used
+// to be written into it — a concurrent map write (-race reports it; the runtime
+// may abort with "concurrent map writes"). The sharedHeaders assertion catches a
+// regression deterministically. The mismatch check guards per-VU token
+// isolation; under the old bug a cross-VU token only leaked in the brief window
+// before the template's first write, so it rarely fired on its own.
+func TestRun_PerVUBearerTokensWithSharedEmptyHeaders(t *testing.T) {
+	const vus = 8
+	var (
+		mu         sync.Mutex
+		nextVU     int
+		mismatches atomic.Int64
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var vu string
+		c, err := r.Cookie("vu")
+		if err == nil {
+			vu = c.Value
+		} else {
+			mu.Lock()
+			nextVU++
+			vu = strconv.Itoa(nextVU)
+			mu.Unlock()
+			http.SetCookie(w, &http.Cookie{Name: "vu", Value: vu, Path: "/"})
+		}
+		if r.URL.Path == "/login" {
+			_, _ = w.Write([]byte(`{"token":"tok-` + vu + `"}`))
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer tok-"+vu {
+			mismatches.Add(1)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	sharedHeaders := map[string]string{} // the shape scenarioStepsToRamp produces
+	api := bearerStep("api", srv.URL+"/api")
+	api.Request.Headers = sharedHeaders
+	login := loginStep(srv.URL)
+	login.Request.Headers = map[string]string{}
+
+	eng := engine.NewRamp(engine.RampConfig{
+		Stages:   holdStages(vus, 300*time.Millisecond),
+		Steps:    []engine.RampStep{login, api},
+		Executor: httpExec(),
+	}, testCollector(t, vus))
+
+	sum := eng.Run(context.Background())
+
+	assert.Empty(t, sharedHeaders, "auth must never be written into the shared step template")
+	assert.Zero(t, mismatches.Load(), "a VU sent another VU's token")
+	assert.Positive(t, sum.Total)
+	assert.Zero(t, sum.Errors)
+}
+
 // Each VU draws one data row when it starts and keeps it for its lifetime. The
 // server tells VUs apart by a cookie (every VU has its own cookie jar), so it can
 // check both halves: each VU sticks to one row, and the rows are all distinct.

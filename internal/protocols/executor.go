@@ -6,8 +6,10 @@ import (
 )
 
 type Request struct {
-	Method  string
-	URL     string
+	Method string
+	URL    string
+	// Headers may be nil. Executors must treat it as read-only: the engine may
+	// pass the same map to several executions.
 	Headers map[string]string
 	Body    []byte
 	// Stream 為 true 時以串流方式讀取回應並量測 TTFT(step 宣告 stream: sse)。

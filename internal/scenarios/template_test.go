@@ -103,3 +103,27 @@ func TestRenderHeaders(t *testing.T) {
 	assert.Equal(t, "application/json", out["Content-Type"])
 	assert.True(t, strings.Contains(out["Authorization"], "tok_xyz"))
 }
+
+// The engine adds auth headers to whatever RenderHeaders returns, and the input
+// is a step template shared by every VU — so the input map must never be handed
+// back, not even when it is empty.
+func TestRenderHeaders_NeverReturnsInputMap(t *testing.T) {
+	tests := map[string]map[string]string{
+		"nil":       nil,
+		"empty":     {},
+		"non-empty": {"Accept": "application/json"},
+	}
+	for name, in := range tests {
+		t.Run(name, func(t *testing.T) {
+			before := len(in)
+			out, err := RenderHeaders(in, &VarContext{})
+			require.NoError(t, err)
+
+			if out != nil { // nil is the documented "no headers" result
+				out["Authorization"] = "Bearer t"
+			}
+			assert.NotContains(t, in, "Authorization", "writing to the result must not touch the input")
+			assert.Len(t, in, before)
+		})
+	}
+}

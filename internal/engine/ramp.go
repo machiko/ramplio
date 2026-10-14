@@ -850,12 +850,11 @@ func renderRequest(step RampStep, ctx *scenarios.VarContext) (protocols.Request,
 		return protocols.Request{}, err
 	}
 
+	// RenderHeaders hands back a fresh map (or nil), never step.Request.Headers
+	// itself, which every VU shares. Executors only read headers, so nil is fine.
 	headers, err := scenarios.RenderHeaders(step.Request.Headers, ctx)
 	if err != nil {
 		return protocols.Request{}, err
-	}
-	if headers == nil {
-		headers = make(map[string]string)
 	}
 
 	var body []byte
@@ -868,22 +867,15 @@ func renderRequest(step RampStep, ctx *scenarios.VarContext) (protocols.Request,
 	}
 
 	if step.Auth != nil {
-		if step.Auth.Bearer != nil {
-			token, err := scenarios.RenderString(*step.Auth.Bearer, ctx)
-			if err != nil {
-				return protocols.Request{}, err
+		authz, err := renderAuthorization(step.Auth, ctx)
+		if err != nil {
+			return protocols.Request{}, err
+		}
+		if authz != "" {
+			if headers == nil {
+				headers = make(map[string]string, 1)
 			}
-			headers["Authorization"] = "Bearer " + token
-		} else if step.Auth.Basic != nil {
-			username, err := scenarios.RenderString(step.Auth.Basic.Username, ctx)
-			if err != nil {
-				return protocols.Request{}, err
-			}
-			password, err := scenarios.RenderString(step.Auth.Basic.Password, ctx)
-			if err != nil {
-				return protocols.Request{}, err
-			}
-			headers["Authorization"] = basicAuthHeader(username, password)
+			headers["Authorization"] = authz
 		}
 	}
 
@@ -894,6 +886,30 @@ func renderRequest(step RampStep, ctx *scenarios.VarContext) (protocols.Request,
 		Body:    body,
 		Stream:  step.Stream == "sse",
 	}, nil
+}
+
+// renderAuthorization returns the Authorization header value for auth, or ""
+// when neither bearer nor basic is set. Bearer wins when both are.
+func renderAuthorization(auth *scenarios.Auth, ctx *scenarios.VarContext) (string, error) {
+	if auth.Bearer != nil {
+		token, err := scenarios.RenderString(*auth.Bearer, ctx)
+		if err != nil {
+			return "", err
+		}
+		return "Bearer " + token, nil
+	}
+	if auth.Basic != nil {
+		username, err := scenarios.RenderString(auth.Basic.Username, ctx)
+		if err != nil {
+			return "", err
+		}
+		password, err := scenarios.RenderString(auth.Basic.Password, ctx)
+		if err != nil {
+			return "", err
+		}
+		return basicAuthHeader(username, password), nil
+	}
+	return "", nil
 }
 
 // applyCaptures extracts values from the result and stores them in varCtx.Captures.
