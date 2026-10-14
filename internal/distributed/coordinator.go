@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,6 +18,13 @@ import (
 	"github.com/machiko/ramplio/v3/internal/protocols"
 	"github.com/machiko/ramplio/v3/internal/reporter"
 	"github.com/machiko/ramplio/v3/internal/scenarios"
+)
+
+// Cleanup deadlines. Stopping always detaches from the run's context so it
+// still works after a cancel (Ctrl-C); teardown detaches only once cancelled.
+const (
+	stopTimeout     = 5 * time.Second
+	teardownTimeout = 30 * time.Second
 )
 
 // Coordinator orchestrates distributed load testing across multiple workers.
@@ -83,12 +91,12 @@ func (c *Coordinator) httpClient() *http.Client {
 }
 
 // Run orchestrates the distributed test execution.
-func (c *Coordinator) Run(ctx context.Context) (metrics.Summary, error) {
+func (c *Coordinator) Run(ctx context.Context) (summary metrics.Summary, err error) {
 	c.startedAt = time.Now()
 
 	// Step 1: Health check all workers
-	if err := c.healthCheckWorkers(ctx); err != nil {
-		return metrics.Summary{}, fmt.Errorf("health check failed: %w", err)
+	if hcErr := c.healthCheckWorkers(ctx); hcErr != nil {
+		return metrics.Summary{}, fmt.Errorf("health check failed: %w", hcErr)
 	}
 
 	// Step 2: Run setup steps centrally and capture values
@@ -97,11 +105,29 @@ func (c *Coordinator) Run(ctx context.Context) (metrics.Summary, error) {
 		return metrics.Summary{}, fmt.Errorf("setup failed: %w", err)
 	}
 
+	// Setup has run (logged in, created test data), so teardown must run exactly
+	// once however Run ends: completion, a worker failure or Ctrl-C. Workers no
+	// longer run teardown themselves. On failure or cancel they are stopped
+	// first (best effort), so the load is not still using what teardown removes
+	// — except workers that refused our assignment: they may be busy with
+	// another coordinator's run, which must not be killed.
+	completed := false
+	var refused map[string]bool
+	defer func() {
+		if !completed {
+			if stopErr := c.stopWorkers(ctx, refused); stopErr != nil {
+				err = errors.Join(err, fmt.Errorf("stopping workers: %w", stopErr))
+			}
+		}
+		c.runTeardown(ctx, setupCaptures)
+	}()
+
 	// Step 3: Allocate VUs to workers
 	allocation := c.allocateVUs()
 
 	// Step 4: Broadcast assign requests to all workers
-	if assignErr := c.broadcastAssign(ctx, allocation, setupCaptures); assignErr != nil {
+	var assignErr error
+	if refused, assignErr = c.broadcastAssign(ctx, allocation, setupCaptures); assignErr != nil {
 		return metrics.Summary{}, fmt.Errorf("broadcast assign failed: %w", assignErr)
 	}
 
@@ -120,8 +146,9 @@ func (c *Coordinator) Run(ctx context.Context) (metrics.Summary, error) {
 			return metrics.Summary{}, fmt.Errorf("polling failed: %w", pErr)
 		}
 	case <-ctx.Done():
-		// Context cancelled, stop all workers
-		_ = c.stopAllWorkers(ctx)
+		// Context cancelled: stop the workers now (the deferred cleanup stops
+		// them again, harmlessly, and reports any failure).
+		_ = c.stopWorkers(ctx, nil)
 		<-done
 	}
 
@@ -132,13 +159,10 @@ func (c *Coordinator) Run(ctx context.Context) (metrics.Summary, error) {
 	}
 
 	// Step 7: Merge snapshots into a statistically correct summary
-	summary := metrics.MergeExports(exports)
+	summary = metrics.MergeExports(exports)
 
-	// Step 8: Run teardown steps centrally, seeded with setup captures
-	if err := c.runTeardown(ctx, setupCaptures); err != nil {
-		fmt.Fprintf(io.Discard, "warning: teardown failed: %v\n", err)
-	}
-
+	// Step 8 (deferred above): teardown runs once, seeded with setup captures.
+	completed = true
 	return summary, nil
 }
 
@@ -265,14 +289,20 @@ func stageShare(total, i, n int) int {
 	return share
 }
 
-// broadcastAssign sends assign requests to all workers.
-func (c *Coordinator) broadcastAssign(ctx context.Context, allocation map[string]int, setupCaptures map[string]string) error {
+// broadcastAssign sends assign requests to all workers. It also returns the
+// workers that answered with a non-200 status: they did not take our run (a
+// 409 means busy, possibly with another coordinator) and must not be stopped.
+// Workers whose outcome is unknown (transport error, timeout) may have started
+// and are not in the set.
+func (c *Coordinator) broadcastAssign(ctx context.Context, allocation map[string]int, setupCaptures map[string]string) (map[string]bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, c.assignTimeout)
 	defer cancel()
 
 	var wg sync.WaitGroup
 	errCh := make(chan error, len(c.workers))
 	shares := splitStageShares(c.cfg.Stages, len(c.workers))
+	var refusedMu sync.Mutex
+	refused := make(map[string]bool)
 
 	for i, worker := range c.workers {
 		assignedVUs := allocation[worker]
@@ -298,6 +328,9 @@ func (c *Coordinator) broadcastAssign(ctx context.Context, allocation map[string
 			}
 			defer func() { _ = resp.Body.Close() }()
 			if resp.StatusCode != http.StatusOK {
+				refusedMu.Lock()
+				refused[addr] = true
+				refusedMu.Unlock()
 				msg, _ := io.ReadAll(resp.Body)
 				errCh <- fmt.Errorf("worker %s returned status %d: %s", addr, resp.StatusCode, string(msg))
 			}
@@ -309,11 +342,11 @@ func (c *Coordinator) broadcastAssign(ctx context.Context, allocation map[string
 
 	for err := range errCh {
 		if err != nil {
-			return err
+			return refused, err
 		}
 	}
 
-	return nil
+	return refused, nil
 }
 
 // pollWorkers periodically polls all workers for live metrics until they complete.
@@ -431,9 +464,11 @@ func (c *Coordinator) aggregateLiveMetrics(liveMetrics map[string]*LiveMetricsRe
 	}
 }
 
-// stopAllWorkers sends stop requests to all workers.
-func (c *Coordinator) stopAllWorkers(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+// stopWorkers sends stop requests to every worker not in skip.
+func (c *Coordinator) stopWorkers(ctx context.Context, skip map[string]bool) error {
+	// Stopping is how a cancelled run ends, so it must not inherit the cancel:
+	// with the run's context every /stop failed and workers kept running.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), stopTimeout)
 	defer cancel()
 
 	var wg sync.WaitGroup
@@ -441,6 +476,9 @@ func (c *Coordinator) stopAllWorkers(ctx context.Context) error {
 	mu := sync.Mutex{}
 
 	for _, worker := range c.workers {
+		if skip[worker] {
+			continue
+		}
 		wg.Add(1)
 		go func(addr string) {
 			defer wg.Done()
@@ -557,10 +595,17 @@ func (c *Coordinator) runSetup(ctx context.Context) (map[string]string, error) {
 }
 
 // runTeardown executes the scenario's teardown steps once on the coordinator,
-// seeded with the setup captures (so a logout step can use the auth token).
-func (c *Coordinator) runTeardown(ctx context.Context, setupCaptures map[string]string) error {
+// seeded with the setup captures (e.g. the token to log out with). A live run
+// context is used as-is, so a long teardown is not cut short; after a cancel
+// (Ctrl-C) it detaches from the cancel, bounded by teardownTimeout.
+func (c *Coordinator) runTeardown(ctx context.Context, setupCaptures map[string]string) {
 	if len(c.cfg.Teardown) == 0 {
-		return nil
+		return
+	}
+	if ctx.Err() != nil {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(context.WithoutCancel(ctx), teardownTimeout)
+		defer cancel()
 	}
 	col := metrics.NewCollector(1)
 	defer col.Stop()
@@ -571,7 +616,6 @@ func (c *Coordinator) runTeardown(ctx context.Context, setupCaptures map[string]
 		WSExecutor:    protocols.NewWSExecutor(),
 	}, col)
 	eng.RunTeardown(ctx, setupCaptures)
-	return nil
 }
 
 // splitScheme separates an optional http:// or https:// prefix from a worker

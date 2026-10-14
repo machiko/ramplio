@@ -100,10 +100,11 @@ func (w *Worker) Assign(ctx context.Context, req *AssignRequest) error {
 		scaleScenario(sc, req.AssignedVUs)
 	}
 
-	// Convert scenario steps to engine steps. Setup steps are intentionally
-	// not converted here — the coordinator runs setup centrally.
+	// Convert scenario steps to engine steps. Setup and teardown are
+	// intentionally left out: the coordinator runs both exactly once for the
+	// whole cluster, so their side effects (log in/out, create/delete test data)
+	// never repeat per worker.
 	steps := engine.StepsFromScenario(sc.Steps)
-	teardownSteps := engine.StepsFromScenario(sc.Teardown)
 
 	// Build engine config from scenario. The coordinator runs setup centrally
 	// and broadcasts the captured values, so workers seed those captures rather
@@ -111,7 +112,6 @@ func (w *Worker) Assign(ctx context.Context, req *AssignRequest) error {
 	cfg := engine.RampConfig{
 		Stages:         sc.Stages,
 		Steps:          steps,
-		TeardownSteps:  teardownSteps,
 		Vars:           sc.Vars,
 		SeedCaptures:   req.SetupCaptures,
 		CircuitBreaker: sc.CircuitBreaker,
@@ -221,20 +221,25 @@ func (w *Worker) GetResult() *ResultResponse {
 	}
 }
 
-// StartHTTPServer starts the HTTP server for the worker. When a secret is
-// configured (via SetSecret), all endpoints require a matching
-// "Authorization: Bearer <secret>" header.
-func (w *Worker) StartHTTPServer(addr string) error {
+// Handler returns the worker's HTTP API (assign/stop/live/result/health),
+// wrapped in the shared-secret check when one is configured.
+func (w *Worker) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /assign", w.handleAssign)
 	mux.HandleFunc("POST /stop", w.handleStop)
 	mux.HandleFunc("GET /live", w.handleLive)
 	mux.HandleFunc("GET /result", w.handleResult)
 	mux.HandleFunc("GET /health", w.handleHealth)
+	return w.authMiddleware(mux)
+}
 
+// StartHTTPServer starts the HTTP server for the worker. When a secret is
+// configured (via SetSecret), all endpoints require a matching
+// "Authorization: Bearer <secret>" header.
+func (w *Worker) StartHTTPServer(addr string) error {
 	server := &http.Server{
 		Addr:    addr,
-		Handler: w.authMiddleware(mux),
+		Handler: w.Handler(),
 	}
 
 	w.mu.RLock()

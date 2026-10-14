@@ -27,34 +27,35 @@ import (
 // merged summary.
 func runCluster(t *testing.T, yaml string, n int) metrics.Summary {
 	t.Helper()
-	addrs := make([]string, n)
-	for i := range n {
-		w := NewWorker(fmt.Sprintf("alloc-%d", i))
-		port := findFreePort()
-		go func() { _ = w.StartHTTPServer("127.0.0.1:" + port) }()
-		addrs[i] = "127.0.0.1:" + port
-	}
-	require.Eventually(t, func() bool {
-		for _, a := range addrs {
-			resp, err := http.Get("http://" + a + "/health")
-			if err != nil {
-				return false
-			}
-			_ = resp.Body.Close()
-		}
-		return true
-	}, 3*time.Second, 20*time.Millisecond, "workers did not come up")
-
-	sc, err := scenarios.Parse(bytes.NewReader([]byte(yaml)))
-	require.NoError(t, err)
-	coord := NewCoordinator(addrs, []byte(yaml), sc, protocols.DefaultHTTPConfig())
-	coord.SetTiming(50*time.Millisecond, 0)
-
+	coord := newTestCoordinator(t, startWorkers(t, n), yaml)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	sum, err := coord.Run(ctx)
 	require.NoError(t, err)
 	return sum
+}
+
+func newTestCoordinator(t *testing.T, addrs []string, yaml string) *Coordinator {
+	t.Helper()
+	sc, err := scenarios.Parse(bytes.NewReader([]byte(yaml)))
+	require.NoError(t, err)
+	coord := NewCoordinator(addrs, []byte(yaml), sc, protocols.DefaultHTTPConfig())
+	coord.SetTiming(50*time.Millisecond, 0)
+	return coord
+}
+
+// startWorkers starts n real worker HTTP servers and returns their addresses.
+// httptest picks the ports itself (no free-port probing to race against other
+// packages' listeners) and closes the servers when the test ends.
+func startWorkers(t *testing.T, n int) []string {
+	t.Helper()
+	addrs := make([]string, n)
+	for i := range n {
+		srv := httptest.NewServer(NewWorker(fmt.Sprintf("alloc-%d", i)).Handler())
+		t.Cleanup(srv.Close)
+		addrs[i] = strings.TrimPrefix(srv.URL, "http://")
+	}
+	return addrs
 }
 
 func TestDistributed_RateModeSplitsTargetRPSAcrossWorkers(t *testing.T) {
