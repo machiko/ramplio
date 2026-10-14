@@ -10,6 +10,7 @@ Ramplio 的所有重要變更都記錄於此。
 ### 修正
 - **`auth:` 步驟在多 VU 下並發寫入共用 header map**: 有 `auth:` 但沒寫 `headers:` 的步驟,其 header 模板由所有 VU 共用,auth 標頭卻被寫回模板本身——可能觸發 Go runtime `fatal error: concurrent map writes` 直接終止壓測,啟動瞬間也可能讓 VU 帶到別人的 token(假 401)。現在 auth 一律寫在每次請求自己的 map 上,模板永不被修改;沒有 header 的請求也順帶省下一次配置。
 - **熔斷器觸發旗標的 data race**: 熔斷器的觸發旗標在記錄失敗時持鎖寫入,但每個 VU 與 rate 模式的派發器在每次請求前都不持鎖讀取它——違反 Go 記憶體模型,多 VU 啟用 `circuit_breaker` 時 `-race` 會報錯。旗標改為原子變數;行為不變(x86 上指令與修正前相同,arm64 每次檢查多不到 1 ns)。
+- **分散式模式漏接 `stream: sse` 與 `ws_mode: persistent`**: worker 端的場景轉換是 CLI 版的舊複本,沒有跟上這兩個欄位——分散式壓測時串流步驟不量 TTFT(結果沒有「開始回應」數字)、WebSocket persistent 退回每次交換重新握手。另外 regex capture 的預編譯快取 key 對不上,每次擷取都重新編譯 regex(實測單次約 2.5µs → 0.38µs)。場景轉換現收斂為 CLI、儀表板、worker、coordinator 共用的單一來源,並以測試守門:`scenarios.Step` 新增欄位而未接上轉換時直接失敗。
 
 ---
 

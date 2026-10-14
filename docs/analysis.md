@@ -20,7 +20,7 @@
 
 | 模組 | 說明 |
 |------|------|
-| `engine/{ramp,vu,rate,step,breaker,datasource}.go` | 多階段負載引擎：VU 模式（線性插值）+ Ramping RPS（**單一 dispatcher + worker 池**，dispatcher 以 Reserve+capped sleep 排定每請求「應送時間戳」注入 buffered jobs channel，避免 rate 0 卡死並按 ramp 追隨速率）；Setup/Teardown lifecycle；Circuit Breaker（滑動時間窗口 ring buffer）；Step.If/Loop/Group/Pause/Retry；dataSource（sequential/random）；預編譯 regex capture cache（wr-6 依職責拆為六檔，見 `RampEngine` 型別 doc） |
+| `engine/{ramp,vu,rate,step,breaker,datasource,convert}.go` | 多階段負載引擎：VU 模式（線性插值）+ Ramping RPS（**單一 dispatcher + worker 池**，dispatcher 以 Reserve+capped sleep 排定每請求「應送時間戳」注入 buffered jobs channel，避免 rate 0 卡死並按 ramp 追隨速率）；Setup/Teardown lifecycle；Circuit Breaker（滑動時間窗口 ring buffer）；Step.If/Loop/Group/Pause/Retry；dataSource（sequential/random）；預編譯 regex capture cache（wr-6 依職責拆為六檔，見 `RampEngine` 型別 doc） |
 | `scenarios/scenario.go` | YAML 場景資料結構：Stage、Step（Protocol/Auth/Capture/Assertions/Retry、**`WSMode`(per_request/persistent)、`Stream`(sse)**）、Thresholds（per-step、**`TTFTP95Ms` 串流首 chunk 守門,設門檻但無 stream 樣本視為設定錯誤大聲失敗**）、CircuitBreakerConfig（WindowSeconds）、VarsFrom、ScenarioHTTP |
 | `scenarios/parser.go` | YAML 解析與驗證（`Parse`/`ParseFile`）；VU/RPS 混用阻擋；**`ws_mode`/`stream` 解析期驗證(值域、`ws_mode` 限 websocket 步驟、`stream` 限 HTTP 步驟)——設定錯誤不浪費一輪壓測** |
 | `scenarios/template.go` | `RenderString`/`RenderHeaders`/`EvalCondition`；支援 uuid/timestamp/env/vars/capture/data token；EvalCondition parse 失敗輸出 stderr 警告（不靜默） |
