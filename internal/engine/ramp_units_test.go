@@ -5,6 +5,7 @@ import (
 	"errors"
 	"maps"
 	"regexp"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -115,6 +116,61 @@ func TestFailWindow_ConcurrentRecordsCountExactlyOnce(t *testing.T) {
 
 	assert.False(t, trippedEarly.Load(), "N failures must not trip an N+1 threshold")
 	assert.True(t, w.record(now), "the N+1th failure must trip")
+}
+
+// Every VU (and the rate dispatcher) polls isCircuitTripped while other
+// goroutines record failures; under -race this pins down that the flag is
+// published safely, and every reader must eventually observe the trip.
+func TestCircuitBreaker_TripVisibleToConcurrentReaders(t *testing.T) {
+	const writers, perWriter, readers = 8, 25, 8
+	e := NewRamp(RampConfig{CircuitBreaker: &scenarios.CircuitBreakerConfig{
+		ConsecutiveFailures: writers * perWriter, WindowSeconds: 60,
+	}}, testCollector(t))
+
+	stop := make(chan struct{})
+	var sawTrip atomic.Int32
+	var rg sync.WaitGroup
+	for range readers {
+		rg.Add(1)
+		go func() {
+			defer rg.Done()
+			for {
+				if e.isCircuitTripped() {
+					sawTrip.Add(1)
+					return
+				}
+				select {
+				case <-stop:
+					return
+				default:
+					runtime.Gosched() // keep spinning readers from starving the writers
+				}
+			}
+		}()
+	}
+
+	var wg sync.WaitGroup
+	for range writers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range perWriter {
+				e.incFails()
+			}
+		}()
+	}
+	wg.Wait()
+	require.True(t, e.isCircuitTripped(), "the last failure reaches the threshold")
+
+	readersDone := make(chan struct{})
+	go func() { rg.Wait(); close(readersDone) }()
+	select {
+	case <-readersDone:
+	case <-time.After(5 * time.Second):
+		close(stop)
+		<-readersDone
+	}
+	assert.Equal(t, int32(readers), sawTrip.Load(), "every polling goroutine must observe the trip")
 }
 
 func TestNewRamp_CircuitBreakerConfig(t *testing.T) {
@@ -597,4 +653,21 @@ func BenchmarkRenderRequest(b *testing.B) {
 			}
 		})
 	}
+}
+
+// BenchmarkIsCircuitTripped is the per-request breaker check every VU (and the
+// rate dispatcher) makes; RunParallel mirrors many VUs polling at once.
+func BenchmarkIsCircuitTripped(b *testing.B) {
+	col := metrics.NewCollector(1)
+	b.Cleanup(func() { col.Stop() })
+	e := NewRamp(RampConfig{CircuitBreaker: &scenarios.CircuitBreakerConfig{ConsecutiveFailures: 1 << 10}}, col)
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			if e.isCircuitTripped() {
+				b.Error("breaker tripped without failures")
+				return
+			}
+		}
+	})
 }

@@ -436,28 +436,36 @@ func TestRun_ReadoutsAfterCompletion(t *testing.T) {
 
 // --- circuit breaker ----------------------------------------------------------
 //
-// These use a single VU on purpose: with one goroutine the trip point is exact,
-// so the assertions are deterministic rather than timing-dependent.
-//
-// Known gap, deliberately not covered here: with several VUs, isCircuitTripped
-// reads the tripped flag without the window's lock while record writes it under
-// the lock — a data race the detector reports. Only one VU is race-free today.
+// The first two use a single VU on purpose: with one goroutine the trip point is
+// exact, so the assertions are deterministic rather than timing-dependent. The
+// multi-VU test that follows bounds the overshoot instead (the rate-mode breaker
+// test lives in ramp_pool_test.go, where it can read the worker pool size).
 
-func TestRun_CircuitBreakerStopsTraffic(t *testing.T) {
-	const threshold = 5
-	var hits atomic.Int64
+func failingServer(t *testing.T, hits *atomic.Int64) *httptest.Server {
+	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
-	defer srv.Close()
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func mustBe200(url string) engine.RampStep {
+	return engine.RampStep{
+		Request:    protocols.Request{Method: http.MethodGet, URL: url},
+		Assertions: &scenarios.Assertions{Status: scenarios.StatusExact(200)},
+	}
+}
+
+func TestRun_CircuitBreakerStopsTraffic(t *testing.T) {
+	const threshold = 5
+	var hits atomic.Int64
+	srv := failingServer(t, &hits)
 
 	eng := engine.NewRamp(engine.RampConfig{
-		Stages: holdStages(1, 30*time.Second), // cut short by cancel below
-		Steps: []engine.RampStep{{
-			Request:    protocols.Request{Method: http.MethodGet, URL: srv.URL},
-			Assertions: &scenarios.Assertions{Status: scenarios.StatusExact(200)},
-		}},
+		Stages:         holdStages(1, 30*time.Second), // cut short by cancel below
+		Steps:          []engine.RampStep{mustBe200(srv.URL)},
 		CircuitBreaker: &scenarios.CircuitBreakerConfig{ConsecutiveFailures: threshold, WindowSeconds: 10},
 		Executor:       httpExec(),
 	}, testCollector(t, 1))
@@ -512,6 +520,42 @@ func TestRun_CircuitBreakerSuccessResetsWindow(t *testing.T) {
 	assert.Greater(t, n.Load(), int64(6), "alternating failures must not trip the breaker")
 	assert.Positive(t, sum.Errors)
 	assert.Less(t, sum.Errors, sum.Total)
+}
+
+// Many VUs record failures and poll the breaker concurrently (meaningful under
+// -race). Each VU checks the breaker before every step, so once it trips at most
+// one in-flight request per VU can still land. That bound assumes a single-shot
+// step: the breaker is not re-checked between Loop iterations.
+func TestRun_CircuitBreakerManyVUs(t *testing.T) {
+	const vus, threshold = 8, 20
+	var hits atomic.Int64
+	srv := failingServer(t, &hits)
+
+	eng := engine.NewRamp(engine.RampConfig{
+		Stages:         holdStages(vus, 30*time.Second), // cut short by cancel below
+		Steps:          []engine.RampStep{mustBe200(srv.URL)},
+		CircuitBreaker: &scenarios.CircuitBreakerConfig{ConsecutiveFailures: threshold, WindowSeconds: 10},
+		Executor:       httpExec(),
+	}, testCollector(t, vus))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan metrics.Summary, 1)
+	go func() { done <- eng.Run(ctx) }()
+
+	assert.Eventually(t, func() bool {
+		return hits.Load() >= threshold && eng.ActiveVUs() == 0
+	}, 3*time.Second, 5*time.Millisecond, "every VU must exit once the breaker trips")
+
+	cancel()
+	var sum metrics.Summary
+	select {
+	case sum = <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("run did not stop after cancel")
+	}
+	assert.LessOrEqual(t, hits.Load(), int64(threshold+vus))
+	assert.GreaterOrEqual(t, sum.Errors, int64(threshold))
 }
 
 // --- rate mode worker branches -----------------------------------------------

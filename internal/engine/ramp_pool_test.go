@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -79,5 +80,60 @@ func TestRatePool_LowLatencyStaysSmall(t *testing.T) {
 	}
 	if peak < rateMinWorkers {
 		t.Errorf("peak workers = %d, expected at least the minimum pool (%d)", peak, rateMinWorkers)
+	}
+}
+
+// Once the breaker trips, the dispatcher must stop and workers must stop taking
+// jobs. Each worker holds at most one job when the trip lands, so hits are bounded
+// by threshold + peak workers. The pool must also stop growing: a dispatcher that
+// ignored the trip would spawn a fresh worker per job (each exiting at once) until
+// the cap, which the hit count alone cannot see.
+func TestRateMode_CircuitBreakerStopsDispatch(t *testing.T) {
+	const threshold = 20
+	var hits atomic.Int64
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer s.Close()
+
+	col := metrics.NewCollector(50)
+	eng := NewRamp(RampConfig{
+		Stages: []scenarios.Stage{
+			{Duration: 10 * time.Millisecond, TargetRPS: 200},
+			{Duration: time.Second, TargetRPS: 200},
+		},
+		Steps: []RampStep{{
+			Request:    protocols.Request{Method: http.MethodGet, URL: s.URL},
+			Assertions: &scenarios.Assertions{Status: scenarios.StatusExact(200)},
+		}},
+		CircuitBreaker: &scenarios.CircuitBreakerConfig{ConsecutiveFailures: threshold, WindowSeconds: 10},
+		Executor:       protocols.NewHTTPExecutor(protocols.DefaultHTTPConfig()),
+	}, col)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	done := make(chan metrics.Summary, 1)
+	go func() { done <- eng.Run(ctx) }()
+
+	deadline := time.Now().Add(3 * time.Second)
+	for !eng.isCircuitTripped() {
+		if time.Now().After(deadline) {
+			t.Fatal("breaker never tripped")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	peakAtTrip := eng.ratePeakWorkers.Load()
+	sum := <-done
+
+	// The dispatcher may be mid-iteration when the trip lands: one more spawn at most.
+	if peak := eng.ratePeakWorkers.Load(); peak > peakAtTrip+1 {
+		t.Errorf("worker pool grew from %d to %d after the trip", peakAtTrip, peak)
+	}
+	if bound := int64(threshold) + int64(eng.ratePeakWorkers.Load()); hits.Load() > bound {
+		t.Errorf("hits = %d, want <= threshold + peak workers = %d", hits.Load(), bound)
+	}
+	if sum.Errors < threshold {
+		t.Errorf("errors = %d, want >= threshold %d", sum.Errors, threshold)
 	}
 }

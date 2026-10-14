@@ -99,7 +99,9 @@ type failWindow struct {
 	head      int
 	threshold int
 	window    time.Duration
-	tripped   bool
+	// tripped is atomic because every VU and the rate dispatcher poll it
+	// lock-free (isCircuitTripped) while record sets it under mu.
+	tripped atomic.Bool
 }
 
 func newFailWindow(threshold int, windowDur time.Duration) *failWindow {
@@ -114,7 +116,7 @@ func newFailWindow(threshold int, windowDur time.Duration) *failWindow {
 func (w *failWindow) record(t time.Time) bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.tripped {
+	if w.tripped.Load() {
 		return true
 	}
 	w.times[w.head] = t
@@ -127,9 +129,10 @@ func (w *failWindow) record(t time.Time) bool {
 		}
 	}
 	if count >= w.threshold {
-		w.tripped = true
+		w.tripped.Store(true)
+		return true
 	}
-	return w.tripped
+	return false
 }
 
 // reset clears the window (called on successful request).
@@ -833,7 +836,7 @@ func (e *RampEngine) executeSingleStep(ctx context.Context, step RampStep, varCt
 
 // isCircuitTripped returns true when the circuit breaker has fired.
 func (e *RampEngine) isCircuitTripped() bool {
-	return e.cbWindow != nil && e.cbWindow.tripped
+	return e.cbWindow != nil && e.cbWindow.tripped.Load()
 }
 
 func (e *RampEngine) incFails() {
