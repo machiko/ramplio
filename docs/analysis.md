@@ -20,7 +20,7 @@
 
 | 模組 | 說明 |
 |------|------|
-| `engine/ramp.go` | 多階段負載引擎：VU 模式（線性插值）+ Ramping RPS（**單一 dispatcher + worker 池**，dispatcher 以 Reserve+capped sleep 排定每請求「應送時間戳」注入 buffered jobs channel，避免 rate 0 卡死並按 ramp 追隨速率）；Setup/Teardown lifecycle；Circuit Breaker（滑動時間窗口 ring buffer）；Step.If/Loop/Group/Pause/Retry；dataSource（sequential/random）；預編譯 regex capture cache |
+| `engine/{ramp,vu,rate,step,breaker,datasource}.go` | 多階段負載引擎：VU 模式（線性插值）+ Ramping RPS（**單一 dispatcher + worker 池**，dispatcher 以 Reserve+capped sleep 排定每請求「應送時間戳」注入 buffered jobs channel，避免 rate 0 卡死並按 ramp 追隨速率）；Setup/Teardown lifecycle；Circuit Breaker（滑動時間窗口 ring buffer）；Step.If/Loop/Group/Pause/Retry；dataSource（sequential/random）；預編譯 regex capture cache（wr-6 依職責拆為六檔，見 `RampEngine` 型別 doc） |
 | `scenarios/scenario.go` | YAML 場景資料結構：Stage、Step（Protocol/Auth/Capture/Assertions/Retry、**`WSMode`(per_request/persistent)、`Stream`(sse)**）、Thresholds（per-step、**`TTFTP95Ms` 串流首 chunk 守門,設門檻但無 stream 樣本視為設定錯誤大聲失敗**）、CircuitBreakerConfig（WindowSeconds）、VarsFrom、ScenarioHTTP |
 | `scenarios/parser.go` | YAML 解析與驗證（`Parse`/`ParseFile`）；VU/RPS 混用阻擋；**`ws_mode`/`stream` 解析期驗證(值域、`ws_mode` 限 websocket 步驟、`stream` 限 HTTP 步驟)——設定錯誤不浪費一輪壓測** |
 | `scenarios/template.go` | `RenderString`/`RenderHeaders`/`EvalCondition`；支援 uuid/timestamp/env/vars/capture/data token；EvalCondition parse 失敗輸出 stderr 警告（不靜默） |
@@ -111,13 +111,10 @@
 | 優先度 | 項目 | 位置 |
 |--------|------|------|
 | LOW | HTML 報告無互動圖表 | reporter/html.go |
-| LOW | Setup 步驟執行結果不計入指標 | engine/ramp.go |
+| LOW | Setup 步驟執行結果不計入指標 | engine/step.go |
 | LOW | RetryExecutor 只支援固定 backoff（無指數退避/jitter）| protocols/retry.go |
 | LOW | `stop` 命令 Unix-only（lsof/kill）| cmd/ramplio/stop.go |
 | LOW | Discover 探測序列寫死（無法自訂步距）| discover/prober.go |
-| MED | `ramp.go` 937 行超過專案 800 行上限（`guard-file-size.py` 硬界線會擋寫入）；核心併發邏輯單檔過大，比照 td-2 依職責拆分 | engine/ramp.go |
-| MED | `internal/engine` 覆蓋率 64.5%（內部套件最低）：circuit breaker `failWindow` record/reset、`dataSource.next`、`RunSetup`/`RunTeardown`、`ActiveVUs`/`StageInfo` 皆 0%，`applyCaptures` 11% | engine/ramp.go |
-| LOW | `docs/roadmap.md` 版本時間軸停在 v2.1.1，v3.0–v3.4 五個版本未記 | docs/roadmap.md |
 | LOW | `nlSummary` computed 是未被模板渲染的死碼，內含獨立 `Math.round(rps)` 與手組 HTML 字串；若未來啟用必須改走 `verdict.capacity`，否則重新引入同頁兩種捨入 | dashboard/templates/dashboard.html:3753 |
 
 > 已解決（自 `72a7b52`）：~~分散式測試缺失~~、~~Sink per-step 明細~~、~~EvalCondition AND/OR~~。
@@ -131,6 +128,7 @@
 > 已解決（v3.2，2026-07-14）：~~WebSocket 每次請求開新連線~~(`ws_mode: persistent` per-VU `WSSession`,A/B ~180µs→~24µs)+附帶修 ~~WS 101 被誤判為錯誤~~(isError/ClassifyError/shouldRetry 三複製點同步豁免);~~`dashboard/controller.go` 與 `dashcontrol.go` 職責重疊~~(td-2:dashcontrol 依職責拆 scenario/baseline/discover 三檔,`internal/dashboard` 界線文件化不得 import engine;重構途中挖出並修好 GUI 上傳 WS 欄位靜默遺失的漂移 bug)。
 > 已解決（v3.3，2026-07-15）：新增 **SSE 串流 TTFT 量測**(`stream: sse` → `readStreaming` 量首 chunk → 獨立 `ttftHist` 全鏈含分散式合併與 rate 模式 CO 修正、`ttft_p95_ms` 守門、terminal/JSON/dashboard「開始回應 vs 完整回應」並陳,ground-truth 自證)。
 > 已解決（v3.4.0「場景產生精靈」,2026-08-01 發版）：**CLI init 變動參數 + datagen**(遞增/UUID/Email/清單/佔位 → CSV + `vars_from`,`dataParamWarnings` 交叉檢查、宣告先於引用);**scenariogen 共用套件**(CLI init 與 dashboard 產生零漂移);**dashboard 情境產生精靈**(`POST /api/generate` 前後端全鏈,DoS 限乘積本身、in-memory CSV 不落磁碟直接開跑,v1 不含 cookie 模式);**慢端點承受能力顯示 RPM 換算**(rpm-1)+**terminal/RPM 捨入來源統一**(rpm-2,`roundRate` 單一來源)+**dashboard 吞吐量 KPI 改消費伺服器 `verdict.capacity`**(wr-2,消除 GUI 與 CLI 捨入分歧)。發版產物:5 平台 archives + checksums,Homebrew cask 仍 `skip_upload`(tap repo + PAT 待人工建立)。
+> 已解決（wr-5/wr-6/wr-7，2026-10-14）：~~`internal/engine` 覆蓋率 64.5%~~（白箱+整合測試補至 96.3%，20 個手工突變全數被殺；探勘逼出的已出貨 bug 另以 fix-1 共用 header 模板並發寫入、fix-2 熔斷旗標無鎖讀修正）、~~`ramp.go` 超過 800 行上限~~（純搬移拆為 ramp/vu/rate/step/breaker/datasource 六檔，AST 比對 39 個宣告與全部註解逐字相同，A/B 無顯著差異）、~~roadmap 時間軸停在 v2.1.1~~（補 v3.0.0–v3.4.0）。
 
 ---
 
