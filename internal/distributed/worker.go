@@ -88,8 +88,17 @@ func (w *Worker) Assign(ctx context.Context, req *AssignRequest) error {
 		return fmt.Errorf("failed to parse scenario: %w", err)
 	}
 
-	// Scale VU counts based on assigned VUs
-	scaleScenario(sc, req.AssignedVUs)
+	// Take this worker's exact share of every stage from the coordinator.
+	// Scaling by AssignedVUs is kept only for requests from older coordinators:
+	// it cannot split target RPS, and treats a zero share as "run everything".
+	if len(req.StageShares) > 0 {
+		if err := applyStageShares(sc, req.StageShares); err != nil {
+			w.mu.Unlock()
+			return err
+		}
+	} else {
+		scaleScenario(sc, req.AssignedVUs)
+	}
 
 	// Convert scenario steps to engine steps. Setup steps are intentionally
 	// not converted here — the coordinator runs setup centrally.
@@ -300,10 +309,29 @@ func (w *Worker) handleResult(rw http.ResponseWriter, r *http.Request) {
 }
 
 func (w *Worker) handleHealth(rw http.ResponseWriter, r *http.Request) {
-	writeJSON(rw, &StatusResponse{OK: true, Message: "healthy"})
+	writeJSON(rw, &StatusResponse{OK: true, Message: "healthy", Capabilities: []string{CapabilityStageShares}})
+}
+
+// applyStageShares replaces each stage's load with this worker's share. The
+// durations stay the ones the worker parsed from the scenario itself.
+func applyStageShares(sc *scenarios.Scenario, shares []StageShare) error {
+	if len(shares) != len(sc.Stages) {
+		return fmt.Errorf("assigned %d stage shares but the scenario has %d stages", len(shares), len(sc.Stages))
+	}
+	for i, s := range shares {
+		if s.Target < 0 || s.TargetRPS < 0 {
+			return fmt.Errorf("stage %d share is negative (target %d, target_rps %d)", i+1, s.Target, s.TargetRPS)
+		}
+	}
+	for i, s := range shares {
+		sc.Stages[i].Target = s.Target
+		sc.Stages[i].TargetRPS = s.TargetRPS
+	}
+	return nil
 }
 
 // scaleScenario scales the scenario's VU counts based on the assigned VUs.
+// Legacy path for assign requests without stage shares (older coordinators).
 // If the original scenario has max target VU T, and we're assigning A VUs,
 // then we scale all stage targets by ratio A/T.
 func scaleScenario(sc *scenarios.Scenario, assignedVUs int) {

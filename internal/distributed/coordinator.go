@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -181,9 +182,16 @@ func (c *Coordinator) healthCheckWorkers(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("worker %s health check failed: %w", addr, err)
 		}
+		var status StatusResponse
+		decodeErr := json.NewDecoder(resp.Body).Decode(&status)
 		_ = resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			return fmt.Errorf("worker %s returned status %d", addr, resp.StatusCode)
+		}
+		// An older worker ignores stage shares and would run the full scenario
+		// load by itself — refuse before any load is sent.
+		if decodeErr != nil || !slices.Contains(status.Capabilities, CapabilityStageShares) {
+			return fmt.Errorf("worker %s does not support per-worker stage shares and would run the full load on its own; run the same ramplio version on the coordinator and every worker", addr)
 		}
 	}
 	return nil
@@ -220,6 +228,43 @@ func (c *Coordinator) allocateVUs() map[string]int {
 	return allocation
 }
 
+// splitStageShares divides every stage's load across n workers so that, stage
+// by stage, the shares add up to exactly the declared value: worker i gets
+// total/n plus one of the total%n leftovers when i < total%n. VU targets and
+// target RPS split alike. A worker can get zero load in a stage (more workers
+// than VUs); it then idles instead of running the whole scenario.
+//
+// Exact at every stage boundary. While VUs ramp, each worker rounds its own
+// linear interpolation, so the cluster total can drift by up to about n/2 VUs
+// mid-ramp; target RPS is interpolated unrounded and stays exact. Shares are
+// monotone in the total, so a worker's largest VU share equals its
+// allocateVUs value.
+func splitStageShares(stages []scenarios.Stage, n int) [][]StageShare {
+	if n <= 0 {
+		return nil
+	}
+	out := make([][]StageShare, n)
+	for i := range out {
+		out[i] = make([]StageShare, len(stages))
+		for j, st := range stages {
+			out[i][j] = StageShare{
+				Target:    stageShare(st.Target, i, n),
+				TargetRPS: stageShare(st.TargetRPS, i, n),
+			}
+		}
+	}
+	return out
+}
+
+// stageShare is worker i's part of total when split across n workers.
+func stageShare(total, i, n int) int {
+	share := total / n
+	if i < total%n {
+		share++
+	}
+	return share
+}
+
 // broadcastAssign sends assign requests to all workers.
 func (c *Coordinator) broadcastAssign(ctx context.Context, allocation map[string]int, setupCaptures map[string]string) error {
 	ctx, cancel := context.WithTimeout(ctx, c.assignTimeout)
@@ -227,16 +272,18 @@ func (c *Coordinator) broadcastAssign(ctx context.Context, allocation map[string
 
 	var wg sync.WaitGroup
 	errCh := make(chan error, len(c.workers))
+	shares := splitStageShares(c.cfg.Stages, len(c.workers))
 
-	for _, worker := range c.workers {
+	for i, worker := range c.workers {
 		assignedVUs := allocation[worker]
 		wg.Add(1)
-		go func(addr string, vus int) {
+		go func(addr string, vus int, stageShares []StageShare) {
 			defer wg.Done()
 			payload := &AssignRequest{
 				ScenarioYAML:  c.scenarioYAML,
 				AssignedVUs:   vus,
 				SetupCaptures: setupCaptures,
+				StageShares:   stageShares,
 			}
 			body, _ := json.Marshal(payload)
 			req, err := c.newRequest(ctx, http.MethodPost, addr, "/assign", bytes.NewReader(body))
@@ -254,7 +301,7 @@ func (c *Coordinator) broadcastAssign(ctx context.Context, allocation map[string
 				msg, _ := io.ReadAll(resp.Body)
 				errCh <- fmt.Errorf("worker %s returned status %d: %s", addr, resp.StatusCode, string(msg))
 			}
-		}(worker, assignedVUs)
+		}(worker, assignedVUs, shares[i])
 	}
 
 	wg.Wait()
