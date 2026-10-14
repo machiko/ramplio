@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -319,6 +320,7 @@ func runDashboard(url, method string, vus, rps int, duration, scenarioFile strin
 	defer signal.Stop(sigs)
 	go func() {
 		<-sigs
+		signal.Stop(sigs) // a second Ctrl-C now kills the process (skipping cleanup)
 		cancel()
 	}()
 
@@ -367,7 +369,24 @@ func runDashboard(url, method string, vus, rps int, duration, scenarioFile strin
 	}
 
 	<-ctx.Done()
+	shutdownDashboard(os.Stderr, ctrl, engine.CancelledTeardownTimeout+5*time.Second)
 	return nil
+}
+
+// shutdownDashboard stops a test still running when the dashboard process is
+// interrupted and waits, bounded, for it to finish — otherwise the run and its
+// teardown (log out, delete test data) die with the process.
+func shutdownDashboard(w io.Writer, ctrl *dashController, timeout time.Duration) {
+	if ctrl.State() != dashboard.StateRunning {
+		return
+	}
+	_, _ = fmt.Fprintf(w, "正在停止進行中的測試並執行 teardown 清理(teardown 最長 %s;再按一次 Ctrl-C 會略過清理強制結束)…\n",
+		engine.CancelledTeardownTimeout)
+	ctrl.Stop()
+	deadline := time.Now().Add(timeout)
+	for ctrl.State() == dashboard.StateRunning && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 // rampProvider supplies live metrics snapshots from a running scenario (TUI / Prometheus path).
@@ -482,6 +501,10 @@ func runScenario(path, promAddr string, httpCfg protocols.HTTPConfig, noTUI bool
 		<-done
 	}
 	cancel()
+	if len(sc.Teardown) > 0 {
+		waitForCleanup(os.Stderr, done, fmt.Sprintf(
+			"正在執行 teardown 清理(最長 %s;再按一次 Ctrl-C 會略過清理強制結束)…", engine.CancelledTeardownTimeout))
+	}
 	<-done
 
 	return sum, sc.Thresholds, nil
@@ -587,7 +610,11 @@ func runDistributed(scenarioFile string, workerAddrs []string, promAddr string, 
 		<-done
 	}
 	cancel()
-	<-done
+	cleanup := "正在停止 worker"
+	if len(sc.Teardown) > 0 {
+		cleanup += fmt.Sprintf(" 並執行 teardown 清理(teardown 最長 %s)", engine.CancelledTeardownTimeout)
+	}
+	waitForCleanup(os.Stderr, done, cleanup+"…再按一次 Ctrl-C 會強制結束:略過清理,且尚未收到停止指令的 worker 會繼續跑完負載。")
 
 	if err != nil {
 		return err
@@ -762,6 +789,19 @@ func parseHeaders(raw []string) map[string]string {
 	return headers
 }
 
+// waitForCleanup prints msg if the run is still winding down after being
+// stopped — teardown may keep sending requests for a while after a cancel —
+// so the CLI does not look hung. It returns once the run has finished.
+func waitForCleanup(w io.Writer, done <-chan struct{}, msg string) {
+	select {
+	case <-done:
+		return
+	default:
+	}
+	_, _ = fmt.Fprintln(w, msg)
+	<-done
+}
+
 // isTerminal reports whether stdout is an interactive terminal. When false
 // (CI, pipes, file redirection), the live TUI cannot run.
 func isTerminal() bool {
@@ -791,7 +831,7 @@ func runHeadlessProgress(provider reporter.LiveProvider, cancel context.CancelFu
 		case <-done:
 			return
 		case <-sigs:
-			fmt.Fprintln(os.Stderr, "\nInterrupted — stopping workers...")
+			fmt.Fprintln(os.Stderr, "\nInterrupted — stopping the test...")
 			cancel()
 			return
 		case <-ticker.C:

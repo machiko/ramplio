@@ -20,12 +20,9 @@ import (
 	"github.com/machiko/ramplio/v3/internal/scenarios"
 )
 
-// Cleanup deadlines. Stopping always detaches from the run's context so it
-// still works after a cancel (Ctrl-C); teardown detaches only once cancelled.
-const (
-	stopTimeout     = 5 * time.Second
-	teardownTimeout = 30 * time.Second
-)
+// stopTimeout bounds stopping the workers. Stopping detaches from the run's
+// context so it still works after a cancel (Ctrl-C).
+const stopTimeout = 5 * time.Second
 
 // Coordinator orchestrates distributed load testing across multiple workers.
 type Coordinator struct {
@@ -595,17 +592,12 @@ func (c *Coordinator) runSetup(ctx context.Context) (map[string]string, error) {
 }
 
 // runTeardown executes the scenario's teardown steps once on the coordinator,
-// seeded with the setup captures (e.g. the token to log out with). A live run
-// context is used as-is, so a long teardown is not cut short; after a cancel
-// (Ctrl-C) it detaches from the cancel, bounded by teardownTimeout.
+// seeded with the setup captures (e.g. the token to log out with). After a
+// cancel (Ctrl-C) engine.RunTeardown detaches from it, bounded, so cleanup
+// still goes out; a live context is used as-is.
 func (c *Coordinator) runTeardown(ctx context.Context, setupCaptures map[string]string) {
 	if len(c.cfg.Teardown) == 0 {
 		return
-	}
-	if ctx.Err() != nil {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(context.WithoutCancel(ctx), teardownTimeout)
-		defer cancel()
 	}
 	col := metrics.NewCollector(1)
 	defer col.Stop()

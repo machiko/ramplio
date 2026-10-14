@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"regexp"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -164,14 +165,60 @@ func (e *RampEngine) Run(ctx context.Context) metrics.Summary {
 		sum = e.runVUs(ctx)
 	}
 
-	// Teardown: run once after all stages regardless of outcome.
-	if len(e.cfg.TeardownSteps) > 0 {
-		tdCtx := e.newVarContext()
-		for _, step := range e.cfg.TeardownSteps {
-			e.executeSingleStep(ctx, step, tdCtx, e.pickExecutor(step))
-		}
-	}
+	// Teardown: run once after all stages regardless of outcome — a cancel
+	// (Ctrl-C, dashboard stop) included, see teardownContext.
+	e.runTeardownSteps(ctx)
 	return sum
+}
+
+// CancelledTeardownTimeout is how long teardown may keep running once the run
+// has been cancelled (Ctrl-C, dashboard stop).
+const CancelledTeardownTimeout = 30 * time.Second
+
+// teardownContext returns the context teardown steps run under. Teardown cleans
+// up what setup created, so it never inherits the run's cancel: a cancel only
+// starts a CancelledTeardownTimeout budget for whatever teardown is left —
+// whether it arrived before teardown began or in the middle of it. A run that is
+// never cancelled gets an unbounded teardown (each request keeps its own
+// timeout).
+func teardownContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return teardownContextWithBudget(ctx, CancelledTeardownTimeout)
+}
+
+func teardownContextWithBudget(ctx context.Context, budget time.Duration) (context.Context, context.CancelFunc) {
+	tctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	var (
+		mu    sync.Mutex
+		timer *time.Timer
+	)
+	stopWatch := context.AfterFunc(ctx, func() {
+		mu.Lock()
+		defer mu.Unlock()
+		timer = time.AfterFunc(budget, cancel)
+	})
+	return tctx, func() {
+		stopWatch()
+		mu.Lock()
+		if timer != nil {
+			timer.Stop()
+		}
+		mu.Unlock()
+		cancel()
+	}
+}
+
+// runTeardownSteps runs the configured teardown steps once under
+// teardownContext; every teardown path goes through here.
+func (e *RampEngine) runTeardownSteps(ctx context.Context) {
+	if len(e.cfg.TeardownSteps) == 0 {
+		return
+	}
+	stepCtx, cancel := teardownContext(ctx)
+	defer cancel()
+	tdCtx := e.newVarContext()
+	for _, step := range e.cfg.TeardownSteps {
+		e.executeSingleStep(stepCtx, step, tdCtx, e.pickExecutor(step))
+	}
 }
 
 // RunSetup executes only the configured setup steps once and returns the
@@ -189,8 +236,10 @@ func (e *RampEngine) RunSetup(ctx context.Context) map[string]string {
 }
 
 // RunTeardown executes only the configured teardown steps once, seeding them
-// with captures (e.g. an auth token needed to log out). Used by the
-// coordinator after a distributed run completes.
+// with captures (e.g. an auth token needed to log out). The distributed
+// coordinator calls it after a run, also after Ctrl-C: like Run's own teardown
+// it never inherits ctx's cancel, and a cancel leaves it at most
+// CancelledTeardownTimeout (see teardownContext).
 func (e *RampEngine) RunTeardown(ctx context.Context, seed map[string]string) {
 	if len(e.cfg.TeardownSteps) == 0 {
 		return
@@ -202,10 +251,7 @@ func (e *RampEngine) RunTeardown(ctx context.Context, seed map[string]string) {
 		}
 		e.setupCaptures = seeded
 	}
-	tdCtx := e.newVarContext()
-	for _, step := range e.cfg.TeardownSteps {
-		e.executeSingleStep(ctx, step, tdCtx, e.pickExecutor(step))
-	}
+	e.runTeardownSteps(ctx)
 }
 
 // newVarContext creates a VarContext for a new VU, pre-populated with setup captures.

@@ -207,6 +207,48 @@ func TestNewRamp_CircuitBreakerConfig(t *testing.T) {
 	}
 }
 
+// --- teardown context -------------------------------------------------------
+
+func TestTeardownContext(t *testing.T) {
+	const budget = 200 * time.Millisecond
+
+	t.Run("a run that is never cancelled is unbounded", func(t *testing.T) {
+		got, release := teardownContextWithBudget(context.Background(), 10*time.Millisecond)
+		defer release()
+		_, bounded := got.Deadline()
+		assert.False(t, bounded, "a normal teardown must not be cut short")
+		time.Sleep(100 * time.Millisecond) // well past the budget
+		assert.NoError(t, got.Err(), "the budget only starts on a cancel")
+	})
+	t.Run("a cancel before teardown starts the budget", func(t *testing.T) {
+		run, cancelRun := context.WithCancel(context.Background())
+		cancelRun()
+		got, release := teardownContextWithBudget(run, budget)
+		defer release()
+		assert.NoError(t, got.Err(), "teardown must still be able to send after a cancel")
+		assert.Eventually(t, func() bool { return got.Err() != nil }, 5*time.Second, 5*time.Millisecond,
+			"teardown must stop once the budget is spent")
+	})
+	t.Run("a cancel during teardown does not abort it, only starts the budget", func(t *testing.T) {
+		run, cancelRun := context.WithCancel(context.Background())
+		got, release := teardownContextWithBudget(run, budget)
+		defer release()
+		cancelRun() // e.g. Ctrl-C while a normal teardown is still running
+		assert.NoError(t, got.Err(), "an in-progress teardown must not be aborted by the cancel")
+		assert.Eventually(t, func() bool { return got.Err() != nil }, 5*time.Second, 5*time.Millisecond)
+	})
+	t.Run("release ends it", func(t *testing.T) {
+		run, cancelRun := context.WithCancel(context.Background())
+		defer cancelRun()
+		got, release := teardownContextWithBudget(run, budget)
+		release()
+		assert.Error(t, got.Err())
+	})
+	t.Run("production budget", func(t *testing.T) {
+		assert.Equal(t, 30*time.Second, CancelledTeardownTimeout)
+	})
+}
+
 // --- data file rows ---------------------------------------------------------
 
 func rowsN(n int) []map[string]string {

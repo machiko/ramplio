@@ -181,6 +181,23 @@ func TestRunTeardown_UsesSeedCaptures(t *testing.T) {
 	assert.Zero(t, srv.badAuth.Load(), "teardown must authenticate with the seeded token")
 }
 
+// The distributed coordinator calls RunTeardown with the run's context, which
+// is already cancelled after Ctrl-C; cleanup must still go out.
+func TestRunTeardown_AfterCancelStillSends(t *testing.T) {
+	srv := newAuthServer(t, "seeded")
+	eng := engine.NewRamp(engine.RampConfig{
+		TeardownSteps: []engine.RampStep{bearerStep("logout", srv.URL+"/logout")},
+		Executor:      httpExec(),
+	}, testCollector(t, 1))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	eng.RunTeardown(ctx, map[string]string{"token": "seeded"})
+
+	assert.Equal(t, 1, srv.count("/logout"))
+	assert.Zero(t, srv.badAuth.Load())
+}
+
 func TestRunTeardown_NilSeed(t *testing.T) {
 	exec := &countingExec{}
 	eng := engine.NewRamp(engine.RampConfig{
@@ -227,6 +244,37 @@ func TestRun_SetupBeforeLoadAndTeardownAfter(t *testing.T) {
 	assert.Zero(t, sum.Errors)
 	require.Len(t, sum.Steps, 1, "setup/teardown must not appear in step metrics")
 	assert.Equal(t, "api", sum.Steps[0].Name)
+}
+
+// Ctrl-C in the CLI and Stop in the dashboard both cancel the run context.
+// Teardown cleans up what setup created (log out, delete test data), so it must
+// still send its requests after the cancel — seeded with the setup captures.
+func TestRun_TeardownRunsAfterCancel(t *testing.T) {
+	srv := newAuthServer(t, "abc")
+	eng := engine.NewRamp(engine.RampConfig{
+		Stages:        holdStages(2, 30*time.Second), // cut short by the cancel
+		SetupSteps:    []engine.RampStep{loginStep(srv.URL)},
+		Steps:         []engine.RampStep{bearerStep("api", srv.URL+"/api/items")},
+		TeardownSteps: []engine.RampStep{bearerStep("logout", srv.URL+"/logout")},
+		Executor:      httpExec(),
+	}, testCollector(t, 2))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { // cancel mid-test, once load is flowing
+		deadline := time.Now().Add(5 * time.Second)
+		for srv.count("/api/items") == 0 && time.Now().Before(deadline) {
+			time.Sleep(5 * time.Millisecond)
+		}
+		cancel()
+	}()
+	start := time.Now()
+	sum := eng.Run(ctx)
+
+	assert.Less(t, time.Since(start), 10*time.Second, "cancel must end the run promptly")
+	assert.Positive(t, sum.Total)
+	assert.Equal(t, 1, srv.count("/logout"), "teardown must still run after a cancel")
+	assert.Zero(t, srv.badAuth.Load(), "teardown must carry the setup token")
 }
 
 // In distributed mode the coordinator broadcasts setup results as SeedCaptures;
