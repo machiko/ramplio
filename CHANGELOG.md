@@ -11,6 +11,7 @@ Ramplio 的所有重要變更都記錄於此。
 - **`auth:` 步驟在多 VU 下並發寫入共用 header map**: 有 `auth:` 但沒寫 `headers:` 的步驟,其 header 模板由所有 VU 共用,auth 標頭卻被寫回模板本身——可能觸發 Go runtime `fatal error: concurrent map writes` 直接終止壓測,啟動瞬間也可能讓 VU 帶到別人的 token(假 401)。現在 auth 一律寫在每次請求自己的 map 上,模板永不被修改;沒有 header 的請求也順帶省下一次配置。
 - **熔斷器觸發旗標的 data race**: 熔斷器的觸發旗標在記錄失敗時持鎖寫入,但每個 VU 與 rate 模式的派發器在每次請求前都不持鎖讀取它——違反 Go 記憶體模型,多 VU 啟用 `circuit_breaker` 時 `-race` 會報錯。旗標改為原子變數;行為不變(x86 上指令與修正前相同,arm64 每次檢查多不到 1 ns)。
 - **分散式模式漏接 `stream: sse` 與 `ws_mode: persistent`**: worker 端的場景轉換是 CLI 版的舊複本,沒有跟上這兩個欄位——分散式壓測時串流步驟不量 TTFT(結果沒有「開始回應」數字)、WebSocket persistent 退回每次交換重新握手。另外 regex capture 的預編譯快取 key 對不上,每次擷取都重新編譯 regex(實測單次約 2.5µs → 0.38µs)。場景轉換現收斂為 CLI、儀表板、worker、coordinator 共用的單一來源,並以測試守門:`scenarios.Step` 新增欄位而未接上轉換時直接失敗。
+- **分散式壓測送出的負載是設定值的 N 倍**: coordinator 只依 VU 數分配,rate 模式(`target_rps`)每個 worker 都分到 0,而 worker 把 0 當成「不縮放」——每個 worker 都跑完整的 RPS(實測 2 個 worker、宣告 40 RPS × 1s 送出 76 個請求);VU 模式 worker 數多於 VU 時,多出的 worker 同樣跑全量(1 VU 場景、3 個 worker 實測同時 3 個 VU)。中間 stage 依比例四捨五入也會讓總數偏離(例如 3 個 worker 分 5 VU 得 6)。現在 coordinator 逐 stage 把 VU 與 RPS 精確切給每個 worker,每個 stage 的份額加總恆等於宣告值(同場景實測 40 個請求;VU 爬升途中各 worker 各自取整,叢集總數暫態偏差至多約 worker 數的一半,stage 邊界精確)。coordinator 開跑前會確認每個 worker 支援逐 stage 份額,版本過舊的 worker 直接拒絕,不會默默退回全量負載——coordinator 與 worker 請使用相同版本。
 
 ---
 

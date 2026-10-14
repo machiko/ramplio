@@ -383,7 +383,8 @@ ramplio run --scenario smoke.yaml \
 Coordinator 自動做到：
 - ✓ 檢查所有 Worker 健康狀態
 - ✓ 運行 Setup 步驟（執行一次，集中於 Coordinator）
-- ✓ 按整數餘數法分配 VU（e.g. 100 VU → 3 Worker 各 33、33、34）
+- ✓ 逐 stage 按整數餘數法切分 VU 與 RPS，每個 stage 的叢集總和恰等於情境宣告值（e.g. 100 VU → 3 Worker 各 34、33、33；`target_rps: 40` → 2 Worker 各 20）
+- ✓ 開跑前確認每個 Worker 支援逐 stage 份額；版本過舊的 Worker 會被拒絕（否則它會獨自跑完整負載）
 - ✓ 廣播情境給所有 Worker，每個 Worker 執行自己的一份
 - ✓ 每秒輪詢所有 Worker 的即時指標，合并顯示在 TUI / Dashboard
 - ✓ 執行 Teardown（同樣在 Coordinator）

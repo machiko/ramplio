@@ -34,7 +34,7 @@
 | `protocols/trace.go` | **新增** `ExecuteTraced`：httptrace 拆單發請求 DNS/TCP/TLS/TTFB/total + Reused 旗標；僅供診斷（pre-flight），hot path Execute 不受影響 |
 | `scenarios/eval_condition.go` | **新增** 條件運算式 Lexer/Parser/AST：支援 AND/OR/NOT、括號、`== != < <= > >=`；運算子優先序 NOT>AND>OR；`EvalCondition` 解析失敗時印警告並回傳 true（不跳過步驟） |
 | `distributed/coordinator.go` | **新增** 協調者：health check → VU 分配（整數最大餘數法）→ broadcast `/assign` → 輪詢 `/live`（1s）聚合 → 收集 `/result` → `mergePartials` 合併 |
-| `distributed/worker.go` | **新增** 工作節點：`/assign /stop /live /result /health` HTTP 端點；`scaleScenario` 依分配 VU 等比縮放 stage target；單節點跑 RampEngine |
+| `distributed/worker.go` | **新增** 工作節點：`/assign /stop /live /result /health` HTTP 端點；依 coordinator 逐 stage 精確份額（`StageShares`，VU 與 RPS 同法切分；/health 回報 `stage_shares` 能力，coordinator 缺此能力即拒跑）覆寫 stage 負載，舊 coordinator 才退回 `scaleScenario` 等比縮放；單節點跑 RampEngine |
 | `distributed/api.go` | **新增** 分散式 DTO：AssignRequest / PartialSummary / LiveMetricsResponse / StatusResponse |
 | `config/distributed.go` | **新增** DistributedConfig（Workers/ListenAddr/Secret/PollIntervalMs/AssignTimeoutSec）；Secret 與部分欄位定義但未被使用 |
 | `reporter/sink.go` | **新增** Sink 介面 + DetailedSink 選用介面（WriteDetailed 輸出 per-step/group 明細） |
