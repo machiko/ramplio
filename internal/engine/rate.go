@@ -35,6 +35,12 @@ const (
 	rateWorkerHeadroom = 5
 )
 
+// rateWorkerCeiling is the most rate-mode workers — and so the most requests
+// in flight — a run peaking at maxRPS may use.
+func rateWorkerCeiling(maxRPS int) int {
+	return min(max(maxRPS*rateWorkerHeadroom, rateMinWorkers), rateHardCap)
+}
+
 // ratePool grows the rate-mode worker set on demand. The single dispatcher calls
 // maybeGrow before each send: if no worker is idle and we are below the cap, it
 // spawns one; at the cap it stops growing and lets the send block — that block is
@@ -64,14 +70,7 @@ func (p *ratePool) maybeGrow() {
 func (e *RampEngine) runRate(ctx context.Context) metrics.Summary {
 	start := time.Now()
 
-	maxRPS := e.maxTargetRPS()
-	maxWorkers := maxRPS * rateWorkerHeadroom
-	if maxWorkers < rateMinWorkers {
-		maxWorkers = rateMinWorkers
-	}
-	if maxWorkers > rateHardCap {
-		maxWorkers = rateHardCap
-	}
+	maxWorkers := rateWorkerCeiling(e.maxTargetRPS())
 
 	// workerCtx lets us stop workers cleanly after all stages finish.
 	workerCtx, workerCancel := context.WithCancel(ctx)

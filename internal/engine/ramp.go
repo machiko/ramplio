@@ -103,6 +103,23 @@ func NewRamp(cfg RampConfig, collector *metrics.Collector) *RampEngine {
 	return e
 }
 
+// CollectorCapacity is the size to pass metrics.NewCollector for a run over
+// stages, so samples are not dropped while the aggregator catches up: the peak
+// VU count in VU mode and, in rate mode, the worker-pool ceiling (that many
+// requests can complete at once). Scenario and rate-mode entry points (CLI,
+// dashboard, distributed worker, discover) size their collector here.
+func CollectorCapacity(stages []scenarios.Stage) int {
+	maxVUs, maxRPS := 0, 0
+	for _, s := range stages {
+		maxVUs = max(maxVUs, s.Target)
+		maxRPS = max(maxRPS, s.TargetRPS)
+	}
+	if maxRPS > 0 {
+		return rateWorkerCeiling(maxRPS)
+	}
+	return max(maxVUs, 1)
+}
+
 // ActiveVUs returns the number of VU goroutines currently executing.
 func (e *RampEngine) ActiveVUs() int { return int(e.activeVUs.Load()) }
 

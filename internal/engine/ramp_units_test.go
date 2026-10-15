@@ -249,6 +249,41 @@ func TestTeardownContext(t *testing.T) {
 	})
 }
 
+// --- collector sizing ---------------------------------------------------------
+
+// CollectorCapacity sizes the sample buffer to the most requests that can
+// complete at once: peak VUs in VU mode, the worker-pool ceiling in rate mode.
+// Rate-mode scenarios used to get the VU rule (no VUs → 1 → a 10-sample buffer).
+func TestCollectorCapacity(t *testing.T) {
+	tests := []struct {
+		name   string
+		stages []scenarios.Stage
+		want   int
+	}{
+		{"vu mode takes the peak target", []scenarios.Stage{{Target: 3}, {Target: 7}, {Target: 0}}, 7},
+		{"no load still gets a buffer", nil, 1},
+		{"rate mode uses the worker ceiling", []scenarios.Stage{{TargetRPS: 40}, {TargetRPS: 100}}, 100 * rateWorkerHeadroom},
+		{"rate mode floor", []scenarios.Stage{{TargetRPS: 1}}, rateMinWorkers},
+		{"rate mode cap", []scenarios.Stage{{TargetRPS: 5000}}, rateHardCap},
+		// The parser rejects mixing; if it ever slips through, follow the engine
+		// (isRateMode: any TargetRPS > 0 runs in rate mode).
+		{"mixed stages follow rate mode", []scenarios.Stage{{Target: 50}, {TargetRPS: 4}}, 4 * rateWorkerHeadroom},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, CollectorCapacity(tt.stages))
+		})
+	}
+}
+
+// The collector must be sized for exactly as many concurrent completions as
+// the rate-mode worker pool allows.
+func TestCollectorCapacityMatchesRateWorkerCeiling(t *testing.T) {
+	for _, rps := range []int{1, 2, 3, 50, 999, 1000, 1001, 20000} {
+		assert.Equal(t, rateWorkerCeiling(rps), CollectorCapacity([]scenarios.Stage{{TargetRPS: rps}}), "rps=%d", rps)
+	}
+}
+
 // --- data file rows ---------------------------------------------------------
 
 func rowsN(n int) []map[string]string {

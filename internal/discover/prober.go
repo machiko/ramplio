@@ -135,20 +135,13 @@ func (p *Prober) probe(ctx context.Context, targetRPS int) ProbeResult {
 		URL:    p.cfg.URL,
 	}
 
-	workerCount := targetRPS * 5
-	if workerCount < 10 {
-		workerCount = 10
-	}
-	if workerCount > 5000 {
-		workerCount = 5000
-	}
-
-	col := metrics.NewCollector(workerCount)
+	stages := []scenarios.Stage{{Duration: p.cfg.ProbeDuration, TargetRPS: targetRPS}}
+	col := metrics.NewCollector(engine.CollectorCapacity(stages))
 	eng := engine.NewRamp(engine.RampConfig{
 		// SetupSteps run once before the timed probe to warm up the TCP/TLS
 		// connection. The result is NOT counted in the probe metrics.
 		SetupSteps: []engine.RampStep{{Request: req}},
-		Stages:     []scenarios.Stage{{Duration: p.cfg.ProbeDuration, TargetRPS: targetRPS}},
+		Stages:     stages,
 		Steps:      []engine.RampStep{{Request: req}},
 		Executor:   p.executor,
 	}, col)

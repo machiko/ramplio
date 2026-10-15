@@ -43,16 +43,20 @@ const (
 )
 
 type Collector struct {
-	ch        chan Sample
-	quit      chan struct{}
-	stopped   chan struct{}
-	mu        sync.RWMutex
-	sum       Summary
-	hist      *hdrhistogram.Histogram
-	corrHist  *hdrhistogram.Histogram // coordinated-omission-corrected latency (rate mode only)
-	ttftHist  *hdrhistogram.Histogram // time-to-first-token (stream steps only)
-	once      sync.Once
+	ch       chan Sample
+	quit     chan struct{}
+	stopped  chan struct{}
+	mu       sync.RWMutex
+	sum      Summary
+	hist     *hdrhistogram.Histogram
+	corrHist *hdrhistogram.Histogram // coordinated-omission-corrected latency (rate mode only)
+	ttftHist *hdrhistogram.Histogram // time-to-first-token (stream steps only)
+	once     sync.Once
+	// startedAt is when the collector was created — callers create it right
+	// before the run starts, so elapsed time measures the run itself.
 	startedAt time.Time
+	// stoppedAt is set once by the first Stop; zero while the run is live.
+	stoppedAt time.Time
 	dropped   atomic.Int64 // samples discarded due to full channel
 	// Generator self-health baselines, sampled by the aggregator goroutine only.
 	gcPauseBaseNs  uint64
@@ -108,7 +112,12 @@ func (c *Collector) Add(s Sample) {
 // Stop signals the collector to finish, drains remaining samples, and returns the summary
 // with HDR-computed percentiles. Safe to call multiple times.
 func (c *Collector) Stop() Summary {
-	c.once.Do(func() { close(c.quit) })
+	c.once.Do(func() {
+		c.mu.Lock()
+		c.stoppedAt = time.Now()
+		c.mu.Unlock()
+		close(c.quit)
+	})
 	<-c.stopped
 
 	c.mu.Lock()
@@ -183,9 +192,20 @@ func (c *Collector) Stop() Summary {
 func (c *Collector) LiveSummary() Summary {
 	c.mu.RLock()
 	s := c.sum
+	s.WallTime = c.elapsedLocked()
 	c.mu.RUnlock()
-	s.WallTime = time.Since(c.startedAt)
 	return s
+}
+
+// elapsedLocked is the run's wall time: up to Stop once stopped, so time spent
+// afterwards (teardown, a coordinator polling for results) does not dilute
+// RPS. Callers hold c.mu (read or write).
+func (c *Collector) elapsedLocked() time.Duration {
+	end := c.stoppedAt
+	if end.IsZero() {
+		end = time.Now() // still running: a live reading
+	}
+	return end.Sub(c.startedAt)
 }
 
 // LivePercentiles returns current HDR histogram percentiles.

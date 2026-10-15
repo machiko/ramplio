@@ -90,13 +90,16 @@ func (c *Collector) Export() HistogramExport {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
+	// The wall time ends when the run stopped, not when it is exported: a
+	// coordinator fetches results on its next poll, and that idle gap would
+	// otherwise inflate WallTime and under-report cluster RPS.
 	exp := HistogramExport{
 		Total:   c.sum.Total,
 		Errors:  c.sum.Errors,
 		BytesIn: c.sum.BytesIn,
 		MinNs:   int64(c.sum.MinLatency),
 		MaxNs:   int64(c.sum.MaxLatency),
-		WallNs:  int64(time.Since(c.startedAt)),
+		WallNs:  int64(c.elapsedLocked()),
 		Dropped: c.dropped.Load(),
 		Hist:    exportHist(c.hist),
 	}

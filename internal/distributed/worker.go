@@ -118,8 +118,10 @@ func (w *Worker) Assign(ctx context.Context, req *AssignRequest) error {
 		Executor:       protocols.NewHTTPExecutor(protocols.DefaultHTTPConfig()),
 		WSExecutor:     protocols.NewWSExecutor(),
 	}
-	// Create collector
-	collector := metrics.NewCollector(req.AssignedVUs)
+	// Size the collector from this worker's effective stages (its share): a
+	// rate-mode share has no VUs, and sizing by AssignedVUs gave it a
+	// 10-sample buffer.
+	collector := metrics.NewCollector(engine.CollectorCapacity(sc.Stages))
 	w.collector = collector
 
 	// Create engine

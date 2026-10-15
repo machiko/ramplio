@@ -153,3 +153,38 @@ func TestMergeExportsNoTTFT(t *testing.T) {
 
 	assert.False(t, sum.HasTTFT)
 }
+
+// The coordinator fetches a worker's export some time after the run ended (on
+// its next poll). The exported wall time must end when the run stopped —
+// otherwise the idle gap inflates it and cluster RPS (Total/WallTime) is
+// under-reported, badly so for short tests.
+func TestExportWallTimeEndsAtStop(t *testing.T) {
+	c := NewCollector(1)
+	c.Add(Sample{Latency: time.Millisecond, StatusCode: 200, At: time.Now()})
+	time.Sleep(20 * time.Millisecond)
+	c.Stop()
+
+	atStop := c.Export().WallNs
+	time.Sleep(50 * time.Millisecond) // the coordinator polls later
+	if later := c.Export().WallNs; later != atStop {
+		t.Errorf("exported wall time kept growing after Stop: %v then %v", time.Duration(atStop), time.Duration(later))
+	}
+	if time.Duration(atStop) < 20*time.Millisecond {
+		t.Errorf("exported wall time %v is shorter than the run", time.Duration(atStop))
+	}
+	// The live view agrees once stopped (the dashboard's final snapshot).
+	if live := c.LiveSummary().WallTime; int64(live) != atStop {
+		t.Errorf("LiveSummary wall time %v differs from the export %v after Stop", live, time.Duration(atStop))
+	}
+}
+
+// Before Stop the export is a live snapshot: wall time keeps growing.
+func TestExportWallTimeIsLiveBeforeStop(t *testing.T) {
+	c := NewCollector(1)
+	defer c.Stop()
+	first := c.Export().WallNs
+	time.Sleep(20 * time.Millisecond)
+	if second := c.Export().WallNs; second <= first {
+		t.Errorf("live export wall time did not advance: %d then %d", first, second)
+	}
+}

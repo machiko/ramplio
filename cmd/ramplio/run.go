@@ -456,8 +456,7 @@ func runScenario(path, promAddr string, httpCfg protocols.HTTPConfig, noTUI bool
 		fmt.Printf("Data file: %s (%d rows, mode=%s)\n", sc.VarsFrom.File, len(rows), dataMode)
 	}
 
-	maxVUs := maxTarget(sc.Stages)
-	col := metrics.NewCollector(maxVUs)
+	col := metrics.NewCollector(engine.CollectorCapacity(sc.Stages))
 	eng := engine.NewRamp(engine.RampConfig{
 		Stages:         sc.Stages,
 		Steps:          steps,
@@ -683,14 +682,7 @@ func runRPS(url, method string, targetRPS int, duration string, headers []string
 	stgs := rateStages(targetRPS, dur)
 	steps := []engine.RampStep{{Request: req}}
 
-	workerCount := targetRPS * 5
-	if workerCount < 10 {
-		workerCount = 10
-	}
-	if workerCount > 5000 {
-		workerCount = 5000
-	}
-	col := metrics.NewCollector(workerCount)
+	col := metrics.NewCollector(engine.CollectorCapacity(stgs))
 	eng := engine.NewRamp(engine.RampConfig{
 		Stages:   stgs,
 		Steps:    steps,

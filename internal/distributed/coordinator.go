@@ -312,7 +312,11 @@ func (c *Coordinator) broadcastAssign(ctx context.Context, allocation map[string
 				SetupCaptures: setupCaptures,
 				StageShares:   stageShares,
 			}
-			body, _ := json.Marshal(payload)
+			body, err := json.Marshal(payload)
+			if err != nil {
+				errCh <- fmt.Errorf("worker %s assign encode failed: %w", addr, err)
+				return
+			}
 			req, err := c.newRequest(ctx, http.MethodPost, addr, "/assign", bytes.NewReader(body))
 			if err != nil {
 				errCh <- fmt.Errorf("worker %s request build failed: %w", addr, err)

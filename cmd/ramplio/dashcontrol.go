@@ -171,13 +171,9 @@ func (c *dashController) Start(req dashboard.RunRequest) error {
 				}
 			}
 			stages = buildOverrideStages(vus, totalDur)
-			maxVUs = vus
 		}
 
-		if maxVUs <= 0 {
-			maxVUs = 1
-		}
-		col = metrics.NewCollector(maxVUs)
+		col = metrics.NewCollector(engine.CollectorCapacity(stages))
 		ramp = engine.NewRamp(engine.RampConfig{
 			Stages:        stages,
 			Steps:         c.pendingSteps,
@@ -203,14 +199,7 @@ func (c *dashController) Start(req dashboard.RunRequest) error {
 		steps := []engine.RampStep{{
 			Request: protocols.Request{Method: method, URL: req.URL},
 		}}
-		workerCount := req.RPS * 5
-		if workerCount < 10 {
-			workerCount = 10
-		}
-		if workerCount > 5000 {
-			workerCount = 5000
-		}
-		col = metrics.NewCollector(workerCount)
+		col = metrics.NewCollector(engine.CollectorCapacity(stgs))
 		ramp = engine.NewRamp(engine.RampConfig{
 			Stages:   stgs,
 			Steps:    steps,

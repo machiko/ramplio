@@ -13,9 +13,9 @@ const CapabilityStageShares = "stage_shares"
 // AssignRequest represents the request to assign work to a worker.
 type AssignRequest struct {
 	ScenarioYAML []byte `json:"scenario_yaml"`
-	// AssignedVUs is this worker's peak VU share. With StageShares it only sizes
-	// the metrics collector; requests from older coordinators carry no shares,
-	// and the worker then scales the scenario's VU targets by it instead.
+	// AssignedVUs is this worker's peak VU share. Only requests from older
+	// coordinators (no StageShares) use it: the worker then scales the
+	// scenario's VU targets by it.
 	AssignedVUs   int               `json:"assigned_vus"`
 	SetupCaptures map[string]string `json:"setup_captures"`
 	// StageShares is this worker's exact share of every scenario stage,
