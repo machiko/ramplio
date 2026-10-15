@@ -14,6 +14,8 @@ Ramplio 的所有重要變更都記錄於此。
 - **分散式壓測送出的負載是設定值的 N 倍**: coordinator 只依 VU 數分配,rate 模式(`target_rps`)每個 worker 都分到 0,而 worker 把 0 當成「不縮放」——每個 worker 都跑完整的 RPS(實測 2 個 worker、宣告 40 RPS × 1s 送出 76 個請求);VU 模式 worker 數多於 VU 時,多出的 worker 同樣跑全量(1 VU 場景、3 個 worker 實測同時 3 個 VU)。中間 stage 依比例四捨五入也會讓總數偏離(例如 3 個 worker 分 5 VU 得 6)。現在 coordinator 逐 stage 把 VU 與 RPS 精確切給每個 worker,每個 stage 的份額加總恆等於宣告值(同場景實測 40 個請求;VU 爬升途中各 worker 各自取整,叢集總數暫態偏差至多約 worker 數的一半,stage 邊界精確)。coordinator 開跑前會確認每個 worker 支援逐 stage 份額,版本過舊的 worker 直接拒絕,不會默默退回全量負載——coordinator 與 worker 請使用相同版本。
 - **分散式 teardown 重複執行**: 文件承諾分散式模式下 teardown 只在 coordinator 執行一次,但每個 worker 也各自跑了一次——N 個 worker 時登出、刪除測試資料等副作用重複 N+1 次(實測 2 個 worker 執行 3 次)。worker 現在只承擔負載,setup 與 teardown 都只在 coordinator 執行一次;且 setup 一旦執行,不論壓測正常結束、worker 失敗或按 Ctrl-C 中止,teardown 都執行恰好一次,清理前會盡力先停下 worker(明確拒絕派工的 worker 不動,它可能正在跑別的 coordinator 的測試;停止失敗會併入回報的錯誤)。原本 Ctrl-C 時停止指令與 teardown 沿用已取消的 context,worker 實際沒被停下、teardown 也沒送出;現在取消後的 teardown 另有 30 秒上限,正常結束時則不設上限。
 - **按 Ctrl-C 或儀表板「停止」後 teardown 沒有送出**: 單機壓測按 Ctrl-C、儀表板按「停止」或在終端中斷儀表板行程時,teardown 沿用已取消的 context(或隨行程消失),登出、刪除測試資料的請求一個都沒送出(實測 0 次),測試資料殘留在目標系統。現在 teardown 一律不受中止影響並帶著 setup 的 token 執行;中止只會讓剩下的 teardown 最多再跑 30 秒(teardown 進行中才中止也一樣,不會被打斷),正常結束不設上限。CLI 與儀表板行程在清理期間會提示,不再無聲等待(再按一次 Ctrl-C 可略過清理強制結束)。注意:teardown 很慢時,儀表板按停止後最長約 30 秒才回到完成狀態。
+- **分散式報表的 RPS 被低估**: worker 匯出結果時才計算經過時間,coordinator 在下一次輪詢(預設每秒)才收結果,空等的時間被算進測試時長,叢集 RPS(總請求數 ÷ 時長)因此偏低,短測試尤其明顯(實測 100ms 的 run 匯出 402ms)。現在經過時間截止於 run 結束的那一刻。
+- **rate 模式情境的指標緩衝過小**: CLI 情境檔、儀表板情境與分散式 worker 在 `target_rps` 情境下把樣本緩衝設為 10 筆(依 VU 數計算,rate 模式沒有 VU),統計來不及消化時會丟樣本(`-race` 下 2000 RPS 實測丟 2 筆;一般執行未觀察到)。現在所有情境與 rate 模式入口依同一規則設定緩衝:rate 模式以 worker 上限(尖峰 RPS × 5,介於 10–5000)為 VU 等價數,緩衝為其 10 倍(100–50,000 筆)。
 
 ---
 

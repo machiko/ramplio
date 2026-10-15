@@ -392,6 +392,8 @@ Coordinator 自動做到：
 
 **重要：** 分散模式下，`setup` 和 `teardown` 只在 Coordinator 執行一次；實際負載由 Worker 並行承擔。
 
+**注意：** `circuit_breaker` 在每個 Worker 各自計算——門檻以單一 Worker 承擔的流量判定，不是全叢集合計。N 個 Worker 時每個只看到約 1/N 的失敗（且任一成功請求就清空窗口），熔斷可能比單機晚、甚至永遠不觸發；觸發時也只停下該 Worker，其他 Worker 照常送負載。分散式下請依 Worker 數調降 `consecutive_failures`（約 ÷ N）。
+
 ### Capacity Discovery
 
 不需要了解 VU 或 RPS 是什麼——直接告訴 Ramplio 網址，它自動幫你找出網站的最大承載量：
