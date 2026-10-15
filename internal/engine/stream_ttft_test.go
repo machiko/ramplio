@@ -72,3 +72,34 @@ func TestRampEngine_PlainStepNoTTFT(t *testing.T) {
 	require.Greater(t, sum.Total, int64(0))
 	assert.False(t, sum.HasTTFT)
 }
+
+// 串流在首段之後被切斷,每筆都必須是錯誤——而不是一批「偏快的成功」
+// 讓延遲與錯誤率都失真。
+func TestRampEngine_TruncatedStreamCountsAsError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: first\n\n"))
+		w.(http.Flusher).Flush()
+		if conn, _, err := w.(http.Hijacker).Hijack(); err == nil {
+			_ = conn.Close()
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	col := metrics.NewCollector(2)
+	eng := engine.NewRamp(engine.RampConfig{
+		Stages: []scenarios.Stage{{Duration: 10 * time.Millisecond, Target: 2}, {Duration: 300 * time.Millisecond, Target: 2}},
+		Steps: []engine.RampStep{{
+			Name:    "sse step",
+			Request: protocols.Request{Method: "GET", URL: srv.URL},
+			Stream:  "sse",
+		}},
+		Executor: protocols.NewHTTPExecutor(protocols.DefaultHTTPConfig()),
+	}, col)
+
+	sum := eng.Run(context.Background())
+
+	require.Greater(t, sum.Total, int64(0))
+	assert.Equal(t, sum.Total, sum.Errors, "截斷的串流必須全數記為錯誤")
+	assert.Equal(t, sum.Errors, sum.ErrorBreakdown[metrics.ErrKindConnReset], "中途斷線歸連線層分類")
+}

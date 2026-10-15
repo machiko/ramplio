@@ -317,3 +317,143 @@ steps:
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "stream")
 }
+
+// setup / teardown 步驟與 steps 適用同一套解析期驗證:
+// 設定錯誤必須在開跑前擋下,而不是等 setup 執行時靜默略過。
+func TestParse_ValidatesSetupAndTeardownSteps(t *testing.T) {
+	base := `
+name: lifecycle
+stages:
+  - duration: 10s
+    target: 1
+steps:
+  - name: ok
+    method: GET
+    url: https://example.com/
+`
+	tests := []struct {
+		name, extra, wantErr string
+	}{
+		{"setup missing url", "setup:\n  - name: login\n    method: POST\n", "url is required"},
+		{"teardown missing method", "teardown:\n  - name: logout\n    url: https://example.com/logout\n", "method is required"},
+		{"setup bad ws_mode", "setup:\n  - name: ws\n    method: GET\n    url: ws://x/\n    protocol: websocket\n    ws_mode: forever\n", "ws_mode"},
+		{"teardown bad stream", "teardown:\n  - name: s\n    method: GET\n    url: https://example.com/\n    stream: chunked\n", "stream"},
+		{"setup bad pause", "setup:\n  - name: p\n    method: GET\n    url: https://example.com/\n    pause: soon\n", "invalid pause"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := scenarios.Parse(strings.NewReader(base + tt.extra))
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.wantErr)
+		})
+	}
+}
+
+// 驗證在解析期:無效的 regex capture 一旦開跑,每個請求都會重新編譯失敗、
+// capture 永遠不會填值,卻沒有任何錯誤。必須在解析時就拒絕。
+func TestParse_RejectsInvalidCaptureRegex(t *testing.T) {
+	yaml := `
+name: bad regex
+stages:
+  - duration: 10s
+    target: 1
+setup:
+  - name: login
+    method: POST
+    url: https://example.com/login
+    capture:
+      token: "regex:([unclosed"
+steps:
+  - name: s
+    method: GET
+    url: https://example.com/
+`
+	_, err := scenarios.Parse(strings.NewReader(yaml))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "token")
+	assert.Contains(t, err.Error(), "regex")
+}
+
+func TestParse_AcceptsValidCaptureRegex(t *testing.T) {
+	yaml := `
+name: good regex
+stages:
+  - duration: 10s
+    target: 1
+steps:
+  - name: s
+    method: GET
+    url: https://example.com/
+    capture:
+      id: 'regex:id=(\d+)'
+      name: $.name
+`
+	_, err := scenarios.Parse(strings.NewReader(yaml))
+	require.NoError(t, err)
+}
+
+// A regex capture without a capture group can never fill a value; reject it
+// like an invalid pattern instead of letting it silently do nothing.
+func TestParse_RejectsCaptureRegexWithoutGroup(t *testing.T) {
+	yaml := `
+name: no group
+stages:
+  - duration: 10s
+    target: 1
+steps:
+  - name: s
+    method: GET
+    url: https://example.com/
+    capture:
+      id: 'regex:id=\d+'
+`
+	_, err := scenarios.Parse(strings.NewReader(yaml))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "id")
+	assert.Contains(t, err.Error(), "group")
+}
+
+// body_matches is compiled per request at run time; an invalid pattern would
+// fail every assertion instead of failing the scenario up front.
+func TestParse_RejectsInvalidBodyMatches(t *testing.T) {
+	yaml := `
+name: bad body_matches
+stages:
+  - duration: 10s
+    target: 1
+steps:
+  - name: s
+    method: GET
+    url: https://example.com/
+    assertions:
+      body_matches: "([unclosed"
+`
+	_, err := scenarios.Parse(strings.NewReader(yaml))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "body_matches")
+}
+
+// The same broken scenario must always report the same first error.
+func TestParse_PauseErrorOrderIsStable(t *testing.T) {
+	yaml := `
+name: two bad pauses
+stages:
+  - duration: 10s
+    target: 1
+setup:
+  - name: login
+    method: POST
+    url: https://example.com/login
+    pause: never
+steps:
+  - name: s
+    method: GET
+    url: https://example.com/
+    pause: later
+`
+	for range 20 {
+		_, err := scenarios.Parse(strings.NewReader(yaml))
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), `step 0 ("s")`, "steps are validated before setup, every time")
+	}
+}

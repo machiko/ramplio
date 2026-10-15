@@ -6,6 +6,7 @@ package engine
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"net/http"
 	"regexp"
 	"strings"
@@ -48,6 +49,14 @@ func (e *RampEngine) stepExecutor(step RampStep, sessionExec protocols.Executor,
 // persistent websocket 在此不適用:這些路徑沒有 VU 生命週期可以承載連線。
 func (e *RampEngine) pickExecutor(step RampStep) protocols.Executor {
 	return e.stepExecutor(step, e.cfg.Executor, nil)
+}
+
+// isRunCancelled reports whether err means the run itself was cancelled (Ctrl-C,
+// ramp-down removing this VU), as opposed to a single request timing out:
+// http.Client.Timeout errors also satisfy errors.Is(err, DeadlineExceeded), and
+// those must be recorded as timeout samples with the VU carrying on.
+func isRunCancelled(ctx context.Context, err error) bool {
+	return ctx.Err() != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded))
 }
 
 // executeSingleStep runs a step once; used by setup and teardown.

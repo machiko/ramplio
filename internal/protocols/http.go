@@ -3,6 +3,7 @@ package protocols
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -110,12 +111,20 @@ func (e *HTTPExecutor) Execute(ctx context.Context, req Request) Result {
 	// 首 chunk 到達時刻(TTFT),兩者共用同一個 1MiB body 上限契約。
 	var body []byte
 	var ttft time.Duration
+	var readErr error
 	if req.Stream {
-		body, ttft = readStreaming(io.LimitReader(resp.Body, 1<<20), start)
+		body, ttft, readErr = readStreaming(io.LimitReader(resp.Body, 1<<20), start)
 	} else {
-		body, _ = io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		body, readErr = io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	}
 	latency := time.Since(start)
+	if readErr != nil {
+		// The connection dropped (or the run was cancelled) mid-body: a
+		// transport failure, not a fast 2xx. Status is zeroed so the error is
+		// classified at the connection layer rather than as an assertion. A
+		// stream's TTFT is kept: the first chunk did arrive.
+		return Result{Error: readErr, Latency: latency, BytesRead: int64(len(body)), TTFT: ttft}
+	}
 
 	headers := make(map[string]string, len(resp.Header))
 	for k, vs := range resp.Header {
@@ -137,7 +146,7 @@ func (e *HTTPExecutor) Execute(ctx context.Context, req Request) Result {
 
 // readStreaming 分塊讀取回應:第一個非空 chunk 到達即記下 TTFT,
 // 之後繼續讀到結束(或上限)。回傳完整 body 與 TTFT。
-func readStreaming(r io.Reader, start time.Time) ([]byte, time.Duration) {
+func readStreaming(r io.Reader, start time.Time) ([]byte, time.Duration, error) {
 	var body []byte
 	var ttft time.Duration
 	buf := make([]byte, 32*1024)
@@ -149,8 +158,11 @@ func readStreaming(r io.Reader, start time.Time) ([]byte, time.Duration) {
 			}
 			body = append(body, buf[:n]...)
 		}
+		if errors.Is(err, io.EOF) {
+			return body, ttft, nil
+		}
 		if err != nil {
-			return body, ttft
+			return body, ttft, err
 		}
 	}
 }

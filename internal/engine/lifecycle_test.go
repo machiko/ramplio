@@ -273,6 +273,7 @@ func TestRun_TeardownRunsAfterCancel(t *testing.T) {
 
 	assert.Less(t, time.Since(start), 10*time.Second, "cancel must end the run promptly")
 	assert.Positive(t, sum.Total)
+	assert.Zero(t, sum.Errors, "requests cut off by the cancel itself are not samples, let alone errors")
 	assert.Equal(t, 1, srv.count("/logout"), "teardown must still run after a cancel")
 	assert.Zero(t, srv.badAuth.Load(), "teardown must carry the setup token")
 }
@@ -480,6 +481,38 @@ func TestRun_ReadoutsAfterCompletion(t *testing.T) {
 	assert.Equal(t, 2, total)
 	assert.Equal(t, 1.0, pct, "a finished stage reports full progress")
 	assert.Zero(t, eng.ActiveVUs())
+}
+
+// --- request timeouts -----------------------------------------------------------
+
+// http.Client.Timeout errors satisfy errors.Is(err, context.DeadlineExceeded),
+// the same test the engine uses to detect a cancelled run. A slow target must
+// be *reported* as timeouts — the most important signal a load test has — and
+// the VUs must keep going, not silently exit one by one.
+func TestRun_RequestTimeoutIsReportedAndVUsSurvive(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(300 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+	cfg := protocols.DefaultHTTPConfig()
+	cfg.RequestTimeout = 50 * time.Millisecond
+
+	eng := engine.NewRamp(engine.RampConfig{
+		Stages:   holdStages(2, 600*time.Millisecond),
+		Steps:    []engine.RampStep{rampStep(srv.URL)},
+		Executor: protocols.NewHTTPExecutor(cfg),
+	}, testCollector(t, 2))
+
+	done := make(chan metrics.Summary, 1)
+	go func() { done <- eng.Run(context.Background()) }()
+	time.Sleep(400 * time.Millisecond) // several timeouts in
+	assert.Equal(t, 2, eng.ActiveVUs(), "VUs must survive request timeouts")
+	sum := <-done
+
+	assert.GreaterOrEqual(t, sum.Total, int64(8), "each timeout is a recorded sample (2 VUs × ~12 per 600ms)")
+	assert.Equal(t, sum.Total, sum.Errors)
+	assert.Equal(t, sum.Errors, sum.ErrorBreakdown[metrics.ErrKindTimeout], "timeouts must be classified as timeouts")
 }
 
 // --- circuit breaker ----------------------------------------------------------

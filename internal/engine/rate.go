@@ -5,7 +5,6 @@ package engine
 
 import (
 	"context"
-	"errors"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -265,7 +264,7 @@ func (e *RampEngine) runRateWorker(ctx context.Context, jobs <-chan time.Time, i
 			}
 
 			result := exec.Execute(ctx, req)
-			if errors.Is(result.Error, context.Canceled) || errors.Is(result.Error, context.DeadlineExceeded) {
+			if isRunCancelled(ctx, result.Error) {
 				e.activeVUs.Add(-1)
 				return
 			}

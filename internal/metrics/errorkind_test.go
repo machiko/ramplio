@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/url"
 	"os"
@@ -43,6 +44,10 @@ func TestClassifyError(t *testing.T) {
 		{"connection refused", wrap(os.NewSyscallError("connect", syscall.ECONNREFUSED)), 0, ErrKindConnRefused},
 		{"connection reset", wrap(os.NewSyscallError("read", syscall.ECONNRESET)), 0, ErrKindConnReset},
 		{"broken pipe", wrap(os.NewSyscallError("write", syscall.EPIPE)), 0, ErrKindConnReset},
+		// A body cut short (server closed the connection mid-response) is the
+		// peer dropping an established connection, not "other".
+		{"truncated body", &url.Error{Err: io.ErrUnexpectedEOF}, 0, ErrKindConnReset},
+		{"bare unexpected eof", io.ErrUnexpectedEOF, 0, ErrKindConnReset},
 		{"context deadline", &url.Error{Err: context.DeadlineExceeded}, 0, ErrKindTimeout},
 		{"net timeout", wrap(timeoutErr{}), 0, ErrKindTimeout},
 		{"tls unknown authority", &url.Error{Err: x509.UnknownAuthorityError{}}, 0, ErrKindTLS},

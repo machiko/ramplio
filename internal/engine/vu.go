@@ -5,7 +5,6 @@ package engine
 
 import (
 	"context"
-	"errors"
 	"math"
 	"sync"
 	"time"
@@ -165,7 +164,7 @@ func (e *RampEngine) runVU(ctx context.Context) {
 				}
 
 				result := exec.Execute(ctx, req)
-				if errors.Is(result.Error, context.Canceled) || errors.Is(result.Error, context.DeadlineExceeded) {
+				if isRunCancelled(ctx, result.Error) {
 					return
 				}
 

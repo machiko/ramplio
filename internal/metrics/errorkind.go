@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
+	"io"
 	"net"
 	"strings"
 	"syscall"
@@ -135,7 +136,7 @@ func classifyTransportError(err error) ErrorKind {
 	}
 
 	// Connection reset / broken pipe — peer dropped an established connection.
-	if errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) {
+	if errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.EPIPE) || errors.Is(err, io.ErrUnexpectedEOF) {
 		return ErrKindConnReset
 	}
 
