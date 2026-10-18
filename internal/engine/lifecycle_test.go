@@ -251,19 +251,23 @@ func TestRun_SetupBeforeLoadAndTeardownAfter(t *testing.T) {
 // still send its requests after the cancel — seeded with the setup captures.
 func TestRun_TeardownRunsAfterCancel(t *testing.T) {
 	srv := newAuthServer(t, "abc")
+	col := testCollector(t, 2)
 	eng := engine.NewRamp(engine.RampConfig{
 		Stages:        holdStages(2, 30*time.Second), // cut short by the cancel
 		SetupSteps:    []engine.RampStep{loginStep(srv.URL)},
 		Steps:         []engine.RampStep{bearerStep("api", srv.URL+"/api/items")},
 		TeardownSteps: []engine.RampStep{bearerStep("logout", srv.URL+"/logout")},
 		Executor:      httpExec(),
-	}, testCollector(t, 2))
+	}, col)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() { // cancel mid-test, once load is flowing
+		// Wait for a *recorded* sample, not just a request the server has seen:
+		// a request still in flight when the cancel lands is (by design) not a
+		// sample, and cancelling on the first server hit left Total at 0.
 		deadline := time.Now().Add(5 * time.Second)
-		for srv.count("/api/items") == 0 && time.Now().Before(deadline) {
+		for col.LiveSummary().Total == 0 && time.Now().Before(deadline) {
 			time.Sleep(5 * time.Millisecond)
 		}
 		cancel()
