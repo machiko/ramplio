@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -45,24 +46,29 @@ steps:
 `, target.URL)
 
 	worker := NewWorker("regression-worker")
-	port := findFreePort()
-	go func() { _ = worker.StartHTTPServer(":" + port) }()
-	time.Sleep(100 * time.Millisecond)
-
-	base := "http://127.0.0.1:" + port
+	base := "http://" + serveWorker(t, worker)
 	body, _ := json.Marshal(AssignRequest{ScenarioYAML: []byte(yaml), AssignedVUs: 10})
 	resp, err := http.Post(base+"/assign", "application/json", bytes.NewReader(body))
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	resp.Body.Close()
 
-	// Wait for the 1s run to finish.
-	time.Sleep(1500 * time.Millisecond)
-
-	res, err := http.Get(base + "/result")
-	require.NoError(t, err)
+	// The result is published once the 1s run finishes.
+	var res *http.Response
+	client := &http.Client{Timeout: 2 * time.Second} // a hung worker must not hang the poll
+	require.Eventually(t, func() bool {
+		r, err := client.Get(base + "/result")
+		if err != nil {
+			return false
+		}
+		if r.StatusCode != http.StatusOK {
+			r.Body.Close()
+			return false
+		}
+		res = r
+		return true
+	}, 10*time.Second, 50*time.Millisecond, "worker never published a result")
 	defer res.Body.Close()
-	require.Equal(t, http.StatusOK, res.StatusCode)
 
 	var result ResultResponse
 	require.NoError(t, json.NewDecoder(res.Body).Decode(&result))
@@ -75,34 +81,22 @@ steps:
 // TestDistributedIntegrationBasic tests coordinator-worker communication with scenario assignment
 func TestDistributedIntegrationBasic(t *testing.T) {
 	// Create a simple test scenario
-	yamlContent := `
+	yamlContent := fmt.Sprintf(`
 name: integration test
 stages:
-  - duration: 100ms
+  - duration: 10ms
+    target: 2
+  - duration: 300ms
     target: 2
 steps:
-  - name: GET example
+  - name: GET local
     method: GET
-    url: http://example.com/
-`
+    url: %s/
+`, localTarget(t))
 
 	// Create and start workers
-	worker1 := NewWorker("worker-1")
-	worker2 := NewWorker("worker-2")
-
-	// Start worker HTTP servers on dynamic ports
-	port1 := findFreePort()
-	port2 := findFreePort()
-
-	go func() {
-		_ = worker1.StartHTTPServer(":" + port1)
-	}()
-	go func() {
-		_ = worker2.StartHTTPServer(":" + port2)
-	}()
-
-	// Wait for servers to start
-	time.Sleep(100 * time.Millisecond)
+	addr1 := serveWorker(t, NewWorker("worker-1"))
+	addr2 := serveWorker(t, NewWorker("worker-2"))
 
 	// Parse scenario
 	sc, err := scenarios.Parse(bytes.NewReader([]byte(yamlContent)))
@@ -110,7 +104,7 @@ steps:
 
 	// Create coordinator with workers
 	coordinator := NewCoordinator(
-		[]string{"localhost:" + port1, "localhost:" + port2},
+		[]string{addr1, addr2},
 		[]byte(yamlContent),
 		sc,
 		protocols.DefaultHTTPConfig(),
@@ -124,23 +118,21 @@ steps:
 
 	// Verify coordinator ran without error and merged results
 	assert.NoError(t, err)
-	// Note: this scenario makes external requests to example.com, which might fail
-	// The key test here is that the coordinator successfully orchestrated workers
-	assert.NotNil(t, summary)
+	assert.Positive(t, summary.Total, "both workers' load must reach the merged summary")
 }
 
 // TestDistributedWorkerStateTransition tests worker state transitions during load test
 func TestDistributedWorkerStateTransition(t *testing.T) {
-	yamlContent := `
+	yamlContent := fmt.Sprintf(`
 name: state test
 stages:
   - duration: 100ms
     target: 1
 steps:
-  - name: GET example
+  - name: GET local
     method: GET
-    url: http://example.com
-`
+    url: %s
+`, localTarget(t))
 
 	worker := NewWorker("state-test-worker")
 
@@ -160,11 +152,9 @@ steps:
 	// Should now be running
 	assert.Equal(t, WorkerStateRunning, worker.GetState())
 
-	// Wait for completion
-	time.Sleep(1 * time.Second)
-
-	// Should now be done
-	assert.Equal(t, WorkerStateDone, worker.GetState())
+	// Should reach done once the 100ms stage ends
+	require.Eventually(t, func() bool { return worker.GetState() == WorkerStateDone },
+		5*time.Second, 10*time.Millisecond, "worker never reached done")
 
 	// Should be able to get result
 	result := worker.GetResult()
@@ -203,15 +193,7 @@ func TestDistributedVUAllocationAccuracy(t *testing.T) {
 func TestDistributedWorkerHTTPServer(t *testing.T) {
 	worker := NewWorker("http-test-worker")
 
-	// Start HTTP server on dynamic port
-	port := findFreePort()
-	go func() {
-		_ = worker.StartHTTPServer(":" + port)
-	}()
-
-	time.Sleep(100 * time.Millisecond)
-
-	baseURL := "http://127.0.0.1:" + port
+	baseURL := "http://" + serveWorker(t, worker)
 
 	// Test health endpoint
 	resp, err := http.Get(baseURL + "/health")
@@ -276,40 +258,29 @@ func TestDistributedCoordinatorLiveSnapshot(t *testing.T) {
 // TestDistributedCompleteFlow tests the complete flow from scenario assignment through result collection
 func TestDistributedCompleteFlow(t *testing.T) {
 	// Create a simple scenario
-	yamlContent := `
+	yamlContent := fmt.Sprintf(`
 name: complete flow test
 stages:
-  - duration: 100ms
+  - duration: 10ms
+    target: 2
+  - duration: 300ms
     target: 2
 steps:
   - name: ping
     method: GET
-    url: http://httpbin.org/status/200
-`
+    url: %s/status/200
+`, localTarget(t))
 
-	// Create workers
-	w1 := NewWorker("worker-1")
-	w2 := NewWorker("worker-2")
-
-	p1 := findFreePort()
-	p2 := findFreePort()
-
-	// Start worker servers
-	go func() {
-		_ = w1.StartHTTPServer(":" + p1)
-	}()
-	go func() {
-		_ = w2.StartHTTPServer(":" + p2)
-	}()
-
-	time.Sleep(100 * time.Millisecond)
+	// Create and start workers
+	a1 := serveWorker(t, NewWorker("worker-1"))
+	a2 := serveWorker(t, NewWorker("worker-2"))
 
 	// Parse scenario
 	sc, _ := scenarios.Parse(bytes.NewReader([]byte(yamlContent)))
 
 	// Create and run coordinator
 	coord := NewCoordinator(
-		[]string{"localhost:" + p1, "localhost:" + p2},
+		[]string{a1, a2},
 		[]byte(yamlContent),
 		sc,
 		protocols.DefaultHTTPConfig(),
@@ -322,17 +293,67 @@ steps:
 
 	// Verify coordinator completed successfully
 	assert.NoError(t, err)
-	assert.NotNil(t, summary)
+	assert.Positive(t, summary.Total)
+	assert.Zero(t, summary.Errors, "the local target always answers 200")
 }
 
-// findFreePort finds an available port for testing
-func findFreePort() string {
-	listener, err := net.ListenTCP("tcp", &net.TCPAddr{Port: 0})
-	if err != nil {
-		panic(err)
-	}
-	defer listener.Close()
+// serveWorker runs w's HTTP API on a port the test already holds (no
+// find-then-rebind race with parallel packages) and returns its host:port.
+// At cleanup the listener and every connection it accepted are closed, so
+// neither the server nor kept-alive connections outlive the test.
+func serveWorker(t *testing.T, w *Worker) string {
+	t.Helper()
+	inner, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	ln := &trackingListener{Listener: inner}
+	t.Cleanup(ln.closeAll)
+	go func() { _ = w.Serve(ln) }()
+	return ln.Addr().String()
+}
 
-	port := listener.Addr().(*net.TCPAddr).Port
-	return fmt.Sprintf("%d", port)
+// trackingListener remembers accepted connections so a test can close them:
+// Serve owns its http.Server, and closing only the listener leaves kept-alive
+// connections (and their server goroutines) running.
+type trackingListener struct {
+	net.Listener
+	mu    sync.Mutex
+	conns []net.Conn
+}
+
+func (l *trackingListener) Accept() (net.Conn, error) {
+	c, err := l.Listener.Accept()
+	if err == nil {
+		l.mu.Lock()
+		l.conns = append(l.conns, c)
+		l.mu.Unlock()
+	}
+	return c, err
+}
+
+func (l *trackingListener) closeAll() {
+	_ = l.Close()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, c := range l.conns {
+		_ = c.Close()
+	}
+}
+
+// localTarget is an in-process load target that answers 200 to everything,
+// so tests never depend on the network or a third-party site.
+func localTarget(t *testing.T) string {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
+		rw.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
+// StartHTTPServer must report a listen failure instead of serving nothing.
+func TestStartHTTPServer_ReportsListenError(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	defer ln.Close()
+	assert.Error(t, NewWorker("busy").StartHTTPServer(ln.Addr().String()), "the address is already taken")
 }

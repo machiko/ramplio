@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -34,7 +35,7 @@ func TestWorkerAssignDuplicate(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a minimal scenario
-	yamlContent := `
+	yamlContent := fmt.Sprintf(`
 name: test
 stages:
   - duration: 1s
@@ -42,8 +43,9 @@ stages:
 steps:
   - name: GET test
     method: GET
-    url: http://example.com
-`
+    url: %s
+`, localTarget(t))
+	t.Cleanup(w.Stop) // runs before the target closes: the assigned run must not outlive the test
 
 	req := &AssignRequest{
 		ScenarioYAML: []byte(yamlContent),
@@ -120,7 +122,7 @@ func TestWorkerVUScaling(t *testing.T) {
 func TestWorkerHandleAssignSuccess(t *testing.T) {
 	w := NewWorker("test-worker")
 
-	yamlContent := `
+	yamlContent := fmt.Sprintf(`
 name: test
 stages:
   - duration: 1s
@@ -128,8 +130,9 @@ stages:
 steps:
   - name: GET test
     method: GET
-    url: http://example.com
-`
+    url: %s
+`, localTarget(t))
+	t.Cleanup(w.Stop) // runs before the target closes: the assigned run must not outlive the test
 
 	req := &AssignRequest{
 		ScenarioYAML: []byte(yamlContent),
@@ -153,7 +156,7 @@ steps:
 func TestWorkerHandleAssignConflict(t *testing.T) {
 	w := NewWorker("test-worker")
 
-	yamlContent := `
+	yamlContent := fmt.Sprintf(`
 name: test
 stages:
   - duration: 1s
@@ -161,8 +164,9 @@ stages:
 steps:
   - name: GET test
     method: GET
-    url: http://example.com
-`
+    url: %s
+`, localTarget(t))
+	t.Cleanup(w.Stop) // runs before the target closes: the assigned run must not outlive the test
 
 	req := &AssignRequest{
 		ScenarioYAML: []byte(yamlContent),

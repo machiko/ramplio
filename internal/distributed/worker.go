@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -239,18 +240,33 @@ func (w *Worker) Handler() http.Handler {
 // configured (via SetSecret), all endpoints require a matching
 // "Authorization: Bearer <secret>" header.
 func (w *Worker) StartHTTPServer(addr string) error {
-	server := &http.Server{
-		Addr:    addr,
-		Handler: w.Handler(),
+	if addr == "" {
+		addr = ":http" // same default as http.Server.ListenAndServe
 	}
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+	// Serve closes ln when it returns, except when ServeTLS fails to load the
+	// certificate before serving.
+	defer func() { _ = ln.Close() }()
+	return w.Serve(ln)
+}
+
+// Serve runs the worker's HTTP API on an existing listener — over TLS when
+// SetTLS configured a certificate — until the listener is closed. Tests bind
+// 127.0.0.1:0 themselves and hand the listener over, so the port is never
+// released and re-bound in between (another process could take it).
+func (w *Worker) Serve(ln net.Listener) error {
+	server := &http.Server{Handler: w.Handler()}
 
 	w.mu.RLock()
 	certFile, keyFile := w.certFile, w.keyFile
 	w.mu.RUnlock()
 	if certFile != "" && keyFile != "" {
-		return server.ListenAndServeTLS(certFile, keyFile)
+		return server.ServeTLS(ln, certFile, keyFile)
 	}
-	return server.ListenAndServe()
+	return server.Serve(ln)
 }
 
 // authMiddleware rejects requests lacking the configured shared secret.

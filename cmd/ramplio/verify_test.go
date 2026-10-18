@@ -122,8 +122,14 @@ func TestVerify_EndToEnd(t *testing.T) {
 	if testing.Short() {
 		t.Skip("verify end-to-end timing test skipped in -short mode")
 	}
+	// This drives the command end to end (mock target, engine, verdict, exit
+	// status); measurement precision is pinned by the engine's ground-truth
+	// tests. The lower bound — never below the injected 40ms — is what exposes a
+	// measurement bug and no tolerance relaxes it. The upper tolerance only
+	// absorbs the host: with the whole suite under -race on a saturated CPU, p99
+	// measured up to 71ms (30ms over) — the old ±30ms flaked there.
 	cmd := newVerifyCmd()
-	cmd.SetArgs([]string{"--latency", "40ms", "--duration", "2s", "--tolerance", "30ms"})
+	cmd.SetArgs([]string{"--latency", "40ms", "--duration", "2s", "--tolerance", "200ms"})
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("verify should pass against a 40ms fixed target: %v", err)
 	}

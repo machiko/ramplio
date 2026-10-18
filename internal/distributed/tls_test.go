@@ -80,16 +80,14 @@ steps:
 `, targetURL)
 }
 
-// startTLSWorker boots a TLS worker on a free port and returns its https address.
+// startTLSWorker boots a TLS worker on a port the test holds and returns its
+// https address.
 func startTLSWorker(t *testing.T) string {
 	t.Helper()
 	cert, key := genSelfSignedCert(t)
 	w := NewWorker("tls-worker")
 	w.SetTLS(cert, key)
-	port := findFreePort()
-	go func() { _ = w.StartHTTPServer(":" + port) }()
-	time.Sleep(200 * time.Millisecond)
-	return "https://127.0.0.1:" + port
+	return "https://" + serveWorker(t, w)
 }
 
 // TestDistributedTLSEndToEnd proves a coordinator can drive an HTTPS worker
