@@ -55,6 +55,14 @@ type Summary struct {
 	// ceiling: under load the generator itself may be the bottleneck, so any
 	// queueing delay can't be attributed solely to the target. Set by the engine.
 	GeneratorWorkerCapHit bool `json:"-"`
+	// GeneratorPlannedRequests is how many requests the rate-mode schedule
+	// called for over the run (the integral of the applied rate), so the report
+	// can say whether the declared load was actually delivered. Zero in VU mode.
+	GeneratorPlannedRequests int64 `json:"-"`
+	// GeneratorDispatchedRequests is how many of those requests a worker
+	// actually took up — counted at hand-off, so requests still in flight at the
+	// end, skipped `if` steps and `loop` repeats neither hide nor inflate it.
+	GeneratorDispatchedRequests int64 `json:"-"`
 
 	// ErrorBreakdown counts failed requests by cause (DNS, connection refused,
 	// timeout, TLS, HTTP 4xx/5xx, assertion, …). Populated lazily on the first

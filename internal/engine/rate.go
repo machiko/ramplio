@@ -12,7 +12,6 @@ import (
 
 	"github.com/machiko/ramplio/v3/internal/metrics"
 	"github.com/machiko/ramplio/v3/internal/scenarios"
-	"golang.org/x/time/rate"
 )
 
 func (e *RampEngine) maxTargetRPS() int {
@@ -45,27 +44,44 @@ func rateWorkerCeiling(maxRPS int) int {
 // spawns one; at the cap it stops growing and lets the send block — that block is
 // the genuine backpressure the coordinated-omission correction must capture, so
 // growth never masks real overload.
+//
+// A worker counts as idle from the moment grow adds it (not from when its
+// goroutine first runs), so a catch-up burst of sends sees the workers it has
+// already asked for instead of spawning one per send up to the ceiling.
 type ratePool struct {
 	jobs   chan time.Time
 	idle   atomic.Int32
 	total  atomic.Int32
 	max    int
 	capHit atomic.Bool
-	spawn  func()
+	start  func() // launches one worker goroutine; bookkeeping is grow's
+	// taken counts jobs a worker took up: the requests the generator actually
+	// sent, as opposed to the samples that happened to be recorded.
+	taken atomic.Int64
 }
 
 func (p *ratePool) maybeGrow() {
-	if p.idle.Load() > 0 {
+	// Jobs already queued will each take one of the idle workers, so only the
+	// surplus is free for this send — in a catch-up burst the queue fills faster
+	// than idle workers wake to drain it.
+	if p.idle.Load() > int32(len(p.jobs)) {
 		return // a worker is already waiting to take this job
 	}
 	if int(p.total.Load()) >= p.max {
 		p.capHit.Store(true) // at the ceiling: the send will block (real backpressure)
 		return
 	}
-	p.spawn()
+	p.grow()
 }
 
-// runRate drives the load test in rate mode (fixed RPS via token bucket).
+// grow adds one worker, counted as idle before its goroutine runs.
+func (p *ratePool) grow() {
+	p.total.Add(1)
+	p.idle.Add(1)
+	p.start()
+}
+
+// runRate drives the load test in rate mode (fixed RPS on a fixed cadence).
 func (e *RampEngine) runRate(ctx context.Context) metrics.Summary {
 	start := time.Now()
 
@@ -75,11 +91,9 @@ func (e *RampEngine) runRate(ctx context.Context) metrics.Summary {
 	workerCtx, workerCancel := context.WithCancel(ctx)
 	defer workerCancel()
 
-	// burst=1: the limiter releases tokens at the exact configured cadence. A
-	// larger burst would let tokens pile up while workers are busy and then fire
-	// back-to-back, masking the queueing delay coordinated-omission correction
-	// must capture.
-	lim := rate.NewLimiter(0, 1)
+	// The dispatcher paces itself from this schedule; the stage loop below
+	// updates it as the rate ramps.
+	sched := newRateSchedule()
 
 	// jobs carries scheduled dispatch timestamps from the single dispatcher to
 	// the workers. Its buffer is the backlog depth: when workers fall behind, a
@@ -88,21 +102,20 @@ func (e *RampEngine) runRate(ctx context.Context) metrics.Summary {
 
 	var wg sync.WaitGroup
 	pool := &ratePool{jobs: jobs, max: maxWorkers}
-	pool.spawn = func() {
-		n := pool.total.Add(1)
-		if n > e.ratePeakWorkers.Load() {
+	pool.start = func() {
+		if n := pool.total.Load(); n > e.ratePeakWorkers.Load() {
 			e.ratePeakWorkers.Store(n)
 		}
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			e.runRateWorker(workerCtx, jobs, &pool.idle)
+			e.runRateWorker(workerCtx, pool)
 		}()
 	}
 	// Start with the minimum pool; the dispatcher grows it on demand. All spawns
 	// happen here or inside the dispatcher, both strictly before wg.Wait below.
 	for range rateMinWorkers {
-		pool.spawn()
+		pool.grow()
 	}
 
 	// The dispatcher paces requests at the current rate independent of worker
@@ -112,8 +125,24 @@ func (e *RampEngine) runRate(ctx context.Context) metrics.Summary {
 	dispDone := make(chan struct{})
 	go func() {
 		defer close(dispDone)
-		e.dispatch(dispCtx, lim, pool)
+		e.dispatch(dispCtx, sched, pool)
 	}()
+
+	// planned integrates the rate the dispatcher was actually asked to run
+	// (the 100ms staircase applied below), so the report can say how much of the
+	// declared load really went out. Once the circuit breaker trips the
+	// dispatcher stops on purpose, so the schedule stops counting too — from
+	// the tick that sees the trip, dropping at most one tick of schedule: an
+	// undercount, which can only hide a shortfall, never invent one.
+	var planned float64
+	appliedRPS, appliedAt := 0.0, time.Now()
+	apply := func(rps float64, now time.Time) {
+		if !e.isCircuitTripped() {
+			planned += appliedRPS * now.Sub(appliedAt).Seconds()
+		}
+		appliedRPS, appliedAt = rps, now
+		sched.set(rps)
+	}
 
 	prevTarget := 0
 	for stageIdx, stage := range e.cfg.Stages {
@@ -139,14 +168,15 @@ func (e *RampEngine) runRate(ctx context.Context) metrics.Summary {
 				elapsed := t.Sub(stageStart).Seconds()
 				progress := math.Min(elapsed/stage.Duration.Seconds(), 1.0)
 				currentRPS := float64(prevTarget) + float64(stage.TargetRPS-prevTarget)*progress
-				lim.SetLimit(rate.Limit(currentRPS))
+				apply(currentRPS, t)
 			}
 		}
 
 		stageCancel()
-		lim.SetLimit(rate.Limit(stage.TargetRPS))
+		apply(float64(stage.TargetRPS), time.Now())
 		prevTarget = stage.TargetRPS
 	}
+	apply(0, time.Now())
 
 	dispCancel()
 	<-dispDone
@@ -156,23 +186,58 @@ func (e *RampEngine) runRate(ctx context.Context) metrics.Summary {
 	sum := e.collector.Stop()
 	sum.WallTime = time.Since(start)
 	sum.GeneratorWorkerCapHit = pool.capHit.Load()
+	sum.GeneratorPlannedRequests = int64(math.Round(planned))
+	sum.GeneratorDispatchedRequests = pool.taken.Load()
 	return sum
 }
 
-// dispatch is the single producer for the jobs channel. It paces requests at the
-// limiter's current rate and stamps each with the time it was due to be sent.
-// When all workers are busy and the backlog is full the send blocks — natural
-// open-model backpressure — and the time a timestamp waits before a worker picks
-// it up becomes the coordinated-omission correction applied in the collector.
+// rateSchedule is the dispatcher's current pace: the interval between two
+// intended send times, or 0 while the rate is 0. set wakes a dispatcher idling
+// at rate 0 so a stage's first requests go out when the rate is applied, not up
+// to a whole poll tick later (that tick used to cost ~10% of a short run).
+type rateSchedule struct {
+	intervalNs atomic.Int64
+	wake       chan struct{}
+}
+
+func newRateSchedule() *rateSchedule { return &rateSchedule{wake: make(chan struct{}, 1)} }
+
+func (s *rateSchedule) set(rps float64) {
+	if rps <= 0 {
+		s.intervalNs.Store(0)
+		return
+	}
+	s.intervalNs.Store(int64(float64(time.Second) / rps))
+	select {
+	case s.wake <- struct{}{}:
+	default: // a wake-up is already pending
+	}
+}
+
+func (s *rateSchedule) interval() time.Duration { return time.Duration(s.intervalNs.Load()) }
+
+// dispatch is the single producer for the jobs channel. It runs a fixed
+// cadence: the n-th request is due at start + n·interval, and that intended
+// time is what the worker gets as the sample's ScheduledAt. When the
+// dispatcher wakes late (timer overshoot is tens of µs per sleep) or the send
+// blocked (all workers busy, the backlog full), it dispatches immediately and
+// the schedule does not slip — so the declared rate is delivered, and the
+// lateness lands in the stamp where coordinated-omission correction attributes
+// it, rather than quietly becoming a lower rate. A token bucket with burst=1
+// could not catch up: every overshoot was a lost slice of the rate, 10–25%
+// at a few thousand RPS.
 //
-// It uses Reserve + a capped sleep rather than lim.Wait so it re-reads the rate
-// at least every dispatchReeval: a blocked Wait holds a reservation computed
-// against the old rate and would not observe the ramp's SetLimit changes (and at
-// rate 0 would block forever). When the current rate is ~0 (ramping from/to 0)
-// the reservation delay is effectively infinite, so we cancel and poll instead
-// of dispatching.
-func (e *RampEngine) dispatch(ctx context.Context, lim *rate.Limiter, pool *ratePool) {
-	const dispatchReeval = rampTickInterval
+// The schedule is re-read at least every rampTickInterval so ramps take
+// effect, and restarts from "now" when woken after a stretch at rate 0. A send
+// planned under a slower rate is pulled in to one new interval from now, so a
+// sudden rate increase is not held back by the old, longer gap.
+//
+// Catch-up is unbounded, as in wrk2: after the generator stalls (a GC pause, a
+// blocked send) the overdue requests go out back to back, so the instantaneous
+// rate briefly exceeds the declared one while the average stays on target.
+func (e *RampEngine) dispatch(ctx context.Context, sched *rateSchedule, pool *ratePool) {
+	const reeval = rampTickInterval
+	var next time.Time // zero until the first positive rate
 	for {
 		if ctx.Err() != nil {
 			return
@@ -180,33 +245,45 @@ func (e *RampEngine) dispatch(ctx context.Context, lim *rate.Limiter, pool *rate
 		if e.isCircuitTripped() {
 			return
 		}
-
-		now := time.Now()
-		r := lim.ReserveN(now, 1)
-		delay := r.DelayFrom(now)
-		if !r.OK() || delay > dispatchReeval {
-			// Rate too low to dispatch right now; don't hold a long reservation,
-			// re-evaluate after one tick so rate changes are picked up.
-			r.Cancel()
-			if !sleepCtx(ctx, dispatchReeval) {
+		interval := sched.interval()
+		if interval <= 0 {
+			// Rate 0 (ramping from/to zero): nothing is due; wait to be woken.
+			next = time.Time{}
+			select {
+			case <-sched.wake:
+			case <-ctx.Done():
 				return
 			}
 			continue
 		}
-		if delay > 0 && !sleepCtx(ctx, delay) {
-			r.Cancel()
-			return
+		now := time.Now()
+		if next.IsZero() {
+			next = now
+		} else if next.After(now.Add(interval)) {
+			next = now.Add(interval)
+		}
+		if wait := next.Sub(now); wait > 0 {
+			if wait > reeval {
+				// Low rate: sleep one tick at a time so a rate change is noticed.
+				if !sleepCtx(ctx, reeval) {
+					return
+				}
+				continue
+			}
+			if !sleepCtx(ctx, wait) {
+				return
+			}
 		}
 
-		scheduledAt := now.Add(delay)
 		// Grow the pool to meet demand before handing off; at the cap this is a
 		// no-op and the send blocks, producing the backpressure CO must measure.
 		pool.maybeGrow()
 		select {
-		case pool.jobs <- scheduledAt:
+		case pool.jobs <- next:
 		case <-ctx.Done():
 			return
 		}
+		next = next.Add(interval)
 	}
 }
 
@@ -222,88 +299,97 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 	}
 }
 
-func (e *RampEngine) runRateWorker(ctx context.Context, jobs <-chan time.Time, idle *atomic.Int32) {
+func (e *RampEngine) runRateWorker(ctx context.Context, pool *ratePool) {
 	varCtx := e.newVarContext()
 	stepIdx := 0
+	// grow already counted this worker as idle; it stays idle while it waits
+	// for a job, so the dispatcher knows whether it needs to grow the pool.
 	for {
 		var scheduledAt time.Time
-		// Count this worker as idle while it waits for a job, so the dispatcher
-		// knows whether it needs to grow the pool.
-		idle.Add(1)
 		select {
 		case <-ctx.Done():
-			idle.Add(-1)
+			pool.idle.Add(-1)
 			return
-		case scheduledAt = <-jobs:
+		case scheduledAt = <-pool.jobs:
 		}
-		idle.Add(-1)
+		pool.idle.Add(-1)
 		if e.isCircuitTripped() {
 			return
 		}
+		pool.taken.Add(1)
+		if !e.runRateJob(ctx, varCtx, &stepIdx, scheduledAt) {
+			return
+		}
+		pool.idle.Add(1)
+	}
+}
 
-		step := e.cfg.Steps[stepIdx%len(e.cfg.Steps)]
-		stepIdx++
+// runRateJob runs the next step for one dispatched slot. It returns false when
+// the run is over and the worker should exit.
+func (e *RampEngine) runRateJob(ctx context.Context, varCtx *scenarios.VarContext, stepIdx *int, scheduledAt time.Time) bool {
+	step := e.cfg.Steps[*stepIdx%len(e.cfg.Steps)]
+	*stepIdx++
 
-		if step.If != "" && !scenarios.EvalCondition(step.If, varCtx) {
+	if step.If != "" && !scenarios.EvalCondition(step.If, varCtx) {
+		return true
+	}
+
+	repeat := step.Loop
+	if repeat < 1 {
+		repeat = 1
+	}
+	exec := e.pickExecutor(step)
+
+	e.activeVUs.Add(1)
+	for range repeat {
+		req, err := renderRequest(step, varCtx)
+		if err != nil {
+			e.collector.Add(metrics.Sample{Error: err, At: time.Now(), ScheduledAt: scheduledAt, StepName: step.Name, Group: step.Group})
+			e.incFails()
 			continue
 		}
 
-		repeat := step.Loop
-		if repeat < 1 {
-			repeat = 1
+		result := exec.Execute(ctx, req)
+		if isRunCancelled(ctx, result.Error) {
+			e.activeVUs.Add(-1)
+			return false
 		}
-		exec := e.pickExecutor(step)
 
-		e.activeVUs.Add(1)
-		for r := 0; r < repeat; r++ {
-			req, err := renderRequest(step, varCtx)
-			if err != nil {
-				e.collector.Add(metrics.Sample{Error: err, At: time.Now(), ScheduledAt: scheduledAt, StepName: step.Name, Group: step.Group})
-				e.incFails()
-				continue
-			}
-
-			result := exec.Execute(ctx, req)
-			if isRunCancelled(ctx, result.Error) {
-				e.activeVUs.Add(-1)
-				return
-			}
-
-			if result.Error == nil {
-				applyCaptures(step.Capture, step.CompiledRegexes, result, varCtx)
-				if step.Assertions != nil {
-					if assertErr := scenarios.EvalAssertions(step.Assertions, result); assertErr != nil {
-						result.Error = assertErr
-					}
+		if result.Error == nil {
+			applyCaptures(step.Capture, step.CompiledRegexes, result, varCtx)
+			if step.Assertions != nil {
+				if assertErr := scenarios.EvalAssertions(step.Assertions, result); assertErr != nil {
+					result.Error = assertErr
 				}
 			}
-
-			e.collector.Add(metrics.Sample{
-				Latency:     result.Latency,
-				StatusCode:  result.StatusCode,
-				BytesRead:   result.BytesRead,
-				Error:       result.Error,
-				At:          time.Now(),
-				ScheduledAt: scheduledAt,
-				StepName:    step.Name,
-				Group:       step.Group,
-				TTFT:        result.TTFT,
-			})
-
-			if result.Error != nil {
-				e.incFails()
-			} else if e.cbWindow != nil {
-				e.cbWindow.reset()
-			}
 		}
-		e.activeVUs.Add(-1)
 
-		if step.Pause > 0 {
-			select {
-			case <-time.After(step.Pause):
-			case <-ctx.Done():
-				return
-			}
+		e.collector.Add(metrics.Sample{
+			Latency:     result.Latency,
+			StatusCode:  result.StatusCode,
+			BytesRead:   result.BytesRead,
+			Error:       result.Error,
+			At:          time.Now(),
+			ScheduledAt: scheduledAt,
+			StepName:    step.Name,
+			Group:       step.Group,
+			TTFT:        result.TTFT,
+		})
+
+		if result.Error != nil {
+			e.incFails()
+		} else if e.cbWindow != nil {
+			e.cbWindow.reset()
 		}
 	}
+	e.activeVUs.Add(-1)
+
+	if step.Pause > 0 {
+		select {
+		case <-time.After(step.Pause):
+		case <-ctx.Done():
+			return false
+		}
+	}
+	return true
 }

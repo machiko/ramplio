@@ -19,7 +19,7 @@ import (
 func TestRatePool_MaybeGrowRespectsCapAndIdle(t *testing.T) {
 	spawned := 0
 	p := &ratePool{max: 3}
-	p.spawn = func() { spawned++; p.total.Add(1) }
+	p.start = func() { spawned++ }
 
 	// An idle worker is waiting → no need to grow.
 	p.idle.Store(1)
@@ -28,11 +28,12 @@ func TestRatePool_MaybeGrowRespectsCapAndIdle(t *testing.T) {
 		t.Fatalf("should not grow while a worker is idle, spawned=%d", spawned)
 	}
 
-	// No idle worker, below cap → grow on each call up to the cap.
-	p.idle.Store(0)
-	p.maybeGrow() // total 1
-	p.maybeGrow() // total 2
-	p.maybeGrow() // total 3 == cap
+	// No idle worker, below cap → grow on each call up to the cap (each new
+	// worker is busy by the next call).
+	for range 3 {
+		p.idle.Store(0)
+		p.maybeGrow() // total 1, 2, 3 == cap
+	}
 	if spawned != 3 {
 		t.Fatalf("expected growth up to cap (3), spawned=%d", spawned)
 	}
@@ -41,12 +42,44 @@ func TestRatePool_MaybeGrowRespectsCapAndIdle(t *testing.T) {
 	}
 
 	// At the cap → no more growth, capHit set so the verdict can flag it.
+	p.idle.Store(0)
 	p.maybeGrow()
 	if spawned != 3 {
 		t.Fatalf("must not grow past the cap, spawned=%d", spawned)
 	}
 	if !p.capHit.Load() {
 		t.Fatalf("capHit should be set once at the cap")
+	}
+}
+
+// A catch-up burst sends back to back, faster than a fresh goroutine gets
+// scheduled. The worker grow just added must already count as idle, or every
+// send in the burst spawns another one — up to the ceiling, flagging a cap hit
+// that never was.
+func TestRatePool_BurstDoesNotSpawnPerSend(t *testing.T) {
+	spawned := 0
+	p := &ratePool{max: 100}
+	p.start = func() { spawned++ } // the goroutine has not run yet
+	for range 50 {
+		p.maybeGrow()
+	}
+	if spawned != 1 || p.capHit.Load() {
+		t.Fatalf("spawned=%d capHit=%v, want 1 worker for the burst and no cap hit", spawned, p.capHit.Load())
+	}
+}
+
+// Jobs already waiting in the queue have idle workers spoken for: a send that
+// finds as many queued jobs as idle workers must grow the pool, or a burst
+// queues behind a few workers and that wait is charged to the target.
+func TestRatePool_QueuedJobsClaimIdleWorkers(t *testing.T) {
+	spawned := 0
+	p := &ratePool{jobs: make(chan time.Time, 4), max: 10}
+	p.start = func() { spawned++ }
+	p.idle.Store(1)
+	p.jobs <- time.Now() // the one idle worker will take this one
+	p.maybeGrow()
+	if spawned != 1 {
+		t.Fatalf("spawned=%d, want 1: the idle worker is already claimed by the queued job", spawned)
 	}
 }
 
@@ -64,7 +97,7 @@ func TestRatePool_LowLatencyStaysSmall(t *testing.T) {
 
 	col := metrics.NewCollector(200)
 	eng := NewRamp(RampConfig{
-		Stages:   []scenarios.Stage{{Duration: 1500 * time.Millisecond, TargetRPS: 50}},
+		Stages:   []scenarios.Stage{{Duration: 10 * time.Millisecond, TargetRPS: 50}, {Duration: 1500 * time.Millisecond, TargetRPS: 50}},
 		Steps:    []RampStep{{Request: protocols.Request{Method: http.MethodGet, URL: s.URL}}},
 		Executor: protocols.NewHTTPExecutor(protocols.DefaultHTTPConfig()),
 	}, col)
@@ -75,8 +108,10 @@ func TestRatePool_LowLatencyStaysSmall(t *testing.T) {
 		t.Error("a low-latency target should not hit the worker cap")
 	}
 	peak := eng.ratePeakWorkers.Load()
-	if peak > 50 {
-		t.Errorf("peak workers = %d, expected grow-on-demand to stay well below the old eager 250", peak)
+	// ~75 requests go out; a worker that never returns to idle after its first
+	// job would force one spawn per request.
+	if peak > 25 {
+		t.Errorf("peak workers = %d for %d requests, expected grow-on-demand to reuse idle workers (old eager pre-spawn: 250)", peak, sum.Total)
 	}
 	if peak < rateMinWorkers {
 		t.Errorf("peak workers = %d, expected at least the minimum pool (%d)", peak, rateMinWorkers)
@@ -135,5 +170,11 @@ func TestRateMode_CircuitBreakerStopsDispatch(t *testing.T) {
 	}
 	if sum.Errors < threshold {
 		t.Errorf("errors = %d, want >= threshold %d", sum.Errors, threshold)
+	}
+	// Stopping at the trip is deliberate, not the generator falling behind: the
+	// schedule must stop counting too, or the report would add a shortfall.
+	if float64(sum.GeneratorDispatchedRequests) < 0.95*float64(sum.GeneratorPlannedRequests) {
+		t.Errorf("planned=%d dispatched=%d: the schedule kept counting after the trip",
+			sum.GeneratorPlannedRequests, sum.GeneratorDispatchedRequests)
 	}
 }
