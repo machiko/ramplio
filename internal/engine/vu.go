@@ -155,6 +155,9 @@ func (e *RampEngine) runVU(ctx context.Context) {
 					return
 				default:
 				}
+				if r > 0 && e.isCircuitTripped() {
+					return // a trip inside a loop stops the remaining repeats
+				}
 
 				req, err := renderRequest(step, varCtx)
 				if err != nil {
@@ -190,8 +193,8 @@ func (e *RampEngine) runVU(ctx context.Context) {
 
 				if result.Error != nil {
 					e.incFails()
-				} else if e.cbWindow != nil {
-					e.cbWindow.reset()
+				} else {
+					e.recordSuccess()
 				}
 
 				if step.Pause > 0 {

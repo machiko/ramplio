@@ -577,6 +577,41 @@ func TestRun_CircuitBreakerStopsTraffic(t *testing.T) {
 	assert.Equal(t, int64(threshold), sum.Errors)
 }
 
+// A `loop:` step repeats inside one iteration; the trip must stop it there
+// rather than let the VU (or rate worker) finish the remaining repeats against
+// a target that is already failing.
+func TestRun_CircuitBreakerStopsInsideLoop(t *testing.T) {
+	const threshold, repeats = 5, 50
+	modes := map[string][]scenarios.Stage{
+		"vu":   holdStages(1, 30*time.Second),
+		"rate": {{Duration: 10 * time.Millisecond, TargetRPS: 1}, {Duration: 30 * time.Second, TargetRPS: 1}},
+	}
+	for name, stages := range modes {
+		t.Run(name, func(t *testing.T) {
+			var hits atomic.Int64
+			srv := failingServer(t, &hits)
+			step := mustBe200(srv.URL)
+			step.Loop = repeats
+			eng := engine.NewRamp(engine.RampConfig{
+				Stages:         stages,
+				Steps:          []engine.RampStep{step},
+				CircuitBreaker: &scenarios.CircuitBreakerConfig{ConsecutiveFailures: threshold, WindowSeconds: 10},
+				Executor:       httpExec(),
+			}, testCollector(t, 10))
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			done := make(chan struct{})
+			go func() { eng.Run(ctx); close(done) }()
+			assert.Eventually(t, func() bool { return hits.Load() >= threshold }, 3*time.Second, 5*time.Millisecond)
+			time.Sleep(100 * time.Millisecond) // room for repeats a missing check would send
+			cancel()
+			<-done
+			assert.Equal(t, int64(threshold), hits.Load(), "repeats after the trip must not be sent")
+		})
+	}
+}
+
 func TestRun_CircuitBreakerSuccessResetsWindow(t *testing.T) {
 	var n atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

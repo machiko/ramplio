@@ -341,7 +341,13 @@ func (e *RampEngine) runRateJob(ctx context.Context, varCtx *scenarios.VarContex
 	exec := e.pickExecutor(step)
 
 	e.activeVUs.Add(1)
-	for range repeat {
+	for r := range repeat {
+		if r > 0 && e.isCircuitTripped() {
+			// A trip inside a loop stops the remaining repeats; the worker exits
+			// rather than sleep out the step's pause.
+			e.activeVUs.Add(-1)
+			return false
+		}
 		req, err := renderRequest(step, varCtx)
 		if err != nil {
 			e.collector.Add(metrics.Sample{Error: err, At: time.Now(), ScheduledAt: scheduledAt, StepName: step.Name, Group: step.Group})
@@ -378,8 +384,8 @@ func (e *RampEngine) runRateJob(ctx context.Context, varCtx *scenarios.VarContex
 
 		if result.Error != nil {
 			e.incFails()
-		} else if e.cbWindow != nil {
-			e.cbWindow.reset()
+		} else {
+			e.recordSuccess()
 		}
 	}
 	e.activeVUs.Add(-1)

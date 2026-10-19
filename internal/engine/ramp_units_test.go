@@ -81,6 +81,61 @@ func TestFailWindow_ResetClearsCountedFailures(t *testing.T) {
 	assert.True(t, w.record(t0.Add(4*time.Millisecond)))
 }
 
+// A success on a window with no failures — every request of a healthy run —
+// must not take the breaker lock: all VUs share it, so a locked reset
+// serialises the whole run on it.
+func TestFailWindow_ResetOnCleanWindowIsLockFree(t *testing.T) {
+	w := newFailWindow(3, time.Second)
+	w.record(time.Unix(1000, 0))
+	w.reset() // clears the one failure; the window is clean again
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	done := make(chan struct{})
+	go func() {
+		w.reset()
+		w.reset()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("reset on a clean window blocked on the breaker lock")
+	}
+}
+
+// The lock-free reset leans on "the ring holds a failure ⇒ dirty". Hammer
+// record and reset from many goroutines: once quiet, a clean flag must mean an
+// empty ring (otherwise a hidden failure would survive every later success and
+// the breaker would count non-consecutive failures).
+func TestFailWindow_ConcurrentRecordResetKeepsDirtyHonest(t *testing.T) {
+	w := newFailWindow(1000, time.Minute) // never trips: resets interleave
+	var wg sync.WaitGroup
+	for g := range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range 3000 {
+				if (i+g)%3 == 0 {
+					w.record(time.Now())
+				} else {
+					w.reset()
+				}
+			}
+		}()
+	}
+	wg.Wait()
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	require.False(t, w.tripped.Load())
+	if !w.dirty.Load() {
+		for i, ts := range w.times {
+			assert.True(t, ts.IsZero(), "slot %d holds a failure the clean flag hides", i)
+		}
+	}
+}
+
 // Once tripped the breaker latches: a later success or a quiet period does not
 // re-arm it, because the run is being stopped.
 func TestFailWindow_TripLatches(t *testing.T) {

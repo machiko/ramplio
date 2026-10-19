@@ -93,13 +93,7 @@ func NewRamp(cfg RampConfig, collector *metrics.Collector) *RampEngine {
 	if len(cfg.DataRows) > 0 {
 		e.data = newDataSource(cfg.DataRows, cfg.DataMode)
 	}
-	if cb := cfg.CircuitBreaker; cb != nil && cb.ConsecutiveFailures > 0 {
-		windowDur := time.Duration(cb.WindowSeconds) * time.Second
-		if windowDur <= 0 {
-			windowDur = time.Second
-		}
-		e.cbWindow = newFailWindow(cb.ConsecutiveFailures, windowDur)
-	}
+	e.cbWindow = newBreakerWindow(cfg.CircuitBreaker)
 	return e
 }
 

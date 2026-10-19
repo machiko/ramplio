@@ -7,6 +7,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/machiko/ramplio/v3/internal/scenarios"
 )
 
 // failWindow implements a sliding-time-window failure counter for the circuit breaker.
@@ -21,6 +23,24 @@ type failWindow struct {
 	// tripped is atomic because every VU and the rate dispatcher poll it
 	// lock-free (isCircuitTripped) while record sets it under mu.
 	tripped atomic.Bool
+	// dirty is set (under mu) while the ring holds a failure recorded since
+	// the last reset. A success on a clean window — every request of a healthy
+	// run — then returns on one atomic load, instead of serialising all VUs on
+	// mu to zero a ring that is already empty.
+	dirty atomic.Bool
+}
+
+// newBreakerWindow builds the circuit breaker's window from the scenario
+// config, or returns nil when the breaker is disabled.
+func newBreakerWindow(cb *scenarios.CircuitBreakerConfig) *failWindow {
+	if cb == nil || cb.ConsecutiveFailures <= 0 {
+		return nil
+	}
+	windowDur := time.Duration(cb.WindowSeconds) * time.Second
+	if windowDur <= 0 {
+		windowDur = time.Second
+	}
+	return newFailWindow(cb.ConsecutiveFailures, windowDur)
 }
 
 func newFailWindow(threshold int, windowDur time.Duration) *failWindow {
@@ -40,6 +60,7 @@ func (w *failWindow) record(t time.Time) bool {
 	}
 	w.times[w.head] = t
 	w.head = (w.head + 1) % w.threshold
+	w.dirty.Store(true)
 	cutoff := t.Add(-w.window)
 	count := 0
 	for _, ts := range w.times {
@@ -55,11 +76,19 @@ func (w *failWindow) record(t time.Time) bool {
 }
 
 // reset clears the window (called on successful request).
+//
+// Skipping the lock on a clean window is safe because record and the slow
+// path below maintain, under mu, the invariant "the ring holds a failure ⇒
+// dirty is true": a reset that loads false therefore saw an empty ring. The
+// only record it can miss is one running concurrently, and ordering the reset
+// before that record is a valid outcome of the race either way.
 func (w *failWindow) reset() {
-	w.mu.Lock()
-	for i := range w.times {
-		w.times[i] = time.Time{}
+	if !w.dirty.Load() {
+		return
 	}
+	w.mu.Lock()
+	clear(w.times)
+	w.dirty.Store(false)
 	w.mu.Unlock()
 }
 
@@ -71,5 +100,13 @@ func (e *RampEngine) isCircuitTripped() bool {
 func (e *RampEngine) incFails() {
 	if e.cbWindow != nil {
 		e.cbWindow.record(time.Now())
+	}
+}
+
+// recordSuccess tells the breaker a request succeeded, wiping the failures
+// counted so far: the breaker counts consecutive failures.
+func (e *RampEngine) recordSuccess() {
+	if e.cbWindow != nil {
+		e.cbWindow.reset()
 	}
 }
