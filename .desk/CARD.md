@@ -3,7 +3,7 @@
 - 分支：`feat/auto-history`（worktree：`/Users/reyes/Workspace/ramplio-worktrees/auto-history`）
 - 基準：`main` @ 9a61b13
 - 規模：一般
-- 狀態：第 5 段第 1 輪完成，待複審（2026-11-25）
+- 狀態：第 5 段第 2 輪完成，待複審（2026-11-25）
 
 ## 規格
 
@@ -150,6 +150,12 @@
 - 2026-11-25（第 5 段第 1 輪）：L8：`report` 設 `SilenceUsage`。沒有像 `compare` 一樣設 `SilenceErrors`，所以錯誤訊息仍會印兩次，那是卡 1 記下的另開卡問題，這裡不處理。
 - 2026-11-25（第 5 段第 1 輪）：L4、L7 不改程式，寫進 README 與 getting-started。L4：壞檔或較新 schema 的紀錄檔會被略過並警告，但不會被自動刪除；檔名排在最新的壞檔需要手動刪。L7：情境檔模式只看檔案路徑，改了內容但路徑不變，仍會跟上一次比較。
 - 2026-11-25（第 5 段第 1 輪）：internal/history 新增的幾條 LOW 測試，紅燈原因是「新 API 不存在」（`removeOldest`、`nowFunc`、`WroteGitignore`、`List` 三個回傳值），沒有先看到行為上的紅。cmd 層的 L5、L6、L8 則是先只改成新簽名、行為不變，實際看到預期的紅（警告 2 行、「已建立」字樣、印出 Usage）之後才修。
+- 2026-11-25（第 5 段第 2 輪，M-2 退化修正）：第 1 輪 L6 的「沒有 .gitignore 就寫 `*`」，在 `RAMPLIO_HISTORY_DIR` 指到專案根目錄、`$HOME` 或共用目錄時，會讓整個目錄不被 git 追蹤。現在只在這兩種情況寫：(1) 這次才建立紀錄目錄；(2) 目錄裡除了 `runs/`（和 `.gitignore` 本身）沒有別的東西，使用者自己先 `mkdir` 的空目錄也算。其他情況不寫，`SaveResult.NeedsIgnoreHint` 只在「這次才建立 `runs/`」那一次為 true，cmd 層印一行提示請使用者自己把 `<目錄>/runs` 加進 .gitignore。目錄讀取失敗一律視為「有別的東西」（寧可不寫）。掃描目錄每次只讀 16 筆，碰到第一個不相干的項目就停，不會把 `$HOME` 整個列出來。`TestHistoryGitignoreWrittenWhenOnlyRunsExists` 修正前就是綠的，留著當守門。
+- 2026-11-25（第 5 段第 2 輪，M-1，只改文件）：target key 的請求雜湊是沒加鹽的 sha256 前 8 碼，**雜湊不等於加密**，低熵的 header／body（短 token、PIN）可以離線窮舉還原。README 與 getting-started 已註明「不要把 `.ramplio/` 紀錄或 baseline 檔貼到公開地方」。
+- 2026-11-25（第 5 段第 2 輪，L-1）：指紋先依「名稱轉小寫」排序，再依原始名稱、值排序，同名不同大小寫的 header 同時出現時也是同一個順序。照字面「先依原始名稱排序」的話，大小寫混用時會打破第 1 輪的「名稱大小寫不影響」（`X-B` 排在 `x-a` 前面），所以先比小寫。寫進雜湊的仍是小寫名稱＋值，兩個都保留，不合併。
+- 2026-11-25（第 5 段第 2 輪，L-2）：`nextStamp` 改成掃過所有檔名，取最大的可解析時間戳，排在最後的外來檔（如 `zzz.json`）不會讓時鐘倒退保護失效。
+- 2026-11-25（第 5 段第 2 輪，L-3，不改程式）：行程在 O_EXCL 佔位之後、rename 之前被砍掉，會留下 0 byte 的佔位檔或 `*.json.tmp`。0 byte 檔 `List` 會靜默略過，但它算在保留筆數裡，會照輪替被刪；`*.json.tmp` 不符合 `*.json` 不會被讀，也不會被輪替，需要手動清。
+- 2026-11-25（第 5 段第 2 輪，L-4，不改程式）：只有 baseline 欄位、沒有 `target_key` 的檔（例如手動把 `--save-baseline` 的檔放進 `runs/`）照樣會被讀進來，但空的 key 永遠不會被當成同目標，不會被自動比較；`compare` 零參數時如果它是最近一筆，會回「沒有同目標的前一筆」。
 
 ## History
 
@@ -192,6 +198,24 @@
     ok  	github.com/machiko/ramplio/v3/internal/history	5.839s
     ok  	github.com/machiko/ramplio/v3/internal/scenarios	3.463s
     （其餘 11 個套件同為 ok，共 16 個套件）
+    ```
+  - `go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest run`：`0 issues.`，exit 0
+  - `go build ./...`：exit 0，無輸出
+  - repo 內沒有殘留 `.ramplio/`
+- 2026-11-25：第 5 段第 2 輪（最後一輪）修正完成。commit：9369fe9 M-2 .gitignore 退化修正＋L-1 指紋固定＋L-2 時間戳掃全部檔名、cc8efc1 文件（M-1 雜湊不等於加密、非空目錄不寫 .gitignore）、本筆（CARD：M-1、L-3、L-4 等 Decisions）。
+- 2026-11-25：第 5 段第 2 輪測試輸出（實際結尾）：
+  - 完成檢查 `go test ./internal/history/... ./cmd/ramplio/... -run 'History|ZeroArg|OneArg|SaveBaselineMasks' -count=1`（篩選字串不變；`-v` 數到 74 個 PASS，含子測試）：
+    ```
+    ok  	github.com/machiko/ramplio/v3/internal/history	0.319s
+    ok  	github.com/machiko/ramplio/v3/cmd/ramplio	26.536s
+    ```
+  - `go test -race -count=1 ./...`（exit 0）：
+    ```
+    ok  	github.com/machiko/ramplio/v3/cmd/ramplio	78.353s
+    ok  	github.com/machiko/ramplio/v3/internal/engine	101.277s
+    ok  	github.com/machiko/ramplio/v3/internal/history	4.331s
+    ok  	github.com/machiko/ramplio/v3/internal/scenarios	1.937s
+    （其餘 12 個套件同為 ok，共 16 個套件）
     ```
   - `go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest run`：`0 issues.`，exit 0
   - `go build ./...`：exit 0，無輸出
