@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/url"
 	"strings"
 	"time"
 
@@ -63,7 +64,7 @@ func runPreflight(ctx context.Context, w io.Writer, cfg protocols.HTTPConfig, re
 	pctx, cancel := context.WithTimeout(ctx, preflightTimeout)
 	defer cancel()
 
-	probeURL := req.URL
+	probeURL := maskURLForDisplay(req.URL) // display only; req is sent unmodified
 	res, trace := exec.ExecuteTraced(pctx, req)
 	kind := metrics.ClassifyError(res.Error, res.StatusCode)
 
@@ -111,4 +112,60 @@ func fmtMs(d time.Duration) string {
 		return "—"
 	}
 	return fmt.Sprintf("%dms", d.Milliseconds())
+}
+
+// sensitiveQueryKeys are query parameters whose values are masked on screen
+// (compared case-insensitively).
+var sensitiveQueryKeys = map[string]bool{
+	"token": true, "key": true, "api_key": true, "apikey": true,
+	"access_token": true, "sig": true, "signature": true, "password": true,
+}
+
+const maskedValue = "***"
+
+// maskURLForDisplay hides credentials in a URL before it is printed: the
+// userinfo password (or the whole userinfo when there is no password) and the
+// values of well-known secret query parameters. The request itself is
+// unchanged; this is for terminal output only.
+func maskURLForDisplay(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "（無法解析的網址）"
+	}
+	userinfo := ""
+	if u.User != nil {
+		if _, hasPassword := u.User.Password(); hasPassword {
+			userinfo = u.User.Username() + ":" + maskedValue + "@"
+		} else {
+			userinfo = maskedValue + "@"
+		}
+		u.User = nil
+	}
+	u.RawQuery = maskQuery(u.RawQuery)
+	out := u.String()
+	if userinfo != "" {
+		out = strings.Replace(out, "//", "//"+userinfo, 1)
+	}
+	return out
+}
+
+func maskQuery(rawQuery string) string {
+	if rawQuery == "" {
+		return ""
+	}
+	parts := strings.Split(rawQuery, "&")
+	masked := make([]string, len(parts))
+	for i, part := range parts {
+		k, _, hasValue := strings.Cut(part, "=")
+		name, err := url.QueryUnescape(k)
+		if err != nil {
+			name = k
+		}
+		if hasValue && sensitiveQueryKeys[strings.ToLower(name)] {
+			masked[i] = k + "=" + maskedValue
+			continue
+		}
+		masked[i] = part
+	}
+	return strings.Join(masked, "&")
 }

@@ -35,6 +35,17 @@ type discoverOptions struct {
 	// FromCurl switches the --allow-write hint to the stdin form so the curl
 	// (and any token in it) is never echoed back to the terminal.
 	FromCurl bool
+	// Uncertain means the curl had parts we could not reproduce; the request
+	// is gated like a write (fail closed) until --allow-write is given.
+	Uncertain bool
+}
+
+// resolvedTarget is the request discover will send plus what the curl parser
+// had to say about it.
+type resolvedTarget struct {
+	Request   protocols.Request
+	Warnings  []string
+	Uncertain bool
 }
 
 const (
@@ -78,7 +89,7 @@ POST／PUT／PATCH／DELETE 等會改資料的方法，預設只送一發預檢�
 			if err != nil {
 				return fmt.Errorf("invalid --probe-duration %q: %w", probeDuration, err)
 			}
-			req, warnings, err := resolveDiscoverRequest(cmd, url, curlCmd, method, body, headerFlags)
+			target, err := resolveDiscoverRequest(cmd, url, curlCmd, method, body, headerFlags)
 			if err != nil {
 				return err
 			}
@@ -87,9 +98,10 @@ POST／PUT／PATCH／DELETE 等會改資料的方法，預設只送一發預檢�
 			defer stop()
 
 			w := cmd.OutOrStdout()
-			printCurlWarnings(w, warnings)
+			printCurlWarnings(w, target.Warnings)
 			return runDiscover(ctx, w, cmd.ErrOrStderr(), discoverOptions{
-				Request:       req,
+				Request:       target.Request,
+				Uncertain:     target.Uncertain,
 				Tolerance:     tol,
 				MaxRPS:        maxRPS,
 				ProbeDuration: pd,
@@ -116,31 +128,29 @@ POST／PUT／PATCH／DELETE 等會改資料的方法，預設只送一發預檢�
 
 // resolveDiscoverRequest builds the request from --url or --curl, then lets
 // explicitly given -H/--method/--body override what the curl said.
-func resolveDiscoverRequest(cmd *cobra.Command, url, curlCmd, method, body string, headerFlags []string) (protocols.Request, []string, error) {
+func resolveDiscoverRequest(cmd *cobra.Command, url, curlCmd, method, body string, headerFlags []string) (resolvedTarget, error) {
 	if (url == "") == (curlCmd == "") {
-		return protocols.Request{}, nil, errors.New("--url 與 --curl 二擇一，必須剛好給一個")
+		return resolvedTarget{}, errors.New("--url 與 --curl 二擇一，必須剛好給一個")
 	}
 	explicit, err := parseHeaderFlags(headerFlags)
 	if err != nil {
-		return protocols.Request{}, nil, err
+		return resolvedTarget{}, err
 	}
 
-	base := protocols.Request{URL: url}
-	var warnings []string
+	base := resolvedTarget{Request: protocols.Request{URL: url}}
 	if curlCmd != "" {
-		parsed, err := readCurlArg(cmd.InOrStdin(), curlCmd)
-		if err != nil {
-			return protocols.Request{}, nil, err
+		parsed, perr := readCurlArg(cmd.InOrStdin(), curlCmd)
+		if perr != nil {
+			return resolvedTarget{}, perr
 		}
-		base = protocols.Request{Method: parsed.Method, URL: parsed.URL, Headers: parsed.HeadersCopy(), Body: parsed.Body}
-		warnings = parsed.Warnings
+		base = targetFromCurl(parsed)
 	}
 
 	req := protocols.Request{
-		Method:  base.Method,
-		URL:     base.URL,
-		Headers: mergeHeaders(base.Headers, explicit),
-		Body:    base.Body,
+		Method:  base.Request.Method,
+		URL:     base.Request.URL,
+		Headers: curlparse.MergeHeaders(base.Request.Headers, explicit),
+		Body:    base.Request.Body,
 	}
 	if cmd.Flags().Changed("body") {
 		req.Body = []byte(body)
@@ -153,18 +163,26 @@ func resolveDiscoverRequest(cmd *cobra.Command, url, curlCmd, method, body strin
 	case req.Method == "":
 		req.Method = "GET"
 	}
-	return req, warnings, nil
+	return resolvedTarget{Request: req, Warnings: base.Warnings, Uncertain: base.Uncertain}, nil
+}
+
+func targetFromCurl(parsed curlparse.Request) resolvedTarget {
+	return resolvedTarget{
+		Request:   protocols.Request{Method: parsed.Method, URL: parsed.URL, Headers: parsed.HeadersCopy(), Body: parsed.Body},
+		Warnings:  parsed.Warnings,
+		Uncertain: parsed.Uncertain,
+	}
 }
 
 // readCurlArg parses the --curl value, reading it from stdin when it is "-".
 func readCurlArg(stdin io.Reader, value string) (curlparse.Request, error) {
 	text := value
 	if value == "-" {
-		b, err := io.ReadAll(io.LimitReader(stdin, maxCurlInputBytes))
+		in, err := readLimitedInput(stdin)
 		if err != nil {
-			return curlparse.Request{}, fmt.Errorf("從 stdin 讀取 curl 失敗：%w", err)
+			return curlparse.Request{}, err
 		}
-		text = string(b)
+		text = in
 	}
 	parsed, err := curlparse.Parse(strings.TrimSpace(text))
 	if err != nil {
@@ -176,37 +194,30 @@ func readCurlArg(stdin io.Reader, value string) (curlparse.Request, error) {
 // maxCurlInputBytes caps stdin so a mistaken pipe can't eat unbounded memory.
 const maxCurlInputBytes = 1 << 20
 
+// readLimitedInput reads stdin up to maxCurlInputBytes. Larger input is an
+// explicit error: silently truncating a curl could drop headers or flags.
+func readLimitedInput(r io.Reader) (string, error) {
+	b, err := io.ReadAll(io.LimitReader(r, maxCurlInputBytes+1))
+	if err != nil {
+		return "", fmt.Errorf("從 stdin 讀取失敗：%w", err)
+	}
+	if len(b) > maxCurlInputBytes {
+		return "", fmt.Errorf("輸入超過 1MiB（上限 %d bytes）：請確認貼上的是單一則 curl", maxCurlInputBytes)
+	}
+	return string(b), nil
+}
+
 func parseHeaderFlags(values []string) (map[string]string, error) {
 	out := make(map[string]string, len(values))
-	for _, v := range values {
+	for i, v := range values {
 		name, val, ok := strings.Cut(v, ":")
 		if !ok || strings.TrimSpace(name) == "" {
-			return nil, fmt.Errorf("-H %q 格式不對，應為 \"名稱: 值\"", v)
+			// Never echo the value: a malformed header is often a token.
+			return nil, fmt.Errorf("第 %d 個 -H 格式不對，應為 \"名稱: 值\"", i+1)
 		}
 		out[strings.TrimSpace(name)] = strings.TrimSpace(val)
 	}
 	return out, nil
-}
-
-// mergeHeaders returns a new map: base overlaid by override, matching names
-// case-insensitively (HTTP header names are case-insensitive).
-func mergeHeaders(base, override map[string]string) map[string]string {
-	if len(base) == 0 && len(override) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(base)+len(override))
-	for k, v := range base {
-		out[k] = v
-	}
-	for k, v := range override {
-		for existing := range out {
-			if strings.EqualFold(existing, k) {
-				delete(out, existing)
-			}
-		}
-		out[k] = v
-	}
-	return out
 }
 
 // isSafeMethod reports whether a method is read-only by HTTP semantics and can
@@ -241,7 +252,7 @@ func printCurlWarnings(w io.Writer, warnings []string) {
 // errWriteNotAllowed after exactly one preflight request.
 func runDiscover(ctx context.Context, w, errW io.Writer, opts discoverOptions) error {
 	req := opts.Request
-	fmt.Fprintf(w, "  目標：    %s %s\n", req.Method, req.URL)
+	fmt.Fprintf(w, "  目標：    %s %s\n", req.Method, maskURLForDisplay(req.URL))
 	if len(req.Headers) > 0 {
 		fmt.Fprintf(w, "  Header：  %s\n", maskedHeaders(req.Headers))
 	}
@@ -249,7 +260,7 @@ func runDiscover(ctx context.Context, w, errW io.Writer, opts discoverOptions) e
 		fmt.Fprintf(w, "  Body：    %d bytes\n", len(req.Body))
 	}
 
-	if !isSafeMethod(req.Method) && !opts.AllowWrite {
+	if (!isSafeMethod(req.Method) || opts.Uncertain) && !opts.AllowWrite {
 		return blockWrite(ctx, w, opts)
 	}
 
@@ -288,10 +299,18 @@ func runDiscover(ctx context.Context, w, errW io.Writer, opts discoverOptions) e
 // blockWrite sends the single preflight (with the real headers and body, so
 // the user sees a meaningful status) and explains how to opt in.
 func blockWrite(ctx context.Context, w io.Writer, opts discoverOptions) error {
-	fmt.Fprintf(w, "\n  ⚠ %s 可能會改動資料，預設只送一發預檢、不做壓測。\n", opts.Request.Method)
+	method := opts.Request.Method
+	fmt.Fprintln(w)
+	if !isSafeMethod(method) {
+		fmt.Fprintf(w, "  ⚠ %s 可能會改動資料，預設不做壓測。\n", method)
+	}
+	if opts.Uncertain {
+		fmt.Fprintln(w, "  ⚠ 這段 curl 有無法完整解讀的部分（見上方警告），送出的請求可能與原指令不同、甚至會改動資料，預設不做壓測。")
+	}
 	if err := runPreflight(ctx, w, protocols.DefaultHTTPConfig(), opts.Request); err != nil {
 		return err
 	}
+	fmt.Fprintf(w, "\n  已送出 1 發真實 %s 預檢（伺服器已實際處理這一發，若是寫入就已經寫入一次）。\n", method)
 	step := nextStep{"在原本的指令後面加上", "--allow-write"}
 	if opts.FromCurl {
 		step = nextStep{"把 curl 留在剪貼簿，執行", "pbpaste | ramplio discover --curl - --allow-write"}

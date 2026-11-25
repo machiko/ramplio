@@ -231,3 +231,26 @@ func TestDiscoverRejectsMalformedHeaderFlag(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "-H")
 }
+
+// H1（discover 層）：無法完整解讀的 curl 視同寫入，沒加 --allow-write 只發 1 發。
+func TestDiscoverCurlUncertainRequiresAllowWrite(t *testing.T) {
+	srv := newRecordingServer(t, "", "")
+
+	out, err := execDiscover(t, "", "--curl", "curl --http3 "+srv.URL, "--probe-duration", "1s", "--max-rps", "5")
+
+	require.Error(t, err)
+	assert.Equal(t, int64(1), srv.total.Load(), "只能送出 1 發預檢")
+	assert.Contains(t, out, "無法完整解讀")
+	assert.Contains(t, out, "已送出 1 發真實 GET 預檢")
+	assert.NotContains(t, out, "容量報告")
+}
+
+// M3（discover 層）。
+func TestDiscoverCurlStdinOverLimitFails(t *testing.T) {
+	huge := "curl http://127.0.0.1:1/ -d " + strings.Repeat("a", maxCurlInputBytes)
+
+	_, err := execDiscover(t, huge, "--curl", "-")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "輸入超過 1MiB")
+}

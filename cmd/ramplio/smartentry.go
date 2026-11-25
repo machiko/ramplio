@@ -85,7 +85,7 @@ func runSmartEntry(ctx context.Context, root *cobra.Command, args []string, env 
 
 	switch classifyTarget(target) {
 	case targetURL:
-		return smartDiscover(ctx, env, protocols.Request{Method: "GET", URL: target}, nil, false)
+		return smartDiscover(ctx, env, resolvedTarget{Request: protocols.Request{Method: "GET", URL: target}}, false)
 	case targetCurl:
 		return smartCurl(ctx, env, target)
 	case targetStdin:
@@ -119,22 +119,21 @@ func smartCurl(ctx context.Context, env smartEntryEnv, curl string) error {
 	if err != nil {
 		return err
 	}
-	req := protocols.Request{Method: parsed.Method, URL: parsed.URL, Headers: parsed.HeadersCopy(), Body: parsed.Body}
-	return smartDiscover(ctx, env, req, parsed.Warnings, true)
+	return smartDiscover(ctx, env, targetFromCurl(parsed), true)
 }
 
 // smartStdin handles `pbpaste | ramplio -`: the input may be a curl or a URL.
 func smartStdin(ctx context.Context, env smartEntryEnv) error {
-	b, err := io.ReadAll(io.LimitReader(env.In, maxCurlInputBytes))
+	in, err := readLimitedInput(env.In)
 	if err != nil {
-		return fmt.Errorf("從 stdin 讀取失敗：%w", err)
+		return err
 	}
-	text := strings.TrimSpace(string(b))
+	text := strings.TrimSpace(in)
 	switch classifyTarget(text) {
 	case targetCurl:
 		return smartCurl(ctx, env, text)
 	case targetURL:
-		return smartDiscover(ctx, env, protocols.Request{Method: "GET", URL: text}, nil, false)
+		return smartDiscover(ctx, env, resolvedTarget{Request: protocols.Request{Method: "GET", URL: text}}, false)
 	}
 	if text == "" {
 		return errors.New("stdin 是空的：請先在瀏覽器 DevTools 對請求按「Copy as cURL」再執行 pbpaste | ramplio -")
@@ -144,10 +143,11 @@ func smartStdin(ctx context.Context, env smartEntryEnv) error {
 
 // smartDiscover runs the shared discover path. A write method stops after one
 // preflight; that is guidance, not failure, so the smart entry exits 0.
-func smartDiscover(ctx context.Context, env smartEntryEnv, req protocols.Request, warnings []string, fromCurl bool) error {
-	printCurlWarnings(env.Out, warnings)
+func smartDiscover(ctx context.Context, env smartEntryEnv, target resolvedTarget, fromCurl bool) error {
+	printCurlWarnings(env.Out, target.Warnings)
 	err := runDiscover(ctx, env.Out, env.Err, discoverOptions{
-		Request:       req,
+		Request:       target.Request,
+		Uncertain:     target.Uncertain,
 		Tolerance:     env.Tuning.Tolerance,
 		MaxRPS:        env.Tuning.MaxRPS,
 		ProbeDuration: env.Tuning.ProbeDuration,
@@ -162,11 +162,11 @@ func smartDiscover(ctx context.Context, env smartEntryEnv, req protocols.Request
 // unknownTarget refuses to run and points the user somewhere useful: a
 // close-matching subcommand, a missing scheme, and the welcome screen.
 func unknownTarget(root *cobra.Command, w io.Writer, target string) error {
-	msg := fmt.Sprintf("看不懂「%s」：它不是網址（http:// 或 https:// 開頭）、curl 指令，也不是情境檔", target)
+	msg := fmt.Sprintf("看不懂「%s」：它不是網址（http:// 或 https:// 開頭）、curl 指令，也不是情境檔", echoSafely(target))
 	if suggestions := root.SuggestionsFor(target); len(suggestions) > 0 {
 		msg += fmt.Sprintf("。你是不是要 %s？", strings.Join(suggestions, " 或 "))
 	} else if looksLikeHost(target) {
-		msg += fmt.Sprintf("。要測這個網址的話請加上 https://：ramplio https://%s", target)
+		msg += fmt.Sprintf("。要測這個網址的話請加上 https://：ramplio %s", maskURLForDisplay("https://"+target))
 	}
 	printWelcome(w)
 	return errors.New(msg)
@@ -176,4 +176,19 @@ func unknownTarget(root *cobra.Command, w io.Writer, target string) error {
 func looksLikeHost(s string) bool {
 	host, _, _ := strings.Cut(s, "/")
 	return strings.Contains(host, ".") && !strings.ContainsAny(s, " \t")
+}
+
+// echoSafely shortens an unrecognised argument for the error message: only its
+// first word, with URL secrets masked, so a pasted command (e.g. a wget with a
+// token) is never echoed back in full.
+func echoSafely(arg string) string {
+	fields := strings.Fields(arg)
+	if len(fields) == 0 {
+		return ""
+	}
+	shown := maskURLForDisplay(fields[0])
+	if len(fields) > 1 {
+		shown += " …"
+	}
+	return shown
 }

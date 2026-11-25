@@ -108,6 +108,7 @@ func TestRootWriteMethodOnlyPreflights(t *testing.T) {
 	require.NoError(t, err, "單一入口擋下寫入是正常引導，exit 0")
 	assert.Len(t, srv.requests(), 1, "server 只能收到 1 個請求")
 	assert.Contains(t, out, "--allow-write")
+	assert.Contains(t, out, "已送出 1 發真實 POST 預檢", "M2：要明說那 1 發是真的寫入")
 	assert.NotContains(t, out, "容量報告")
 }
 
@@ -256,4 +257,156 @@ func TestClassifyTarget(t *testing.T) {
 			assert.Equal(t, tt.want, classifyTarget(tt.arg))
 		})
 	}
+}
+
+// H1：各種寫入型寫法與無法解讀的旗標，都只能送 1 發預檢就擋下。
+func TestRootWriteBypassVariantsOnlyPreflight(t *testing.T) {
+	tests := []struct {
+		name, flags, wantInOut string
+	}{
+		{"-F 表單", "-F a=b", "已送出 1 發真實 POST 預檢"},
+		{"-T 上傳", "-T file.bin", "已送出 1 發真實 PUT 預檢"},
+		{"--json", `--json '{}'`, "已送出 1 發真實 POST 預檢"},
+		{"--data-urlencode", "--data-urlencode a=b", "已送出 1 發真實 POST 預檢"},
+		{"短旗標叢集 -sXPOST", "-sXPOST", "已送出 1 發真實 POST 預檢"},
+		{"不認識的旗標（GET 但無法完整解讀）", "--http3", "無法完整解讀"},
+		{"proxy（GET 但送達方式不同）", "-x http://127.0.0.1:1", "無法完整解讀"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := newCapturingServer(t)
+			curl := "curl " + tt.flags + " '" + srv.URL + "/x'"
+
+			out, err := runEntry(t, "", curl)
+
+			require.NoError(t, err)
+			assert.Len(t, srv.requests(), 1, "server 只能收到 1 個請求")
+			assert.Contains(t, out, "--allow-write")
+			assert.Contains(t, out, tt.wantInOut)
+			assert.NotContains(t, out, "容量報告")
+		})
+	}
+}
+
+// H2：憑證旗標的值不得出現在任何輸出，且不能被誤當成網址或多出參數。
+func TestSmartEntryCredentialFlagsNeverPrinted(t *testing.T) {
+	const pw, tok = "S3CRETPW", "S3CRETTOK"
+	variants := []string{
+		"-u admin:" + pw,
+		"-uadmin:" + pw,
+		"--user=admin:" + pw,
+		"--oauth2-bearer " + tok,
+		"-H 'Authorization Bearer " + tok + "'",
+		"--proxy-user u:" + pw,
+		"-A 'agent " + tok + "'",
+	}
+	for _, v := range variants {
+		t.Run(v, func(t *testing.T) {
+			srv := newCapturingServer(t)
+			curl := "curl " + v + " '" + srv.URL + "/x' --data-raw 'a=1'"
+
+			out, err := runEntry(t, "", curl)
+
+			require.NoError(t, err)
+			require.Len(t, srv.requests(), 1)
+			assert.Contains(t, out, "POST "+srv.URL+"/x", "網址不能被憑證取代")
+			assert.NotContains(t, out, "多出")
+			assertNoSecrets(t, out, pw, tok)
+		})
+	}
+
+	t.Run("GET 完整探測也帶上 Basic 認證且不外洩", func(t *testing.T) {
+		srv := newCapturingServer(t)
+		out, err := runEntry(t, "", "curl -u admin:"+pw+" '"+srv.URL+"/me'")
+
+		require.NoError(t, err)
+		assert.Contains(t, out, "容量報告")
+		reqs := srv.requests()
+		require.Greater(t, len(reqs), 1)
+		for _, r := range reqs {
+			assert.Equal(t, "Basic YWRtaW46UzNDUkVUUFc=", r.header.Get("Authorization"))
+		}
+		assertNoSecrets(t, out, pw)
+	})
+}
+
+// M1：網址的 userinfo 與敏感 query 參數在目標行、預檢輸出都要遮罩。
+func TestSmartEntryMasksURLSecrets(t *testing.T) {
+	const pw, tok = "S3CRETPW", "S3CRETTOK"
+
+	t.Run("寫入型預檢", func(t *testing.T) {
+		srv := newCapturingServer(t)
+		target := strings.Replace(srv.URL, "http://", "http://user:"+pw+"@", 1) + "/x?token=" + tok + "&page=2"
+
+		out, err := runEntry(t, "", "curl '"+target+"' --data-raw 'a=1'")
+
+		require.NoError(t, err)
+		require.Len(t, srv.requests(), 1)
+		assert.Contains(t, out, "user:***@")
+		assert.Contains(t, out, "token=***")
+		assert.Contains(t, out, "page=2")
+		assertNoSecrets(t, out, pw, tok)
+	})
+
+	t.Run("網址直接探測", func(t *testing.T) {
+		srv := newCapturingServer(t)
+		out, err := runEntry(t, "", srv.URL+"/x?API_KEY="+tok)
+
+		require.NoError(t, err)
+		assert.Contains(t, out, "容量報告")
+		assert.Contains(t, out, "API_KEY=***")
+		assertNoSecrets(t, out, tok)
+		assert.Greater(t, len(srv.requests()), 1)
+	})
+
+	t.Run("看不懂的參數與補 https:// 建議也不外洩", func(t *testing.T) {
+		_, err := runEntry(t, "", "api.example.com/x?access_token="+tok)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "ramplio https://api.example.com/x?access_token=***")
+		assert.NotContains(t, err.Error(), tok)
+
+		_, err = runEntry(t, "", "wget https://x.test/?sig="+tok)
+		require.Error(t, err)
+		assert.NotContains(t, err.Error(), tok)
+	})
+}
+
+func TestSmartEntryMaskURL(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"https://x.test/a?page=2", "https://x.test/a?page=2"},
+		{"https://u:p@x.test/a", "https://u:***@x.test/a"},
+		{"https://tokenonly@x.test/a", "https://***@x.test/a"},
+		{"https://x.test/a?token=1&key=2&api_key=3&apikey=4&access_token=5&sig=6&signature=7&password=8&q=ok",
+			"https://x.test/a?token=***&key=***&api_key=***&apikey=***&access_token=***&sig=***&signature=***&password=***&q=ok"},
+		{"https://x.test/a?Access_Token=abc#frag", "https://x.test/a?Access_Token=***#frag"},
+		{"https://x.test/a?token", "https://x.test/a?token"},
+		{"http://[::1:bad", "（無法解析的網址）"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			assert.Equal(t, tt.want, maskURLForDisplay(tt.in))
+		})
+	}
+}
+
+// M3：stdin 超過 1MiB 要明確失敗，不能靜默截斷。
+func TestRootStdinOverLimitFails(t *testing.T) {
+	huge := "curl http://127.0.0.1:1/ -d " + strings.Repeat("a", maxCurlInputBytes)
+
+	_, err := runEntry(t, huge, "-")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "輸入超過 1MiB")
+}
+
+func TestRootStdinExactlyAtLimitIsAccepted(t *testing.T) {
+	prefix := "curl http://127.0.0.1:1/ -d "
+	exact := prefix + strings.Repeat("a", maxCurlInputBytes-len(prefix))
+	require.Len(t, exact, maxCurlInputBytes)
+
+	_, err := runEntry(t, exact, "-")
+
+	// 剛好 1MiB 會被接受並解析；之後預檢連不到 127.0.0.1:1 而失敗是預期的。
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "超過")
 }
