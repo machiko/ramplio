@@ -490,3 +490,21 @@ func TestHistoryPreexistingDirGetsGitignoreNotice(t *testing.T) {
 	assert.NotContains(t, first, "已建立", "目錄是使用者建的，不能說是我們建立的")
 	assert.NotContains(t, second, ".gitignore")
 }
+
+// M-2（負向）：RAMPLIO_HISTORY_DIR 指到有其他檔案的目錄時不寫 .gitignore，只提示一次。
+func TestHistoryNonEmptyDirPrintsIgnoreHint(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module x\n"), 0o644))
+	t.Setenv(historyDirEnv, dir)
+	srv := newDelayServer(t)
+
+	first, _, err := execRun(t, "--url", srv.URL, "-d", quickRun, "--no-tui")
+	require.NoError(t, err)
+	second, _, err := execRun(t, "--url", srv.URL, "-d", quickRun, "--no-tui")
+	require.NoError(t, err)
+
+	assert.NoFileExists(t, filepath.Join(dir, ".gitignore"))
+	assert.Contains(t, first, filepath.Join(dir, history.RecordsSubdir), "要指出該忽略的路徑")
+	assert.Contains(t, first, ".gitignore")
+	assert.NotContains(t, second, ".gitignore", "只在第一次提示")
+}

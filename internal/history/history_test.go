@@ -301,3 +301,60 @@ func TestHistoryGitignoreKeepsUserFile(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "custom\n", string(ignore))
 }
+
+// M-2（負向）：紀錄目錄裡已有別的東西（例如指到專案根目錄）且沒有 .gitignore 時，
+// 不可寫 `*`（會讓整個專案不被 git 追蹤），改回報需要提示，而且只在第一次放進紀錄時。
+func TestHistoryGitignoreNotWrittenIntoNonEmptyDir(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module x\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "README"), []byte("hi\n"), 0o644))
+
+	first, err := Save(dir, runRecord("k"), DefaultKeep)
+	require.NoError(t, err)
+	second, err := Save(dir, runRecord("k"), DefaultKeep)
+	require.NoError(t, err)
+
+	assert.NoFileExists(t, filepath.Join(dir, ".gitignore"), "不可在非空目錄寫 .gitignore")
+	assert.False(t, first.WroteGitignore)
+	assert.True(t, first.NeedsIgnoreHint, "第一次要提示使用者自己把 runs/ 加進 .gitignore")
+	assert.False(t, second.NeedsIgnoreHint, "提示只在第一次放進紀錄時")
+}
+
+// M-2：目錄裡只有 runs/（之前存過、.gitignore 被刪掉）仍算「只放紀錄的目錄」，可以補寫。
+func TestHistoryGitignoreWrittenWhenOnlyRunsExists(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.Mkdir(filepath.Join(dir, RecordsSubdir), 0o755))
+
+	res, err := Save(dir, runRecord("k"), DefaultKeep)
+
+	require.NoError(t, err)
+	assert.True(t, res.WroteGitignore)
+	assert.False(t, res.NeedsIgnoreHint)
+	assert.FileExists(t, filepath.Join(dir, ".gitignore"))
+}
+
+// L-1：同名不同大小寫的 header 同時出現時，指紋要固定（map 走訪順序不可影響結果）。
+func TestHistoryRequestFingerprintStableWithCaseDuplicates(t *testing.T) {
+	headers := map[string]string{"X-A": "1", "x-a": "2", "X-B": "3"}
+	want := RequestFingerprint(headers, nil)
+
+	for i := 0; i < 200; i++ {
+		require.Equal(t, want, RequestFingerprint(headers, nil), "第 %d 次結果不同", i)
+	}
+}
+
+// L-2：排在最後的檔名無法解析時，仍要用所有檔名裡最大的可解析時間戳。
+func TestHistoryClockGuardSkipsUnparsableNames(t *testing.T) {
+	dir := t.TempDir()
+	runsDir := filepath.Join(dir, RecordsSubdir)
+	require.NoError(t, os.MkdirAll(runsDir, 0o755))
+	future := "20991231T235959.000Z-00.json"
+	require.NoError(t, os.WriteFile(filepath.Join(runsDir, future), []byte("{}"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(runsDir, "zzz-not-a-stamp.json"), []byte("{}"), 0o644))
+	setClock(t, time.Date(2026, 11, 25, 12, 0, 0, 0, time.UTC))
+
+	res, err := Save(dir, runRecord("k"), DefaultKeep)
+
+	require.NoError(t, err)
+	assert.Greater(t, filepath.Base(res.Path), future, "新紀錄要排在最大的可解析時間戳之後")
+}

@@ -72,6 +72,11 @@ type SaveResult struct {
 	Path string
 	// WroteGitignore is true when this save wrote dir/.gitignore (it did not exist yet).
 	WroteGitignore bool
+	// NeedsIgnoreHint is true when records were put into a directory that holds
+	// other things and has no .gitignore: writing `*` there could hide a whole
+	// project from git, so the caller asks the user to ignore runs/ instead.
+	// Only set on the save that first created runs/.
+	NeedsIgnoreHint bool
 	// PruneErr reports a failure to delete old records; the save itself succeeded.
 	PruneErr error
 }
@@ -88,7 +93,7 @@ func Save(dir string, rec Record, keep int) (SaveResult, error) {
 		return SaveResult{}, fmt.Errorf("序列化執行紀錄失敗: %w", err)
 	}
 
-	wroteIgnore, err := ensureDir(dir)
+	setup, err := ensureDir(dir)
 	if err != nil {
 		return SaveResult{}, err
 	}
@@ -96,18 +101,79 @@ func Save(dir string, rec Record, keep int) (SaveResult, error) {
 	if err != nil {
 		return SaveResult{}, err
 	}
-	return SaveResult{Path: path, WroteGitignore: wroteIgnore, PruneErr: prune(filepath.Join(dir, RecordsSubdir), keep)}, nil
+	return SaveResult{
+		Path:            path,
+		WroteGitignore:  setup.wroteGitignore,
+		NeedsIgnoreHint: setup.needsIgnoreHint,
+		PruneErr:        prune(filepath.Join(dir, RecordsSubdir), keep),
+	}, nil
 }
 
-// ensureDir creates dir and dir/runs, and writes a .gitignore that ignores
-// everything when dir has none (also when the user created dir themselves),
-// so records never end up in git. An existing .gitignore is never touched.
-// It reports whether the .gitignore was written by this call.
-func ensureDir(dir string) (bool, error) {
+// ensureDir creates dir and dir/runs. It writes a .gitignore containing `*`
+// only when dir is ours alone: created by this call, or holding nothing but
+// runs/ (a user's empty mkdir counts). If dir also holds other things (for
+// example RAMPLIO_HISTORY_DIR points at a project root or $HOME), `*` would
+// hide all of them from git, so nothing is written and the caller is told to
+// hint instead — only on the save that first creates runs/. An existing
+// .gitignore is never touched.
+func ensureDir(dir string) (dirSetup, error) {
+	dirIsNew := !exists(dir)
+	runsIsNew := !exists(filepath.Join(dir, RecordsSubdir))
 	if err := os.MkdirAll(filepath.Join(dir, RecordsSubdir), 0o755); err != nil {
-		return false, fmt.Errorf("建立紀錄目錄 %s 失敗: %w", dir, err)
+		return dirSetup{}, fmt.Errorf("建立紀錄目錄 %s 失敗: %w", dir, err)
 	}
 	path := filepath.Join(dir, gitignoreName)
+	if exists(path) {
+		return dirSetup{}, nil
+	}
+	if !dirIsNew && !holdsOnlyRecords(dir) {
+		return dirSetup{needsIgnoreHint: runsIsNew}, nil
+	}
+	wrote, err := writeGitignore(path)
+	return dirSetup{wroteGitignore: wrote}, err
+}
+
+// dirSetup is what ensureDir did about git ignoring.
+type dirSetup struct {
+	wroteGitignore  bool
+	needsIgnoreHint bool
+}
+
+func exists(path string) bool {
+	_, err := os.Lstat(path)
+	return !errors.Is(err, fs.ErrNotExist)
+}
+
+// dirScanBatch bounds each directory read so a huge directory ($HOME) is not
+// listed in full: one foreign entry is enough to decide.
+const dirScanBatch = 16
+
+// holdsOnlyRecords reports whether dir contains nothing but runs/ (and
+// .gitignore). Any read error counts as "not only records" (fail safe: do not write).
+func holdsOnlyRecords(dir string) bool {
+	f, err := os.Open(dir)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = f.Close() }() // 唯讀
+	for {
+		names, err := f.Readdirnames(dirScanBatch)
+		for _, name := range names {
+			if name != RecordsSubdir && name != gitignoreName {
+				return false
+			}
+		}
+		if errors.Is(err, io.EOF) {
+			return true
+		}
+		if err != nil {
+			return false
+		}
+	}
+}
+
+// writeGitignore creates path with `*` unless it already exists (O_EXCL).
+func writeGitignore(path string) (bool, error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 	if errors.Is(err, fs.ErrExist) {
 		return false, nil
@@ -163,9 +229,11 @@ func writeRecord(runsDir string, data []byte) (string, error) {
 // so a new record always sorts after the existing ones.
 func nextStamp(runsDir string) string {
 	stamp := nowFunc().UTC()
-	names, err := recordNames(runsDir)
-	if err == nil && len(names) > 0 {
-		if latest, ok := stampOf(names[len(names)-1]); ok && !latest.Before(stamp) {
+	names, _ := recordNames(runsDir) // unreadable dir: writing fails right after anyway
+	// Scan every name: a foreign file that sorts last must not hide the
+	// newest real timestamp.
+	for _, name := range names {
+		if latest, ok := stampOf(name); ok && !latest.Before(stamp) {
 			stamp = latest.Add(time.Millisecond)
 		}
 	}
@@ -307,20 +375,29 @@ const fingerprintLen = 8
 // body are compared exactly. Every part is length-prefixed so the boundary
 // between a header value and the body cannot be shifted.
 func RequestFingerprint(headers map[string]string, body []byte) string {
-	lower := make(map[string]string, len(headers))
+	type header struct{ lower, orig, value string }
+	list := make([]header, 0, len(headers))
 	for name, value := range headers {
-		lower[strings.ToLower(name)] = value
+		list = append(list, header{strings.ToLower(name), name, value})
 	}
-	names := make([]string, 0, len(lower))
-	for name := range lower {
-		names = append(names, name)
-	}
-	sort.Strings(names)
+	// Sort by the normalised name first (order and case do not matter), then
+	// by the original name and value so names that differ only in case
+	// (`X-A` and `x-a` both given) still hash the same every time.
+	sort.Slice(list, func(i, j int) bool {
+		a, b := list[i], list[j]
+		if a.lower != b.lower {
+			return a.lower < b.lower
+		}
+		if a.orig != b.orig {
+			return a.orig < b.orig
+		}
+		return a.value < b.value
+	})
 
 	h := sha256.New()
-	for _, name := range names {
-		writePart(h, name)
-		writePart(h, lower[name])
+	for _, hd := range list {
+		writePart(h, hd.lower)
+		writePart(h, hd.value)
 	}
 	writePart(h, string(body))
 	return hex.EncodeToString(h.Sum(nil))[:fingerprintLen]

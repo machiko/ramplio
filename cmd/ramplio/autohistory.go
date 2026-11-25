@@ -107,6 +107,11 @@ func printSaved(outW, errW io.Writer, dir string, res history.SaveResult) {
 	if res.WroteGitignore {
 		fmt.Fprintf(outW, "執行紀錄放在 %s/（已在裡面自動放 .gitignore，不會被 commit）。\n", dir)
 	}
+	if res.NeedsIgnoreHint {
+		fmt.Fprintf(outW, "執行紀錄放在 %s。這個目錄裡還有其他檔案，所以沒有自動放 .gitignore；"+
+			"如果它在 git 專案裡，請自己把這個路徑加進 .gitignore。\n",
+			filepath.Join(dir, history.RecordsSubdir))
+	}
 	fmt.Fprintf(outW, "執行紀錄已存至 %s\n", res.Path)
 	if res.PruneErr != nil {
 		fmt.Fprintf(errW, "warning: 清理舊執行紀錄失敗: %v\n", res.PruneErr)
