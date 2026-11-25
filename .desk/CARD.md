@@ -3,7 +3,7 @@
 - 分支：`feat/smart-entry`（worktree：`/Users/reyes/Workspace/ramplio-worktrees/smart-entry`）
 - 基準：`main` @ 9c10397
 - 規模：一般
-- 狀態：第 3 段完成，待獨立審查（2026-11-25）
+- 狀態：第 5 段第 1 輪完成，待複審（2026-11-25）
 
 ## 規格
 
@@ -66,7 +66,7 @@ Reyes 說「連我自己都不太會用」。與 agy（Gemini，plan 模式唯�
 
 ### 完成檢查
 
-`go test ./internal/curlparse/... ./internal/discover/... ./cmd/ramplio/... -run 'Curl|Probe|Root'`（實作前紅、實作後綠），接著 `go test -race ./...`、`golangci-lint run`、`go build ./...`。
+`go test ./internal/curlparse/... ./internal/discover/... ./cmd/ramplio/... -run 'Curl|Probe|Root|SmartEntry'`（實作前紅、實作後綠；第 5 段第 1 輪起加上 `SmartEntry`，讓情境 9 也在篩選內），接著 `go test -race ./...`、`golangci-lint run`、`go build ./...`。
 
 ### 驗證（端到端）
 
@@ -87,6 +87,13 @@ Reyes 說「連我自己都不太會用」。與 agy（Gemini，plan 模式唯�
 - 2026-11-25（實作）：`discover` 被 `--allow-write` 擋下時回錯誤（exit ≠ 0）；單一入口照情境 3 回 exit 0。理由：明確下 `discover` 的人（或 CI）要的是探測結果，沒跑成就該失敗；單一入口的擋下是引導。兩者共用 `runDiscover`，都只發一發預檢。
 - 2026-11-25（實作）：`main.go` 的 root 抽成 `newRootCmd()`（保留 `rootCmd` 變數），測試才能拿全新的 root 實跑 cobra 分派；cobra v1.8.0 的 `SuggestionsFor` 不會自己套預設距離，root 明確設 `SuggestionsMinimumDistance: 2`。
 - 2026-11-25（實作）：`smartentry_test.go` 兩處刻意的錯字 `dicover`（情境 5）被 golangci-lint 的 misspell 抓到，用逐行 `//nolint:misspell` 加理由處理；沒有改 `.golangci.yml`、沒有放寬全域規則。本機沒裝 golangci-lint，用 `go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest`（v2.15.0，與 CI 的 latest 對齊）跑，不動 go.mod。
+- 2026-11-25（第 5 段第 1 輪）：`run.go` 的那 1 行是 `runPreflight` 改吃 `protocols.Request` 的必要連動（實作計畫寫了「既有呼叫端跟著調整」），只把參數包成 Request，`run` 的行為不變；唯一可見差異是預檢輸出的網址現在也會遮罩（M1 改在 `runPreflight` 內，`run` 一起受惠）。
+- 2026-11-25（第 5 段第 1 輪）：Uncertain 採 fail-closed。curl 只要有不認識的旗標，或有無法重現的寫法（`-F`、`-T`、`-d @檔案`、`--data-urlencode @檔案`、`-x/--proxy`、`--resolve`、`-K` 等），就設 `Uncertain`。discover 與單一入口在 Uncertain 且沒加 `--allow-write` 時，跟寫入型一樣只送 1 發預檢就擋下，並說明是「無法完整解讀」。只影響 curl 本身輸出的帶值旗標（`-o`、`-m`、`-w`、`--cacert` 等）只警告、不設 Uncertain。
+- 2026-11-25（第 5 段第 1 輪）：M2 的處置：被擋下的那 1 發照舊送真實方法（不改成 OPTIONS/HEAD，那要另外回規格確認），擋下後明說「已送出 1 發真實 <METHOD> 預檢（伺服器已實際處理這一發，若是寫入就已經寫入一次）」。
+- 2026-11-25（第 5 段第 1 輪）：`discover` 被擋時回 exit ≠ 0、單一入口回 exit 0。**待使用者最後確認**。
+- 2026-11-25（第 5 段第 1 輪）：改了一組既有測試的輸入：`parse_test.go` 的「不認識的旗標產生警告」原本用結尾不帶值的 `--max-time` 當「不認識的旗標」。H2 要求 `--max-time` 改成已知的帶值旗標，所以改成合法寫法 `--max-time 5`。斷言沒有放寬：仍要求警告提到兩個旗標，並新增要求 `Uncertain == true`（因為 `--http2`）。
+- 2026-11-25（第 5 段第 1 輪）：H2 延伸：`discover -H` 格式錯誤的錯誤訊息原本用 `%q` 印出整段值，跟審查指出的外洩是同一類，改成只說「第 N 個 -H」。看不懂的參數回顯只顯示第一個詞並遮罩網址秘密。
+- 2026-11-25（第 5 段第 1 輪）：M4：大小寫不敏感的 header 覆蓋邏輯從 `discover.go` 移到 `curlparse.MergeHeaders`，解析器與 discover 共用同一份。
 - 2026-11-25（實作）：curl 的 tokenizer 跟解析放同一個 `parse.go`，不另開檔，守住「只改計畫列的檔案」。
 
 ## History
@@ -114,3 +121,23 @@ Reyes 說「連我自己都不太會用」。與 agy（Gemini，plan 模式唯�
   - `go build ./...`：exit 0，無輸出
   - 注意：完成檢查的 `-run 'Curl|Probe|Root'` 篩不到情境 9 的 `TestSmartEntryMasksCredentials`（名稱沿用規格），它在 `go test -race ./...` 整套裡有跑且通過。
   - 觀察到的既有問題（計畫外，未修）：任何指令回錯誤時訊息印兩次（cobra 的 `Error:` 加上 `main()` 自己再印一次）；`runPreflight` 不可達時的「可加 --no-preflight」提示在 discover／單一入口路徑不適用（這兩處沒有該旗標）。
+- 2026-11-25：**另開卡（本卡不修）**：(1) 任何指令回錯誤時訊息印兩次（cobra 的 `Error:` 加上 `main()` 自己再印一次）；(2) `runPreflight` 連不到目標時的「可加 --no-preflight」提示在 discover／單一入口路徑不適用。
+- 2026-11-25：第 5 段第 1 輪（審查 Block，2 HIGH）修正完成。commit：829c6e9 解析器（H1 旗標補齊＋叢集＋Uncertain、H2 憑證／帶值旗標＋警告不帶值、M4 MergeHeaders、LOW 大小寫一致）、5a4d4e9 cmd 層（H1 fail-closed 守門、M1 網址遮罩、M2 提示、M3 stdin 上限）、本筆（README curl 說明、CARD）。
+- 2026-11-25：第 5 段第 1 輪測試輸出（實際結尾）：
+  - 完成檢查 `go test ./internal/curlparse/... ./internal/discover/... ./cmd/ramplio/... -run 'Curl|Probe|Root|SmartEntry' -count=1`：
+    ```
+    ok  	github.com/machiko/ramplio/v3/internal/curlparse	0.348s
+    ok  	github.com/machiko/ramplio/v3/internal/discover	2.344s
+    ok  	github.com/machiko/ramplio/v3/cmd/ramplio	11.633s
+    ```
+  - `go test -race -count=1 ./...`：
+    ```
+    ok  	github.com/machiko/ramplio/v3/cmd/ramplio	52.876s
+    ok  	github.com/machiko/ramplio/v3/internal/curlparse	3.770s
+    ok  	github.com/machiko/ramplio/v3/internal/discover	10.080s
+    ok  	github.com/machiko/ramplio/v3/internal/engine	101.198s
+    ok  	github.com/machiko/ramplio/v3/internal/scenarios	1.919s
+    （其餘 10 個套件同為 ok，exit 0）
+    ```
+  - `go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest run`：`0 issues.`，exit 0
+  - `go build ./...`：exit 0，無輸出
