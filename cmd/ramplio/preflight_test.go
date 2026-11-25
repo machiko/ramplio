@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -68,7 +69,7 @@ func TestRunPreflight_ReachableServerPasses(t *testing.T) {
 	defer srv.Close()
 
 	var buf bytes.Buffer
-	err := runPreflight(context.Background(), &buf, protocols.DefaultHTTPConfig(), srv.URL, "GET")
+	err := runPreflight(context.Background(), &buf, protocols.DefaultHTTPConfig(), protocols.Request{Method: "GET", URL: srv.URL})
 	if err != nil {
 		t.Fatalf("reachable server (even 5xx) should pass preflight, got %v", err)
 	}
@@ -84,12 +85,38 @@ func TestRunPreflight_ConnRefusedAborts(t *testing.T) {
 	ln.Close()
 
 	var buf bytes.Buffer
-	err = runPreflight(context.Background(), &buf, protocols.DefaultHTTPConfig(), "http://"+addr, "GET")
+	err = runPreflight(context.Background(), &buf, protocols.DefaultHTTPConfig(), protocols.Request{Method: "GET", URL: "http://" + addr})
 	if err == nil {
 		t.Fatal("connection refused should abort preflight")
 	}
 	out := buf.String()
 	if !strings.Contains(out, "預檢沒過") || !strings.Contains(out, "--no-preflight") {
 		t.Errorf("expected plain-language explanation with escape hatch, got:\n%s", out)
+	}
+}
+
+// 寫入型預檢若少了 Authorization／Content-Type 會拿到 401/415 的假警報，
+// 所以預檢必須原封不動送出完整請求。
+func TestRunPreflight_SendsHeadersAndBody(t *testing.T) {
+	var gotAuth, gotType, gotBody, gotMethod string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		gotMethod, gotAuth, gotType, gotBody = r.Method, r.Header.Get("Authorization"), r.Header.Get("Content-Type"), string(b)
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer srv.Close()
+
+	req := protocols.Request{
+		Method:  "POST",
+		URL:     srv.URL,
+		Headers: map[string]string{"Authorization": "Bearer t0k", "Content-Type": "application/json"},
+		Body:    []byte(`{"a":1}`),
+	}
+	var buf bytes.Buffer
+	if err := runPreflight(context.Background(), &buf, protocols.DefaultHTTPConfig(), req); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotMethod != "POST" || gotAuth != "Bearer t0k" || gotType != "application/json" || gotBody != `{"a":1}` {
+		t.Errorf("preflight lost request parts: method=%q auth=%q type=%q body=%q", gotMethod, gotAuth, gotType, gotBody)
 	}
 }

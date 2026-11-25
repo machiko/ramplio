@@ -52,7 +52,10 @@ func methodOrGet(m string) string {
 // explanation to w and returns a non-nil error so the caller can abort. Slow
 // targets, timeouts and HTTP error codes do NOT abort — the service is reachable
 // and the user may legitimately want to measure those.
-func runPreflight(ctx context.Context, w io.Writer, cfg protocols.HTTPConfig, probeURL, probeMethod string) error {
+//
+// req is sent as-is (headers and body included) so a write-type probe gets the
+// same auth / content-type as the real traffic instead of a misleading 401/415.
+func runPreflight(ctx context.Context, w io.Writer, cfg protocols.HTTPConfig, req protocols.Request) error {
 	cfg.RequestTimeout = preflightTimeout
 	exec := protocols.NewHTTPExecutor(cfg)
 	defer exec.CloseIdleConnections()
@@ -60,7 +63,8 @@ func runPreflight(ctx context.Context, w io.Writer, cfg protocols.HTTPConfig, pr
 	pctx, cancel := context.WithTimeout(ctx, preflightTimeout)
 	defer cancel()
 
-	res, trace := exec.ExecuteTraced(pctx, protocols.Request{Method: probeMethod, URL: probeURL})
+	probeURL := req.URL
+	res, trace := exec.ExecuteTraced(pctx, req)
 	kind := metrics.ClassifyError(res.Error, res.StatusCode)
 
 	if !reporter.IsReachabilityFailure(kind) {

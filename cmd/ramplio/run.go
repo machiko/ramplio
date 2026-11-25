@@ -128,7 +128,7 @@ func newRunCmd() *cobra.Command {
 			// fast with a plain-language reason instead of after a full run.
 			if !noPreflight {
 				if pURL, pMethod, ok := preflightTarget(scenarioFile, url, method); ok {
-					if pferr := runPreflight(cmd.Context(), os.Stderr, httpCfg, pURL, pMethod); pferr != nil {
+					if pferr := runPreflight(cmd.Context(), os.Stderr, httpCfg, protocols.Request{Method: pMethod, URL: pURL}); pferr != nil {
 						return pferr
 					}
 				}

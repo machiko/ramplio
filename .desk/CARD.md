@@ -82,6 +82,8 @@ Reyes 說「連我自己都不太會用」。與 agy（Gemini，plan 模式唯�
 - 2026-11-25：第一張卡先做單一入口，不做 agy 建議的「自動留存」（使用者決定：要先有亮眼、本人立刻有感的入口）。
 - 2026-11-25：寫入型方法預設只發一發預檢，要壓測得明確加 `--allow-write`（agy 提出的資料安全風險）。
 - 2026-11-25：curl 解析自己寫，不新增 shlex 相依套件。
+- 2026-11-25（實作）：計畫外但必要的測試檔改動——`cmd/ramplio/preflight_test.go`（跟著 `runPreflight` 新簽名調整呼叫，並新增 `TestRunPreflight_SendsHeadersAndBody`）、`internal/discover/prober_test.go`（情境 4 的測試放這）、`cmd/ramplio/discover_test.go`（情境 8）、`cmd/ramplio/guidance_test.go`（歡迎畫面 ① 文字改了，斷言跟著改）。只動測試、不放寬既有斷言。
+- 2026-11-25（實作）：curl 的 tokenizer 跟解析放同一個 `parse.go`，不另開檔，守住「只改計畫列的檔案」。
 
 ## History
 
