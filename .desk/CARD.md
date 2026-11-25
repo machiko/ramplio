@@ -83,6 +83,9 @@ Reyes 說「連我自己都不太會用」。與 agy（Gemini，plan 模式唯�
 - 2026-11-25：寫入型方法預設只發一發預檢，要壓測得明確加 `--allow-write`（agy 提出的資料安全風險）。
 - 2026-11-25：curl 解析自己寫，不新增 shlex 相依套件。
 - 2026-11-25（實作）：計畫外但必要的測試檔改動——`cmd/ramplio/preflight_test.go`（跟著 `runPreflight` 新簽名調整呼叫，並新增 `TestRunPreflight_SendsHeadersAndBody`）、`internal/discover/prober_test.go`（情境 4 的測試放這）、`cmd/ramplio/discover_test.go`（情境 8）、`cmd/ramplio/guidance_test.go`（歡迎畫面 ① 文字改了，斷言跟著改）。只動測試、不放寬既有斷言。
+- 2026-11-25（實作）：專案沒有 `changelog.d/`，既有慣例是 `CHANGELOG.md` 的 `[Unreleased]` 區塊，所以改在那裡的「新增」加一條（只動 Unreleased，不碰歷史版本）。
+- 2026-11-25（實作）：`discover` 被 `--allow-write` 擋下時回錯誤（exit ≠ 0）；單一入口照情境 3 回 exit 0。理由：明確下 `discover` 的人（或 CI）要的是探測結果，沒跑成就該失敗；單一入口的擋下是引導。兩者共用 `runDiscover`，都只發一發預檢。
+- 2026-11-25（實作）：`main.go` 的 root 抽成 `newRootCmd()`（保留 `rootCmd` 變數），測試才能拿全新的 root 實跑 cobra 分派；cobra v1.8.0 的 `SuggestionsFor` 不會自己套預設距離，root 明確設 `SuggestionsMinimumDistance: 2`。
 - 2026-11-25（實作）：curl 的 tokenizer 跟解析放同一個 `parse.go`，不另開檔，守住「只改計畫列的檔案」。
 
 ## History
