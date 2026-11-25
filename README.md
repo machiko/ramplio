@@ -419,7 +419,7 @@ ramplio discover --url https://api.example.com/orders --method POST --body '{"sk
 pbpaste | ramplio discover --curl - -H "Authorization: Bearer $NEW_TOKEN"   # 明確旗標覆蓋 curl 的值
 ```
 
-curl 支援 DevTools 產出的寫法與常見旗標：`-X`、`-H`、`-d/--data/--data-raw/--data-binary`、`--data-urlencode`、`--json`、`-G`、`-I`、`-b`、`-u/--user`（轉 Basic 認證）、`--oauth2-bearer`、`-A`、`-e`、`--url`，以及 `-sXPOST` 這類短旗標叢集；`--compressed`、`-s`、`-S`、`-k`、`-L`、`-i` 略過，`-o`、`-m`、`-w` 等只影響 curl 本身輸出的旗標會印警告後略過。**無法完整重現的寫法**（不認識的旗標、`-F` 表單、`-T` 上傳、`-d @檔案`、`-x` proxy 等）一律視同寫入：沒加 `--allow-write` 就只送 1 發預檢。警告只列旗標名稱，網址裡的密碼與 `token`、`key`、`sig` 等參數在畫面上也會遮成 `***`。
+curl 支援 DevTools 產出的寫法與常見旗標：`-X`、`-H`、`-d/--data/--data-raw/--data-binary`、`--data-urlencode`、`--json`、`-G`、`-I`、`-b`、`-u/--user`（轉 Basic 認證）、`--oauth2-bearer`、`-A`、`-e`、`--url`，以及 `-sXPOST` 這類短旗標叢集；`--compressed`、`-s`、`-S`、`-k`、`-L`、`-i`、`-v`、`-f`、`-4`、`-6`、`--http1.1`、`--http2` 略過，`-o`、`-m`、`-w` 等只影響 curl 本身輸出的旗標會印警告後略過。**無法完整重現的寫法**（不認識的旗標、`-F` 表單、`-T` 上傳、`-d @檔案`、`-x` proxy、`X-HTTP-Method-Override` 這類方法覆寫 header 等）一律視同寫入：沒加 `--allow-write` 就只送 1 發預檢。警告只列旗標名稱，網址裡的密碼、`#` 後面的 fragment，以及名稱含 `token`、`secret`、`key`、`sig`、`auth`、`pass`、`session`、`code` 等字樣的參數，在畫面上與 `--save-baseline` 存檔裡都會遮成 `***`。
 
 也可以從網頁儀表板的「⚡ 探測上限」分頁直接操作，包含即時探測進度表格與容量報告卡片，PM 不需要技術背景也能讀懂結果。
 

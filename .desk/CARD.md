@@ -3,7 +3,7 @@
 - 分支：`feat/smart-entry`（worktree：`/Users/reyes/Workspace/ramplio-worktrees/smart-entry`）
 - 基準：`main` @ 9c10397
 - 規模：一般
-- 狀態：第 5 段第 1 輪完成，待複審（2026-11-25）
+- 狀態：第 5 段第 2 輪完成，待複審（2026-11-25）
 
 ## 規格
 
@@ -94,6 +94,12 @@ Reyes 說「連我自己都不太會用」。與 agy（Gemini，plan 模式唯�
 - 2026-11-25（第 5 段第 1 輪）：改了一組既有測試的輸入：`parse_test.go` 的「不認識的旗標產生警告」原本用結尾不帶值的 `--max-time` 當「不認識的旗標」。H2 要求 `--max-time` 改成已知的帶值旗標，所以改成合法寫法 `--max-time 5`。斷言沒有放寬：仍要求警告提到兩個旗標，並新增要求 `Uncertain == true`（因為 `--http2`）。
 - 2026-11-25（第 5 段第 1 輪）：H2 延伸：`discover -H` 格式錯誤的錯誤訊息原本用 `%q` 印出整段值，跟審查指出的外洩是同一類，改成只說「第 N 個 -H」。看不懂的參數回顯只顯示第一個詞並遮罩網址秘密。
 - 2026-11-25（第 5 段第 1 輪）：M4：大小寫不敏感的 header 覆蓋邏輯從 `discover.go` 移到 `curlparse.MergeHeaders`，解析器與 discover 共用同一份。
+- 2026-11-25（第 5 段第 2 輪）：M2 查證結論：`compare` 不是靠 URL 找對應資料，只在兩份 baseline 的 `Scenario`（discover 模式＝目標 URL）不同時印警告（`internal/baseline/compare.go:128`）；dashboard 只拿它來顯示。遮罩是確定性的，同一個目標前後兩次遮罩結果相同，比對不受影響。代價是：同一個網址只差在 token 值的兩份 baseline 會被視為同一目標，這本來就是同一目標，可以接受。
+- 2026-11-25（第 5 段第 2 輪）：M1 的遮罩改為不分大小寫的子字串比對，刻意寧可多遮：`code` 會連 `country_code`、`zipcode` 一起遮。fragment 只要存在就整段換成 `#***`。原本 `TestSmartEntryMaskURL` 預期 `#frag` 原樣保留，照審查要求改成預期 `#***`（變嚴格，不是放寬）。
+- 2026-11-25（第 5 段第 2 輪）：LOW 3 把 `--http2` 列為無害，跟第 1 輪「不認識的旗標」測試案例拿 `--http2` 當例子衝突。改用真的不認識的 `--frobnicate`，斷言不變（仍要求警告提到兩個旗標、`Uncertain == true`）。
+- 2026-11-25（第 5 段第 2 輪）：LOW 2 比審查要求多分一類：逾時或連線中斷時，請求可能已經送到伺服器，說「沒有寫入」可能是假的，所以改說「已送出但沒有收到回應，無法確定伺服器是否已處理（可能已寫入一次）」。只有其他沒送出的情況（例如網址無法解析）才說「預檢沒有送達目標，沒有寫入」。實作上把 `runPreflight` 拆成會回傳結果的 `preflightOnce`，`runPreflight` 的簽名不變，`run.go` 不用再動。
+- 2026-11-25（第 5 段第 2 輪）：LOW 1 兩層都擋：curl 裡出現的方法覆寫 header 由解析器設 Uncertain；`discover --url … -H "X-HTTP-Method-Override: …"` 明確給的，由 `resolveDiscoverRequest` 檢查。判斷邏輯共用 `curlparse.MethodOverrideHeaderNames`。
+- 2026-11-25（第 5 段第 2 輪）：LOW 5 的測試第一次跑就是綠的：第 1 輪已實作「已知帶值旗標缺值就回錯」，這次只是補回歸保護。
 - 2026-11-25（實作）：curl 的 tokenizer 跟解析放同一個 `parse.go`，不另開檔，守住「只改計畫列的檔案」。
 
 ## History
@@ -137,6 +143,26 @@ Reyes 說「連我自己都不太會用」。與 agy（Gemini，plan 模式唯�
     ok  	github.com/machiko/ramplio/v3/internal/discover	10.080s
     ok  	github.com/machiko/ramplio/v3/internal/engine	101.198s
     ok  	github.com/machiko/ramplio/v3/internal/scenarios	1.919s
+    （其餘 10 個套件同為 ok，exit 0）
+    ```
+  - `go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest run`：`0 issues.`，exit 0
+  - `go build ./...`：exit 0，無輸出
+- 2026-11-25：**另開卡（第 2 輪新增）**：預檢沒有任何回應（例如網址無法解析）時，既有的 `printPreflightBreakdown` 還是印「✓ 預檢通過（無回應）」，跟緊接著的「預檢沒有送達目標，沒有寫入」矛盾。這段 `run --url` 也在用，是改動前就有的行為；這是最後一輪，修正清單沒列，本卡不修。
+- 2026-11-25：第 5 段第 2 輪（複審可進 PR，收 MEDIUM 與便宜的 LOW）修正完成。commit：8907bf3 解析器（LOW 1 方法覆寫 header、LOW 3 無害布林旗標、LOW 5 回歸測試）、f157caf cmd 層（M1 遮罩擴大＋fragment、M2 baseline 遮罩、LOW 1 discover -H、LOW 2 預檢送達說明、LOW 4 -H 去重）、本筆（README、CARD）。
+- 2026-11-25：第 5 段第 2 輪測試輸出（實際結尾）：
+  - 完成檢查 `go test ./internal/curlparse/... ./internal/discover/... ./cmd/ramplio/... -run 'Curl|Probe|Root|SmartEntry' -count=1`：
+    ```
+    ok  	github.com/machiko/ramplio/v3/internal/curlparse	0.265s
+    ok  	github.com/machiko/ramplio/v3/internal/discover	2.282s
+    ok  	github.com/machiko/ramplio/v3/cmd/ramplio	13.160s
+    ```
+  - `go test -race -count=1 ./...`：
+    ```
+    ok  	github.com/machiko/ramplio/v3/cmd/ramplio	56.383s
+    ok  	github.com/machiko/ramplio/v3/internal/curlparse	4.639s
+    ok  	github.com/machiko/ramplio/v3/internal/discover	13.670s
+    ok  	github.com/machiko/ramplio/v3/internal/engine	105.871s
+    ok  	github.com/machiko/ramplio/v3/internal/scenarios	3.038s
     （其餘 10 個套件同為 ok，exit 0）
     ```
   - `go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest run`：`0 issues.`，exit 0
