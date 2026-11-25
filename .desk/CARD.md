@@ -3,7 +3,7 @@
 - 分支：`feat/auto-history`（worktree：`/Users/reyes/Workspace/ramplio-worktrees/auto-history`）
 - 基準：`main` @ 9a61b13
 - 規模：一般
-- 狀態：第 1 段已確認，第 2 段實作中（2026-11-25）
+- 狀態：第 3 段完成，待獨立審查（2026-11-25）
 
 ## 規格
 
@@ -132,8 +132,38 @@
 - 2026-11-25（使用者確認）：第一次建立 `.ramplio/` 時自動寫 `.ramplio/.gitignore`（內容 `*`）並印一行說明。
 - 2026-11-25（使用者確認）：`compare` 零參數比「最近一筆」與「同目標的前一筆」。
 - 2026-11-25（使用者確認，範圍擴充）：原本記為另開卡的既有問題——`run --url --save-baseline` 的 `Scenario` 存原始網址（`run.go:206` `baseline.FromSummary(sum, scenarioName)`）——併進本卡修，新增驗收情境 17。
+- 2026-11-25（實作，偏離規格）：紀錄檔名從規格寫的 `<時間>-<run|discover>.json` 改成 `<時間>-<序號>.json`，kind 只存在內容裡。理由：`-race` 跑 `TestHistoryListNewestFirstSkipsCorrupt` 時抓到真的 bug——同一毫秒存兩筆不同 kind 的紀錄，兩個檔都拿到序號 00（撞名檢查把 kind 算進檔名），排序就退回去比 kind 的字母，新舊顛倒。拿掉 kind 後 `O_EXCL` 才真正保證序號唯一、檔名順序＝存檔順序。測試沒改。
+- 2026-11-25（實作）：`history.Save` 的回傳值從規格寫的 `(path, created, err)` 改成 `(SaveResult{Path, Created, PruneErr}, err)`。刪舊檔失敗時存檔本身已經成功，要能單獨回報成警告，不能混在 `err` 裡。
+- 2026-11-25（實作，規格外的小補強）：discover 被中斷（ctx 取消）時不存紀錄。只探測一半的結果，下次比對會看起來像大退步。run 的情境模式按 Ctrl-C 中斷時，現有流程分不出是不是跑完了，照樣會存（只影響參考用的自動比對，不影響結束碼），列為已知限制。
+- 2026-11-25（實作）：`compare.go` 的 `renderComparison` 和新的 `renderAutoDiff` 共用 `verdictMarkWord`（判定 → 符號＋白話），避免兩份用語分歧。`compare`／`report` 的輸出改走 `cmd.OutOrStdout()`；正式執行時一樣是 stdout，測試才抓得到輸出。
+- 2026-11-25（實作）：`run.go` 的自動紀錄訊息走 `cmd.OutOrStdout()`／`cmd.ErrOrStderr()`；正式執行時一樣是 stdout／stderr，測試可以分別斷言。原有的摘要仍然直接寫 `os.Stdout`，這次沒動。
+- 2026-11-25（實作）：`TestHistoryBlockedWriteNotSaved`（情境 4）和 `TestCompareOneArgRejected`（情境 16）在實作前就是綠的。前者斷言「沒有發生」，原本就不存檔；後者原本由 cobra 的 `ExactArgs(2)` 擋。兩條都留下當回歸守門：實作後改成 `compareArgs`、`runDiscover` 加了存檔，它們仍然要綠。
+- 2026-11-25（實作）：`report_test.go` 比規格多兩條：`TestReportZeroArgNoHistory`（完全沒有紀錄）、`TestReportExplicitInputStillWorks`（情境 16 的 `report --input` 相容性，原本沒有測試）。
+- 2026-11-25（實作）：產品程式 diff 是 +526／−34 行（不含測試與文件），比規格估的 350–450 行多。多出來的主要在 `internal/history`（245 行，含註解與錯誤處理）。
+- 2026-11-25：觀察到的既有問題（計畫外，本卡不修，另開卡）：`run --url` 的 `--output x.xml`（JUnit）和 `--sink` 收到的 `scenarioName` 仍是原始網址；終端的「Running … → <網址>」那行也沒遮罩。
 
 ## History
 
 - 2026-11-25：讀程式釐清三種存檔格式（JSON 報告、baseline、HTML）各自的結構與消費者，決定拆成 2a／2b，寫出 2a 規格。
 - 2026-11-25：使用者確認規格（5 個待決定照推薦定案），併入 `run --save-baseline` 遮罩（情境 17）；進第 2 段。
+- 2026-11-25：第 2 段實作完成（TDD，每塊先看到預期原因的紅燈再實作）。commit：7877c1a CARD 定案、3facf62 `internal/history`、fcaf789 `run --save-baseline` 遮罩（情境 17）、3752e20 run／discover 自動留存與比對、5fee8d3 同毫秒排序修正、6209f0c `compare` 零參數、cb98efa `report` 零參數、d6e4518 文件。
+  - 注意：3752e20 commit 時，指令用 `| tail` 吃掉了 `go test -race` 的失敗 exit code，所以這筆 commit 當下 `internal/history` 在 `-race` 下是紅的（同毫秒排序 bug）。下一筆 5fee8d3 修正，之後的檢查都用 `set -o pipefail`。
+- 2026-11-25：第 3 段測試輸出（實際結尾）：
+  - 完成檢查 `go test ./internal/history/... ./cmd/ramplio/... -run 'History|ZeroArg|OneArg|SaveBaselineMasks' -count=1`：
+    ```
+    ok  	github.com/machiko/ramplio/v3/internal/history	0.515s
+    ok  	github.com/machiko/ramplio/v3/cmd/ramplio	15.707s
+    ```
+  - `go test -race -count=1 ./...`（exit 0）：
+    ```
+    ok  	github.com/machiko/ramplio/v3/cmd/ramplio	71.697s
+    ok  	github.com/machiko/ramplio/v3/internal/baseline	3.342s
+    ok  	github.com/machiko/ramplio/v3/internal/discover	13.784s
+    ok  	github.com/machiko/ramplio/v3/internal/engine	102.526s
+    ok  	github.com/machiko/ramplio/v3/internal/history	1.375s
+    ok  	github.com/machiko/ramplio/v3/internal/reporter	5.016s
+    （其餘 10 個套件同為 ok，共 16 個套件）
+    ```
+  - `go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest run`（v2.15.0）：`0 issues.`，exit 0
+  - `go build ./...`：exit 0，無輸出
+  - 測試跑完後 repo 內沒有殘留 `.ramplio/`（`TestMain` 把 `RAMPLIO_HISTORY_DIR` 指到暫存目錄）。
