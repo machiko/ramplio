@@ -10,3 +10,6 @@ dashboard/dist/
 # 執行殘留物與本機測試檔
 /sessions.csv
 /scenario.yaml
+
+# 自動執行紀錄（ramplio run / discover 跑完自動留存）
+/.ramplio/

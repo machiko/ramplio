@@ -805,6 +805,20 @@ Flags:
 
 ### 儲存與重新載入結果
 
+每次 `run`／`discover` 跑完都會自動存一筆執行紀錄到目前目錄的 `.ramplio/runs/`（保留最近 50 筆；裡面自動放 `.gitignore`，不會被 commit），結尾也會自動跟「上一次同目標、同設定」比較 p99、錯誤率、吞吐量。這段比較只是參考，不影響結束碼。
+
+```bash
+ramplio run --url https://api.example.com/health   # 跑兩次同樣的指令
+ramplio compare                                    # 比較最近一筆與同目標的前一筆（退步時 exit 1）
+ramplio report                                     # 用最近一筆 run 紀錄產生 report.html
+```
+
+- 同目標的認定：模式、HTTP 方法、網址（情境模式用情境檔路徑）、負載參數（`--vus`／`--rps`、`-d`；discover 是 `--tolerance`、`--max-rps`、`--probe-duration`）都相同。
+- 加 `--no-history` 不留存；設 `RAMPLIO_HISTORY_DIR` 可以改存放位置。存檔失敗只印警告，不影響結果與結束碼。
+- 紀錄檔裡的網址會遮罩帳密與 token。紀錄檔是 baseline 格式的超集，也可以直接 `ramplio compare .ramplio/runs/a.json .ramplio/runs/b.json`。
+
+想自己管檔名時，舊的旗標照樣能用：
+
 ```bash
 ramplio run --scenario smoke.yaml --output results.json
 ramplio report --input results.json
