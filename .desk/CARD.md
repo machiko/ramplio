@@ -3,7 +3,7 @@
 - 分支：`feat/auto-history`（worktree：`/Users/reyes/Workspace/ramplio-worktrees/auto-history`）
 - 基準：`main` @ 9a61b13
 - 規模：一般
-- 狀態：第 5 段第 2 輪完成，待複審（2026-11-25）
+- 狀態：第 4 段複審通過，第 6 段 PR 等 CI（2026-11-26）
 
 ## 規格
 
@@ -156,6 +156,7 @@
 - 2026-11-25（第 5 段第 2 輪，L-2）：`nextStamp` 改成掃過所有檔名，取最大的可解析時間戳，排在最後的外來檔（如 `zzz.json`）不會讓時鐘倒退保護失效。
 - 2026-11-25（第 5 段第 2 輪，L-3，不改程式）：行程在 O_EXCL 佔位之後、rename 之前被砍掉，會留下 0 byte 的佔位檔或 `*.json.tmp`。0 byte 檔 `List` 會靜默略過，但它算在保留筆數裡，會照輪替被刪；`*.json.tmp` 不符合 `*.json` 不會被讀，也不會被輪替，需要手動清。
 - 2026-11-25（第 5 段第 2 輪，L-4，不改程式）：只有 baseline 欄位、沒有 `target_key` 的檔（例如手動把 `--save-baseline` 的檔放進 `runs/`）照樣會被讀進來，但空的 key 永遠不會被當成同目標，不會被自動比較；`compare` 零參數時如果它是最近一筆，會回「沒有同目標的前一筆」。
+- 2026-11-26（第 4 段第 3 次審查）：LOW 不處理，寫進 PR 說明：(1) LOW-1：在空的專案根目錄設 `RAMPLIO_HISTORY_DIR=.`，因為目錄裡只有 `runs/`，仍會寫入 `*` 的 `.gitignore`；(2) LOW-2：`runs/` 建立之後如果存檔失敗，下一次不會再印「請自己忽略 runs/」的提示（提示只在建立 `runs/` 那次印）。
 
 ## History
 
@@ -220,3 +221,4 @@
   - `go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest run`：`0 issues.`，exit 0
   - `go build ./...`：exit 0，無輸出
   - repo 內沒有殘留 `.ramplio/`
+- 2026-11-26（第 4 段）：第 3 次獨立審查結論「可以進 PR」，無 CRITICAL／HIGH／MEDIUM，LOW 2 條記入 Decisions，不處理。主對話另做端到端驗證：兩次 run 自動比較、`compare`／`report` 零參數、紀錄檔沒有 token 原文，都通過。進第 6 段。
