@@ -45,7 +45,9 @@ func TestPrintWelcome(t *testing.T) {
 	// surfaces the help pointer for advanced features.
 	for _, want := range []string{
 		"撐得住多少人",
-		"ramplio discover --url https://example.com",
+		"ramplio <網址或貼上 curl>",
+		"ramplio https://example.com",
+		"pbpaste | ramplio -",
 		"ramplio run --dashboard",
 		"ramplio run --url https://example.com",
 		"ramplio --help",

@@ -2,11 +2,19 @@ package main
 
 import (
 	"bytes"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/machiko/ramplio/v3/internal/discover"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // englishLeftovers are phrases from the old English report that must NOT appear
@@ -134,4 +142,155 @@ func assertNoEnglishLeftovers(t *testing.T, out string) {
 			t.Errorf("report still contains English leftover %q\n--- got ---\n%s", bad, out)
 		}
 	}
+}
+
+// recordingServer counts requests and remembers whether every one carried the
+// expected Authorization header and body.
+type recordingServer struct {
+	*httptest.Server
+	total, mismatched atomic.Int64
+}
+
+func newRecordingServer(t *testing.T, wantAuth, wantBody string) *recordingServer {
+	t.Helper()
+	rs := &recordingServer{}
+	rs.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rs.total.Add(1)
+		b, _ := io.ReadAll(r.Body)
+		if r.Header.Get("Authorization") != wantAuth || string(b) != wantBody {
+			rs.mismatched.Add(1)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(rs.Close)
+	return rs
+}
+
+func execDiscover(t *testing.T, stdin string, args ...string) (string, error) {
+	t.Helper()
+	cmd := newDiscoverCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetIn(strings.NewReader(stdin))
+	cmd.SetArgs(args)
+	err := cmd.Execute()
+	return out.String(), err
+}
+
+// 情境 8：discover 本身也守門，寫入型方法沒加 --allow-write 只發一發就擋下。
+func TestDiscoverWriteMethodRequiresAllowWrite(t *testing.T) {
+	srv := newRecordingServer(t, "", "")
+
+	out, err := execDiscover(t, "", "--url", srv.URL, "--method", "POST", "--probe-duration", "1s", "--max-rps", "5")
+
+	require.Error(t, err, "寫入型方法沒加 --allow-write 應回錯誤（exit ≠ 0）")
+	assert.Equal(t, int64(1), srv.total.Load(), "只能送出 1 發預檢")
+	assert.Contains(t, out, "--allow-write")
+	assert.NotContains(t, out, "容量報告", "不該開始探測")
+}
+
+// 情境 4（cmd 層）：--curl 解析出的 header 與 body 要帶進每個探測請求。
+func TestDiscoverCurlProbeSendsHeadersAndBody(t *testing.T) {
+	srv := newRecordingServer(t, "Bearer s3cr3t", `{"a":1}`)
+	curl := "curl '" + srv.URL + "' -H 'Authorization: Bearer s3cr3t' --data-raw '{\"a\":1}'"
+
+	out, err := execDiscover(t, "", "--curl", curl, "--allow-write", "--probe-duration", "1500ms", "--max-rps", "5")
+
+	require.NoError(t, err)
+	assert.Contains(t, out, "容量報告")
+	assert.Greater(t, srv.total.Load(), int64(1))
+	assert.Equal(t, int64(0), srv.mismatched.Load(), "每個請求都要帶 Authorization 與 body")
+	assert.NotContains(t, out, "s3cr3t", "輸出不得出現 token 原文")
+}
+
+// --curl - 從 stdin 讀；明確給的 -H/--method/--body 覆蓋 curl 解析值。
+func TestDiscoverCurlStdinExplicitFlagsOverride(t *testing.T) {
+	srv := newRecordingServer(t, "Bearer override", "new-body")
+	curl := "curl " + srv.URL + " -H 'authorization: Bearer original' --data-raw 'old-body'"
+
+	_, err := execDiscover(t, curl, "--curl", "-",
+		"-H", "Authorization: Bearer override", "--body", "new-body", "--method", "PUT", "--allow-write",
+		"--probe-duration", "1500ms", "--max-rps", "5")
+
+	require.NoError(t, err)
+	assert.Greater(t, srv.total.Load(), int64(1))
+	assert.Equal(t, int64(0), srv.mismatched.Load(), "明確旗標必須覆蓋 curl 的值（含大小寫不同的同名 header）")
+}
+
+func TestDiscoverRequiresExactlyOneOfURLOrCurl(t *testing.T) {
+	_, err := execDiscover(t, "")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--curl")
+
+	_, err = execDiscover(t, "", "--url", "http://127.0.0.1:1", "--curl", "curl http://127.0.0.1:1")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "二擇一")
+}
+
+func TestDiscoverRejectsMalformedHeaderFlag(t *testing.T) {
+	_, err := execDiscover(t, "", "--url", "http://127.0.0.1:1", "-H", "no-colon-here")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "-H")
+}
+
+// H1（discover 層）：無法完整解讀的 curl 視同寫入，沒加 --allow-write 只發 1 發。
+func TestDiscoverCurlUncertainRequiresAllowWrite(t *testing.T) {
+	srv := newRecordingServer(t, "", "")
+
+	out, err := execDiscover(t, "", "--curl", "curl --http3 "+srv.URL, "--probe-duration", "1s", "--max-rps", "5")
+
+	require.Error(t, err)
+	assert.Equal(t, int64(1), srv.total.Load(), "只能送出 1 發預檢")
+	assert.Contains(t, out, "無法完整解讀")
+	assert.Contains(t, out, "已送出 1 發真實 GET 預檢")
+	assert.NotContains(t, out, "容量報告")
+}
+
+// M3（discover 層）。
+func TestDiscoverCurlStdinOverLimitFails(t *testing.T) {
+	huge := "curl http://127.0.0.1:1/ -d " + strings.Repeat("a", maxCurlInputBytes)
+
+	_, err := execDiscover(t, huge, "--curl", "-")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "輸入超過 1MiB")
+}
+
+// 第 2 輪 M2：--save-baseline 寫出的檔案也不能有網址裡的憑證。
+func TestDiscoverProbeSaveBaselineMasksCredentials(t *testing.T) {
+	srv := newRecordingServer(t, "", "")
+	path := filepath.Join(t.TempDir(), "b.json")
+	target := strings.Replace(srv.URL, "http://", "http://u:S3CRETPW@", 1) + "/x?token=S3CRETTOK&page=2"
+
+	_, err := execDiscover(t, "", "--url", target, "--save-baseline", path,
+		"--probe-duration", "1500ms", "--max-rps", "5")
+	require.NoError(t, err)
+
+	saved, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.NotContains(t, string(saved), "S3CRETPW")
+	assert.NotContains(t, string(saved), "S3CRETTOK")
+	assert.Contains(t, string(saved), "token=***")
+}
+
+// 第 2 輪 LOW 1（discover 層）：用 -H 明確加的方法覆寫 header 一樣要擋。
+func TestDiscoverProbeMethodOverrideHeaderRequiresAllowWrite(t *testing.T) {
+	srv := newRecordingServer(t, "", "")
+
+	out, err := execDiscover(t, "", "--url", srv.URL, "-H", "X-Method-Override: PUT",
+		"--probe-duration", "1s", "--max-rps", "5")
+
+	require.Error(t, err)
+	assert.Equal(t, int64(1), srv.total.Load(), "只能送出 1 發預檢")
+	assert.Contains(t, out, "X-Method-Override")
+	assert.NotContains(t, out, "容量報告")
+}
+
+// 第 2 輪 LOW 4：重複的 -H 不分大小寫去重，後者覆蓋前者。
+func TestDiscoverParseHeaderFlagsLaterWins(t *testing.T) {
+	got, err := parseHeaderFlags([]string{"authorization: first", "X-A: 1", "Authorization: second"})
+
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"Authorization": "second", "X-A": "1"}, got)
 }

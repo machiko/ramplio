@@ -13,10 +13,12 @@ import (
 // Config controls the capacity discovery run.
 type Config struct {
 	URL           string
-	Method        string        // default "GET"
-	Tolerance     time.Duration // p99 threshold for a passing probe; default 2s
-	MaxRPS        int           // stop probing above this rate; default 500
-	ProbeDuration time.Duration // how long each probe runs; default 15s
+	Method        string            // default "GET"
+	Headers       map[string]string // sent on every request (read-only; may be nil)
+	Body          []byte            // sent on every request (may be nil)
+	Tolerance     time.Duration     // p99 threshold for a passing probe; default 2s
+	MaxRPS        int               // stop probing above this rate; default 500
+	ProbeDuration time.Duration     // how long each probe runs; default 15s
 	HTTPConfig    protocols.HTTPConfig
 }
 
@@ -130,9 +132,13 @@ func (p *Prober) Run(ctx context.Context, onProbeStart func(rps int), onProbe fu
 }
 
 func (p *Prober) probe(ctx context.Context, targetRPS int) ProbeResult {
+	// SetupSteps and Steps share this one request so the warm-up carries the
+	// same credentials and payload as the measured probe.
 	req := protocols.Request{
-		Method: p.cfg.Method,
-		URL:    p.cfg.URL,
+		Method:  p.cfg.Method,
+		URL:     p.cfg.URL,
+		Headers: p.cfg.Headers,
+		Body:    p.cfg.Body,
 	}
 
 	stages := []scenarios.Stage{{Duration: p.cfg.ProbeDuration, TargetRPS: targetRPS}}

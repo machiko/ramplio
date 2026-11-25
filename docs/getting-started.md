@@ -22,6 +22,27 @@ ramplio --version
 
 ---
 
+## Quickstart: One command, capacity answer
+
+Give Ramplio a URL — or paste a request copied from your browser — and it
+probes how much traffic the endpoint can take:
+
+```bash
+ramplio https://example.com          # same as: ramplio discover --url https://example.com
+pbpaste | ramplio -                  # DevTools → Network → right-click → Copy as cURL
+ramplio 'curl https://api.example.com/me -H "Authorization: Bearer …"'
+```
+
+- Headers and body from the curl are sent on every probe request; the terminal
+  only shows header **names** (values are masked as `***`).
+- Write methods (POST/PUT/PATCH/DELETE, including Chrome's implicit POST from
+  `--data-raw`) are **not** load tested by default: Ramplio sends one preflight,
+  prints the result and tells you to re-run with
+  `pbpaste | ramplio discover --curl - --allow-write` if you really mean it.
+- `ramplio x.yaml` / `ramplio x.har` print the right command
+  (`run --scenario` / `import`) instead of running; a mistyped subcommand such
+  as `ramplio dicover` gets a suggestion and never starts traffic.
+
 ## Quickstart: One-liner load test
 
 Hit a URL with 10 virtual users for 30 seconds. Point it at your own service,

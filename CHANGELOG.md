@@ -7,6 +7,9 @@ Ramplio 的所有重要變更都記錄於此。
 
 ## [Unreleased]
 
+### 新增
+- **單一入口 `ramplio <網址 | 'curl …' | ->`**: 不必記子指令,直接給網址、貼上瀏覽器 DevTools 的「Copy as cURL」或 `pbpaste | ramplio -`,就帶著 header／body 開始容量探測;`.yaml`／`.har` 會印出正確指令,打錯字的子指令會給建議且不會開跑。POST／PUT／PATCH／DELETE(含 Chrome 只有 `--data-raw` 的隱式 POST)預設只送一發預檢,確定要壓測需明確加 `--allow-write`;終端輸出與建議指令只顯示 header 名稱,不會印出 token。`discover` 同步新增 `--curl`、`-H`、`--method`、`--body`、`--allow-write`,開跑前的預檢也改為送出完整請求(含 header 與 body),寫入型預檢不再因少了授權拿到假的 401/415。
+
 ### 修正
 - **`auth:` 步驟在多 VU 下並發寫入共用 header map**: 有 `auth:` 但沒寫 `headers:` 的步驟,其 header 模板由所有 VU 共用,auth 標頭卻被寫回模板本身——可能觸發 Go runtime `fatal error: concurrent map writes` 直接終止壓測,啟動瞬間也可能讓 VU 帶到別人的 token(假 401)。現在 auth 一律寫在每次請求自己的 map 上,模板永不被修改;沒有 header 的請求也順帶省下一次配置。
 - **熔斷器觸發旗標的 data race**: 熔斷器的觸發旗標在記錄失敗時持鎖寫入,但每個 VU 與 rate 模式的派發器在每次請求前都不持鎖讀取它——違反 Go 記憶體模型,多 VU 啟用 `circuit_breaker` 時 `-race` 會報錯。旗標改為原子變數;行為不變(x86 上指令與修正前相同,arm64 每次檢查多不到 1 ns)。

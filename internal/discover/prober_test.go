@@ -2,6 +2,7 @@ package discover
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -231,4 +232,42 @@ func TestRunNilCallbacksAndLowRPSWorkerFloor(t *testing.T) {
 	assert.Equal(t, 1, res.SafeLimit)
 	assert.True(t, res.Exhausted)
 	assert.Equal(t, ProbePass, res.Probes[0].Status)
+}
+
+// TestProbeSendsHeadersAndBody 對應驗收情境 4：探測送出的每個請求（含暖機的
+// SetupSteps）都必須帶上 Config 指定的 header 與 body，否則帶權杖的 API 會一路 401。
+func TestProbeSendsHeadersAndBody(t *testing.T) {
+	const wantAuth = "Bearer secret-token"
+	const wantBody = `{"q":"ping"}`
+
+	var total, bad int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt64(&total, 1)
+		body, _ := io.ReadAll(r.Body)
+		if r.Header.Get("Authorization") != wantAuth ||
+			r.Header.Get("Content-Type") != "application/json" ||
+			string(body) != wantBody {
+			atomic.AddInt64(&bad, 1)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	p := New(Config{
+		URL:    srv.URL,
+		Method: "POST",
+		Headers: map[string]string{
+			"Authorization": wantAuth,
+			"Content-Type":  "application/json",
+		},
+		Body:          []byte(wantBody),
+		MaxRPS:        5,
+		ProbeDuration: 1500 * time.Millisecond,
+		Tolerance:     2 * time.Second,
+	})
+	res := p.Run(context.Background(), nil, nil)
+
+	require.Len(t, res.Probes, 1)
+	require.Greater(t, atomic.LoadInt64(&total), int64(1), "至少要有暖機＋探測請求")
+	assert.Equal(t, int64(0), atomic.LoadInt64(&bad), "每個請求都必須帶 header 與 body")
 }

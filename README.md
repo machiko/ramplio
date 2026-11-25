@@ -3,7 +3,8 @@
 **輸入網址，回答你的服務撐得住多少人。** Ramplio 自動探測 HTTP 服務的容量上限、輸出白話容量報告，而且數字你能用內建 `mock-server` 注入已知延遲自行驗證——不必先學會 VU/RPS，也不必賭工具有沒有測準。也支援 YAML 多階段情境、登入流程、即時儀表板與分散式壓測，全部都在單一自包含的執行檔中。
 
 ```bash
-ramplio discover --url https://example.com   # 30 秒回答：你的服務撐得住多少人
+ramplio https://example.com      # 給網址，回答：你的服務撐得住多少人
+pbpaste | ramplio -              # 或在瀏覽器 DevTools 對請求按「Copy as cURL」，帶著 header／body 探測
 ```
 
 ## 快速導航
@@ -399,8 +400,26 @@ Coordinator 自動做到：
 不需要了解 VU 或 RPS 是什麼——直接告訴 Ramplio 網址，它自動幫你找出網站的最大承載量：
 
 ```bash
-ramplio discover --url https://example.com
+ramplio https://example.com                    # 單一入口：等同 discover --url
+ramplio 'curl https://api.example.com/me -H "Authorization: Bearer …"'
+pbpaste | ramplio -                            # 貼上 DevTools「Copy as cURL」
 ```
+
+單一入口會自動判斷你給的是網址、curl、還是檔案（`.yaml` 會提示用 `run --scenario`、`.har` 會提示用 `import`），打錯字的子指令會給建議而不會開跑。
+
+**寫入型方法的安全閥：** POST／PUT／PATCH／DELETE（包含 Chrome 複製出來、只有 `--data-raw` 沒寫 `-X` 的隱式 POST）預設**只送一發預檢**、印出結果就停下；確定要壓測請改用 `pbpaste | ramplio discover --curl - --allow-write`。終端輸出只顯示 header 名稱、值一律遮成 `***`，建議指令也不會把你的 token 印回畫面。
+
+需要細部控制時用 `discover` 子指令：
+
+```bash
+ramplio discover --url https://example.com
+ramplio discover --url https://api.example.com/me -H "Authorization: Bearer $TOKEN"
+ramplio discover --url https://api.example.com/orders --method POST --body '{"sku":1}' \
+  -H "Content-Type: application/json" --allow-write
+pbpaste | ramplio discover --curl - -H "Authorization: Bearer $NEW_TOKEN"   # 明確旗標覆蓋 curl 的值
+```
+
+curl 支援 DevTools 產出的寫法與常見旗標：`-X`、`-H`、`-d/--data/--data-raw/--data-binary`、`--data-urlencode`、`--json`、`-G`、`-I`、`-b`、`-u/--user`（轉 Basic 認證）、`--oauth2-bearer`、`-A`、`-e`、`--url`，以及 `-sXPOST` 這類短旗標叢集；`--compressed`、`-s`、`-S`、`-k`、`-L`、`-i`、`-v`、`-f`、`-4`、`-6`、`--http1.1`、`--http2` 略過，`-o`、`-m`、`-w` 等只影響 curl 本身輸出的旗標會印警告後略過。**無法完整重現的寫法**（不認識的旗標、`-F` 表單、`-T` 上傳、`-d @檔案`、`-x` proxy、`X-HTTP-Method-Override` 這類方法覆寫 header 等）一律視同寫入：沒加 `--allow-write` 就只送 1 發預檢。警告只列旗標名稱，網址裡的密碼、`#` 後面的 fragment，以及名稱含 `token`、`secret`、`key`、`sig`、`auth`、`pass`、`session`、`code` 等字樣的參數，在畫面上與 `--save-baseline` 存檔裡都會遮成 `***`。
 
 也可以從網頁儀表板的「⚡ 探測上限」分頁直接操作，包含即時探測進度表格與容量報告卡片，PM 不需要技術背景也能讀懂結果。
 
@@ -726,10 +745,21 @@ Flags:
 ```
 
 ```
+ramplio <網址 | 'curl …' | ->
+
+不寫子指令直接給目標：網址或 curl 走容量探測；寫入型方法只送一發預檢。
+```
+
+```
 ramplio discover [flags]
 
 Flags:
-  -u, --url string             目標 URL（必填）
+  -u, --url string             目標 URL（與 --curl 二擇一）
+      --curl string            DevTools「Copy as cURL」整段；給 - 從 stdin 讀
+  -H, --header stringArray     額外 header，可重複（覆蓋 curl 解析出的同名 header）
+      --method string          HTTP 方法（預設 GET；有 --body 時預設 POST）
+      --body string            請求內容
+      --allow-write            允許對 POST/PUT/PATCH/DELETE 壓測（否則只送一發預檢）
       --tolerance string       可接受的 p99 時間（預設 "2s"）
       --max-rps int            最高探測速率（預設 500）
       --probe-duration string  每個探測點的時長（預設 "15s"）

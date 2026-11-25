@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/url"
 	"strings"
 	"time"
 
@@ -52,7 +53,17 @@ func methodOrGet(m string) string {
 // explanation to w and returns a non-nil error so the caller can abort. Slow
 // targets, timeouts and HTTP error codes do NOT abort — the service is reachable
 // and the user may legitimately want to measure those.
-func runPreflight(ctx context.Context, w io.Writer, cfg protocols.HTTPConfig, probeURL, probeMethod string) error {
+//
+// req is sent as-is (headers and body included) so a write-type probe gets the
+// same auth / content-type as the real traffic instead of a misleading 401/415.
+func runPreflight(ctx context.Context, w io.Writer, cfg protocols.HTTPConfig, req protocols.Request) error {
+	_, err := preflightOnce(ctx, w, cfg, req)
+	return err
+}
+
+// preflightOnce is runPreflight that also returns the raw result, so a caller
+// can tell whether the request actually reached the target.
+func preflightOnce(ctx context.Context, w io.Writer, cfg protocols.HTTPConfig, req protocols.Request) (protocols.Result, error) {
 	cfg.RequestTimeout = preflightTimeout
 	exec := protocols.NewHTTPExecutor(cfg)
 	defer exec.CloseIdleConnections()
@@ -60,26 +71,27 @@ func runPreflight(ctx context.Context, w io.Writer, cfg protocols.HTTPConfig, pr
 	pctx, cancel := context.WithTimeout(ctx, preflightTimeout)
 	defer cancel()
 
-	res, trace := exec.ExecuteTraced(pctx, protocols.Request{Method: probeMethod, URL: probeURL})
+	probeURL := maskURLForDisplay(req.URL) // display only; req is sent unmodified
+	res, trace := exec.ExecuteTraced(pctx, req)
 	kind := metrics.ClassifyError(res.Error, res.StatusCode)
 
 	if !reporter.IsReachabilityFailure(kind) {
 		// Reachable: surface where the single probe's time went, so the user can
 		// see what the tool measures (DNS / 連線 / TLS / 首位元組) before the run.
 		printPreflightBreakdown(w, probeURL, res, trace)
-		return nil
+		return res, nil
 	}
 
 	title, cause, action, ok := reporter.ExplainErrorKind(kind)
 	if !ok {
-		return nil
+		return res, nil
 	}
 	fmt.Fprintf(w, "\n✗ 預檢沒過：%s\n", title)
 	fmt.Fprintf(w, "  目標：%s\n", probeURL)
 	fmt.Fprintf(w, "  %s\n", cause)
 	fmt.Fprintf(w, "  → 建議：%s\n", action)
 	fmt.Fprintln(w, "  （確定要照跑可加 --no-preflight 略過這項檢查）")
-	return fmt.Errorf("預檢失敗：目標無法連線（%s）", kind)
+	return res, fmt.Errorf("預檢失敗：目標無法連線（%s）", kind)
 }
 
 // printPreflightBreakdown shows the single probe's latency split into connection
@@ -107,4 +119,90 @@ func fmtMs(d time.Duration) string {
 		return "—"
 	}
 	return fmt.Sprintf("%dms", d.Milliseconds())
+}
+
+// sensitiveQueryKeyParts: a query parameter whose name contains any of these
+// (case-insensitive substring) has its value masked on screen and in saved
+// files. Over-masking a harmless parameter is preferred to leaking a secret.
+var sensitiveQueryKeyParts = []string{
+	"token", "secret", "key", "sig", "auth", "pass", "credential", "session", "jwt", "code",
+}
+
+const maskedValue = "***"
+
+// maskURLForDisplay hides credentials in a URL before it is printed or saved:
+// the userinfo password (or the whole userinfo when there is no password), the
+// values of secret-looking query parameters, and the whole fragment (OAuth
+// implicit flows put access_token there). The request itself is unchanged.
+func maskURLForDisplay(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "（無法解析的網址）"
+	}
+	userinfo := ""
+	if u.User != nil {
+		if _, hasPassword := u.User.Password(); hasPassword {
+			userinfo = u.User.Username() + ":" + maskedValue + "@"
+		} else {
+			userinfo = maskedValue + "@"
+		}
+		u.User = nil
+	}
+	hasFragment := u.Fragment != "" || u.RawFragment != "" || strings.Contains(raw, "#")
+	u.Fragment, u.RawFragment = "", ""
+	u.RawQuery = maskQuery(u.RawQuery)
+	out := u.String()
+	if userinfo != "" {
+		out = strings.Replace(out, "//", "//"+userinfo, 1)
+	}
+	if hasFragment {
+		out += "#" + maskedValue
+	}
+	return out
+}
+
+func isSensitiveQueryKey(name string) bool {
+	lower := strings.ToLower(name)
+	for _, part := range sensitiveQueryKeyParts {
+		if strings.Contains(lower, part) {
+			return true
+		}
+	}
+	return false
+}
+
+func maskQuery(rawQuery string) string {
+	if rawQuery == "" {
+		return ""
+	}
+	parts := strings.Split(rawQuery, "&")
+	masked := make([]string, len(parts))
+	for i, part := range parts {
+		k, _, hasValue := strings.Cut(part, "=")
+		name, err := url.QueryUnescape(k)
+		if err != nil {
+			name = k
+		}
+		if hasValue && isSensitiveQueryKey(name) {
+			masked[i] = k + "=" + maskedValue
+			continue
+		}
+		masked[i] = part
+	}
+	return strings.Join(masked, "&")
+}
+
+// preflightOutcomeMessage tells the user honestly what the blocked preflight
+// did: a response means the server processed it (a write happened once); a
+// timeout or mid-flight reset means it may have; anything else means the
+// request never reached the target.
+func preflightOutcomeMessage(method string, res protocols.Result) string {
+	if res.StatusCode > 0 {
+		return fmt.Sprintf("已送出 1 發真實 %s 預檢（伺服器已實際處理這一發，若是寫入就已經寫入一次）。", method)
+	}
+	switch metrics.ClassifyError(res.Error, res.StatusCode) {
+	case metrics.ErrKindTimeout, metrics.ErrKindConnReset:
+		return fmt.Sprintf("1 發 %s 預檢已送出但沒有收到回應（逾時或連線中斷），無法確定伺服器是否已處理（可能已寫入一次）。", method)
+	}
+	return "預檢沒有送達目標，沒有寫入。"
 }
