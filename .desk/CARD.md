@@ -3,7 +3,7 @@
 - 分支：`feat/smart-entry`（worktree：`/Users/reyes/Workspace/ramplio-worktrees/smart-entry`）
 - 基準：`main` @ 9c10397
 - 規模：一般
-- 狀態：第 5 段第 2 輪完成，待複審（2026-11-25）
+- 狀態：第 4 段複審通過（無 CRITICAL／HIGH／MEDIUM），第 6 段 PR 等 CI（2026-11-25）
 
 ## 規格
 
@@ -90,7 +90,7 @@ Reyes 說「連我自己都不太會用」。與 agy（Gemini，plan 模式唯�
 - 2026-11-25（第 5 段第 1 輪）：`run.go` 的那 1 行是 `runPreflight` 改吃 `protocols.Request` 的必要連動（實作計畫寫了「既有呼叫端跟著調整」），只把參數包成 Request，`run` 的行為不變；唯一可見差異是預檢輸出的網址現在也會遮罩（M1 改在 `runPreflight` 內，`run` 一起受惠）。
 - 2026-11-25（第 5 段第 1 輪）：Uncertain 採 fail-closed。curl 只要有不認識的旗標，或有無法重現的寫法（`-F`、`-T`、`-d @檔案`、`--data-urlencode @檔案`、`-x/--proxy`、`--resolve`、`-K` 等），就設 `Uncertain`。discover 與單一入口在 Uncertain 且沒加 `--allow-write` 時，跟寫入型一樣只送 1 發預檢就擋下，並說明是「無法完整解讀」。只影響 curl 本身輸出的帶值旗標（`-o`、`-m`、`-w`、`--cacert` 等）只警告、不設 Uncertain。
 - 2026-11-25（第 5 段第 1 輪）：M2 的處置：被擋下的那 1 發照舊送真實方法（不改成 OPTIONS/HEAD，那要另外回規格確認），擋下後明說「已送出 1 發真實 <METHOD> 預檢（伺服器已實際處理這一發，若是寫入就已經寫入一次）」。
-- 2026-11-25（第 5 段第 1 輪）：`discover` 被擋時回 exit ≠ 0、單一入口回 exit 0。**待使用者最後確認**。
+- 2026-11-25（第 5 段第 1 輪）：`discover` 被擋時回 exit ≠ 0、單一入口回 exit 0。**使用者已確認（2026-11-25）**。
 - 2026-11-25（第 5 段第 1 輪）：改了一組既有測試的輸入：`parse_test.go` 的「不認識的旗標產生警告」原本用結尾不帶值的 `--max-time` 當「不認識的旗標」。H2 要求 `--max-time` 改成已知的帶值旗標，所以改成合法寫法 `--max-time 5`。斷言沒有放寬：仍要求警告提到兩個旗標，並新增要求 `Uncertain == true`（因為 `--http2`）。
 - 2026-11-25（第 5 段第 1 輪）：H2 延伸：`discover -H` 格式錯誤的錯誤訊息原本用 `%q` 印出整段值，跟審查指出的外洩是同一類，改成只說「第 N 個 -H」。看不懂的參數回顯只顯示第一個詞並遮罩網址秘密。
 - 2026-11-25（第 5 段第 1 輪）：M4：大小寫不敏感的 header 覆蓋邏輯從 `discover.go` 移到 `curlparse.MergeHeaders`，解析器與 discover 共用同一份。
@@ -101,6 +101,9 @@ Reyes 說「連我自己都不太會用」。與 agy（Gemini，plan 模式唯�
 - 2026-11-25（第 5 段第 2 輪）：LOW 1 兩層都擋：curl 裡出現的方法覆寫 header 由解析器設 Uncertain；`discover --url … -H "X-HTTP-Method-Override: …"` 明確給的，由 `resolveDiscoverRequest` 檢查。判斷邏輯共用 `curlparse.MethodOverrideHeaderNames`。
 - 2026-11-25（第 5 段第 2 輪）：LOW 5 的測試第一次跑就是綠的：第 1 輪已實作「已知帶值旗標缺值就回錯」，這次只是補回歸保護。
 - 2026-11-25（實作）：curl 的 tokenizer 跟解析放同一個 `parse.go`，不另開檔，守住「只改計畫列的檔案」。
+
+- 2026-11-25（使用者確認）：被擋下的寫入型請求維持真的送出 1 發預檢（畫面明說已送出），不改成完全不送。
+- 2026-11-25（第 4 段第 3 次審查）：LOW 不修、寫進 PR 說明：(1) 遮罩關鍵字沒涵蓋 `pwd`、`bearer`、`otp`、`pin`；(2) 沒有 `=` 的 query 片段（`?<secret>`）不遮，現實罕見。
 
 ## History
 
@@ -167,3 +170,4 @@ Reyes 說「連我自己都不太會用」。與 agy（Gemini，plan 模式唯�
     ```
   - `go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest run`：`0 issues.`，exit 0
   - `go build ./...`：exit 0，無輸出
+- 2026-11-25（第 4 段）：第 3 次獨立審查（go-reviewer，只拿規格＋diff）結論「可以進 PR」，無 CRITICAL／HIGH／MEDIUM，LOW 2 條記入 Decisions；Claude 主對話重跑 `go test -race -count=1 ./...` 15 套件 ok、golangci-lint `0 issues.`。進第 6 段。
