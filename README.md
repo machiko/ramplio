@@ -813,7 +813,9 @@ ramplio compare                                    # 比較最近一筆與同目
 ramplio report                                     # 用最近一筆 run 紀錄產生 report.html
 ```
 
-- 同目標的認定：模式、HTTP 方法、網址（情境模式用情境檔路徑）、負載參數（`--vus`／`--rps`、`-d`；discover 是 `--tolerance`、`--max-rps`、`--probe-duration`）都相同。
+- 同目標的認定：模式、HTTP 方法、網址、header＋body、負載參數（`--vus`／`--rps`、`-d`；discover 是 `--tolerance`、`--max-rps`、`--probe-duration`）都相同。header＋body 只存 sha256 前 8 碼，不存原文；header 順序與名稱大小寫不影響，但 token 換了就會當成新目標，從第一筆重新累積。
+- 情境檔模式（`--scenario`）只看檔案路徑：改了情境檔內容但路徑不變，仍會跟上一次比較。
+- 壞掉或由較新版本 ramplio 寫的紀錄檔會被略過（印警告），但不會被自動刪除；檔名排在最新的壞檔要自己刪。
 - 加 `--no-history` 不留存；設 `RAMPLIO_HISTORY_DIR` 可以改存放位置。存檔失敗只印警告，不影響結果與結束碼。
 - 紀錄檔裡的網址會遮罩帳密與 token。紀錄檔是 baseline 格式的超集，也可以直接 `ramplio compare .ramplio/runs/a.json .ramplio/runs/b.json`。
 

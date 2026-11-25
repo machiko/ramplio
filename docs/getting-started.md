@@ -444,8 +444,11 @@ ramplio run --url https://api.example.com/health --vus 50 --duration 60s --dns-c
 Every `run` / `discover` automatically saves a run record to `.ramplio/runs/`
 in the current directory (the latest 50 are kept; the directory ignores itself
 via its own `.gitignore`). At the end of each run the result is compared with
-the previous run of the **same target and settings** (mode, method, masked URL
-or scenario path, and load flags). That comparison is informational only — it
+the previous run of the **same target and settings** (mode, method, masked URL,
+a hash of headers + body, and load flags; scenario mode looks at the scenario
+file path only, not its content). Only the first 8 hex chars of a sha256 of the
+headers and body are stored — never their values — so rotating a token starts a
+new series. That comparison is informational only — it
 never changes the exit code.
 
 ```bash
@@ -456,7 +459,9 @@ ramplio report                                    # HTML report from the latest 
 
 Use `--no-history` to skip recording, or `RAMPLIO_HISTORY_DIR` to keep records
 elsewhere. A failure to save (read-only directory, full disk) only prints a
-warning. URL credentials are masked in records.
+warning. URL credentials are masked in records. Corrupt records, or records
+written by a newer ramplio, are skipped with a warning but never deleted
+automatically.
 
 The explicit flags still work when you want to manage file names yourself:
 

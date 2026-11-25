@@ -8,7 +8,7 @@ Ramplio 的所有重要變更都記錄於此。
 ## [Unreleased]
 
 ### 新增
-- **自動留存與比對**: `run`／`discover`（含單一入口）每次跑完自動存一筆執行紀錄到 `.ramplio/runs/`（保留最近 50 筆,目錄自帶 `.gitignore`），不必事先記得加 `--output`／`--save-baseline`;結尾自動跟「上一次同目標、同設定」比較 p99、錯誤率、吞吐量,這段只是參考、不影響結束碼。`ramplio compare` 不帶參數時比較最近一筆與同目標的前一筆（退步照舊 exit 1）,`ramplio report` 不帶參數時用最近一筆 run 紀錄產生 HTML。存檔失敗只警告;`--no-history` 可關閉,`RAMPLIO_HISTORY_DIR` 可改位置。紀錄檔是 baseline 格式的超集,舊的 `compare a.json b.json` 可直接讀。
+- **自動留存與比對**: `run`／`discover`（含單一入口）每次跑完自動存一筆執行紀錄到 `.ramplio/runs/`（保留最近 50 筆,目錄自帶 `.gitignore`），不必事先記得加 `--output`／`--save-baseline`;結尾自動跟「上一次同目標、同設定」(含 header＋body,只存雜湊不存原文)比較 p99、錯誤率、吞吐量,這段只是參考、不影響結束碼。`ramplio compare` 不帶參數時比較最近一筆與同目標的前一筆（退步照舊 exit 1）,`ramplio report` 不帶參數時用最近一筆 run 紀錄產生 HTML。存檔失敗只警告;`--no-history` 可關閉,`RAMPLIO_HISTORY_DIR` 可改位置。紀錄檔是 baseline 格式的超集,舊的 `compare a.json b.json` 可直接讀。
 - **單一入口 `ramplio <網址 | 'curl …' | ->`**: 不必記子指令,直接給網址、貼上瀏覽器 DevTools 的「Copy as cURL」或 `pbpaste | ramplio -`,就帶著 header／body 開始容量探測;`.yaml`／`.har` 會印出正確指令,打錯字的子指令會給建議且不會開跑。POST／PUT／PATCH／DELETE(含 Chrome 只有 `--data-raw` 的隱式 POST)預設只送一發預檢,確定要壓測需明確加 `--allow-write`;終端輸出與建議指令只顯示 header 名稱,不會印出 token。`discover` 同步新增 `--curl`、`-H`、`--method`、`--body`、`--allow-write`,開跑前的預檢也改為送出完整請求(含 header 與 body),寫入型預檢不再因少了授權拿到假的 401/415。
 
 ### 修正
