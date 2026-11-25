@@ -146,7 +146,7 @@ func TestRootStdinCurlProbesWithHeaders(t *testing.T) {
 
 // 情境 5：打錯字的子指令不開跑，回錯誤附建議與歡迎畫面指引（走真正的 cobra root）。
 func TestRootUnknownArgSuggests(t *testing.T) {
-	out, err := execRoot(t, "dicover")
+	out, err := execRoot(t, "dicover") //nolint:misspell // 刻意的錯字：情境 5 測的就是打錯子指令
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "你是不是要 discover")
@@ -248,7 +248,7 @@ func TestClassifyTarget(t *testing.T) {
 		{"x.yaml", targetYAMLFile},
 		{"X.YML", targetYAMLFile},
 		{"rec.har", targetHARFile},
-		{"dicover", targetUnknown},
+		{"dicover", targetUnknown}, //nolint:misspell // 刻意的錯字：打錯的子指令必須歸為 unknown
 		{"ftp://x.test", targetUnknown},
 	}
 	for _, tt := range tests {

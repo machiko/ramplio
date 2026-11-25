@@ -3,7 +3,7 @@
 - 分支：`feat/smart-entry`（worktree：`/Users/reyes/Workspace/ramplio-worktrees/smart-entry`）
 - 基準：`main` @ 9c10397
 - 規模：一般
-- 狀態：第 1 段規格已確認（2026-11-25），第 2 段實作中
+- 狀態：第 3 段完成，待獨立審查（2026-11-25）
 
 ## 規格
 
@@ -86,9 +86,31 @@ Reyes 說「連我自己都不太會用」。與 agy（Gemini，plan 模式唯�
 - 2026-11-25（實作）：專案沒有 `changelog.d/`，既有慣例是 `CHANGELOG.md` 的 `[Unreleased]` 區塊，所以改在那裡的「新增」加一條（只動 Unreleased，不碰歷史版本）。
 - 2026-11-25（實作）：`discover` 被 `--allow-write` 擋下時回錯誤（exit ≠ 0）；單一入口照情境 3 回 exit 0。理由：明確下 `discover` 的人（或 CI）要的是探測結果，沒跑成就該失敗；單一入口的擋下是引導。兩者共用 `runDiscover`，都只發一發預檢。
 - 2026-11-25（實作）：`main.go` 的 root 抽成 `newRootCmd()`（保留 `rootCmd` 變數），測試才能拿全新的 root 實跑 cobra 分派；cobra v1.8.0 的 `SuggestionsFor` 不會自己套預設距離，root 明確設 `SuggestionsMinimumDistance: 2`。
+- 2026-11-25（實作）：`smartentry_test.go` 兩處刻意的錯字 `dicover`（情境 5）被 golangci-lint 的 misspell 抓到，用逐行 `//nolint:misspell` 加理由處理；沒有改 `.golangci.yml`、沒有放寬全域規則。本機沒裝 golangci-lint，用 `go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest`（v2.15.0，與 CI 的 latest 對齊）跑，不動 go.mod。
 - 2026-11-25（實作）：curl 的 tokenizer 跟解析放同一個 `parse.go`，不另開檔，守住「只改計畫列的檔案」。
 
 ## History
 
 - 2026-11-25：與 agy 討論三輪後定出規格；建立分支與 worktree。
 - 2026-11-25：使用者確認規格；交給 herdr pane `impl`（wA:p4）實作。
+- 2026-11-25：第 2 段實作完成（TDD，每塊先看到預期原因的紅燈再實作）。commit：92d0f69 curl 解析器、b95ef92 prober header/body、d83f8ee 預檢送完整請求、1ee3b2f discover 旗標與寫入守門、edcd803 歡迎畫面、c1fe0e2 單一入口分派、fc2398c 文件與 CHANGELOG。
+- 2026-11-25：第 3 段測試輸出（實際結尾）：
+  - 完成檢查 `go test ./internal/curlparse/... ./internal/discover/... ./cmd/ramplio/... -run 'Curl|Probe|Root' -count=1`：
+    ```
+    ok  	github.com/machiko/ramplio/v3/internal/curlparse	0.677s
+    ok  	github.com/machiko/ramplio/v3/internal/discover	2.670s
+    ok  	github.com/machiko/ramplio/v3/cmd/ramplio	7.443s
+    ```
+  - `go test -race -count=1 ./...`：
+    ```
+    ok  	github.com/machiko/ramplio/v3/cmd/ramplio	50.169s
+    ok  	github.com/machiko/ramplio/v3/internal/curlparse	3.995s
+    ok  	github.com/machiko/ramplio/v3/internal/discover	11.029s
+    ok  	github.com/machiko/ramplio/v3/internal/engine	103.662s
+    ok  	github.com/machiko/ramplio/v3/internal/scenarios	2.370s
+    （其餘 10 個套件同為 ok，exit 0）
+    ```
+  - `golangci-lint run`（v2.15.0，經 go run）：`0 issues.`，exit 0
+  - `go build ./...`：exit 0，無輸出
+  - 注意：完成檢查的 `-run 'Curl|Probe|Root'` 篩不到情境 9 的 `TestSmartEntryMasksCredentials`（名稱沿用規格），它在 `go test -race ./...` 整套裡有跑且通過。
+  - 觀察到的既有問題（計畫外，未修）：任何指令回錯誤時訊息印兩次（cobra 的 `Error:` 加上 `main()` 自己再印一次）；`runPreflight` 不可達時的「可加 --no-preflight」提示在 discover／單一入口路徑不適用（這兩處沒有該旗標）。
