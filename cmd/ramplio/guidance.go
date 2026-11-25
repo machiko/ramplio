@@ -36,7 +36,7 @@ func printWelcome(w io.Writer) {
 	fmt.Fprintln(w, "  給網址，自動探測容量上限並給白話答案；數字你能自己驗證")
 	fmt.Fprintln(w, guidanceRule)
 	printNextSteps(w, "\n  從這裡開始：",
-		nextStep{"① 探測容量上限（最推薦，一行回答撐多少人）", "ramplio discover --url https://example.com"},
+		nextStep{"① 探測容量上限（最推薦）：ramplio <網址或貼上 curl>", "ramplio https://example.com      （或複製 DevTools 的 curl 後：pbpaste | ramplio -）"},
 		nextStep{"② 開視覺面板（全程點選操作）", "ramplio run --dashboard"},
 		nextStep{"③ 直接壓測一個網址", "ramplio run --url https://example.com"},
 	)
