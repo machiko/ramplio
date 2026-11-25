@@ -1,173 +1,135 @@
-# CARD：智慧單一入口 `ramplio <網址或 curl>`
+# CARD：自動留存與比對（卡 2a）
 
-- 分支：`feat/smart-entry`（worktree：`/Users/reyes/Workspace/ramplio-worktrees/smart-entry`）
-- 基準：`main` @ 9c10397
+- 分支：`feat/auto-history`（worktree：`/Users/reyes/Workspace/ramplio-worktrees/auto-history`）
+- 基準：`main` @ 9a61b13
 - 規模：一般
-- 狀態：第 4 段複審通過（無 CRITICAL／HIGH／MEDIUM），第 6 段 PR 等 CI（2026-11-25）
+- 狀態：第 1 段規格待使用者確認（2026-11-25）
 
 ## 規格
 
 ### Context
 
-Reyes 說「連我自己都不太會用」。與 agy（Gemini，plan 模式唯讀）兩輪討論＋Claude 抽查程式後的共識：根因不是少功能，而是**入口太多、每個入口只做一半**：
+易用性三張卡的第二張（第一張「單一入口」已合併，PR #1）。根因同上一張：**入口太多、每個入口只做一半**。存檔這一塊目前的情況：
 
-- 首推的 `discover` 只能打裸 GET（`cmd/ramplio/discover.go:90-95` 只有 5 個旗標；`internal/discover/prober.go:132` 的 `probe()` 只送 Method+URL），真實 API 帶 Authorization 或 POST 就不能用。
-- `run --url` 沒有即時畫面（TUI 只在 scenario 路徑 `run.go:499,608`）。
-- 兩套精靈（CLI `init` vs dashboard guided）、三種存檔旗標（`--output`／`--report`／`--save-baseline`，compare 只吃 baseline 格式）。
+- 三種存檔各要記一個旗標，而且格式互不相通：
+  - `run --output x.json` → `reporter.Report`（`internal/reporter/json.go:13`），**沒有目標欄位**，只有 `report --input` 吃它，用來轉 HTML。
+  - `run|discover --save-baseline x.json` → `baseline.Baseline`（`internal/baseline/baseline.go:22`），有 `Scenario`（目標識別），只有 `compare` 吃它。discover 只能產 baseline，產不出 Report，因為它沒有 `metrics.Summary`。
+  - `run --report x.html` → HTML 成品，沒有程式會再讀它。
+- `report` 的 `--input` 是必填（`report.go:61`）；`compare` 一定要給兩個參數（`compare.go:89`）。沒有事先存檔，跑完就什麼都比不了。
+- 結果：使用者要先知道「之後想比較」，才會記得加 `--save-baseline`，而且要自己管檔名。
 
-三張卡路線（使用者選定先做單一入口）：
-1. **本卡**：`ramplio <網址 | 'curl …' | ->` 自動判斷 → 安全分流 → 走容量探測；discover 補 header／body。
-2. 自動留存 `.ramplio/last.json`＋自動與上次比對＋`report`／`compare` 零參數；`run --url/--rps` 補 TUI。
-3. discover 結果一鍵固化成帶 thresholds 的 scenario.yaml；收斂雙精靈、移除 init 裡不存在的 `generate_sessions.sh`。
+原本的第二張卡有 4 點，評估後拆成兩張（見 Decisions）：
+- **本卡 2a**：每次 `run`／`discover` 跑完自動留一筆紀錄 → 結尾自動跟上一次同目標比較 → `compare`／`report` 不帶參數也能跑。
+- **卡 2b**（下一張）：`run --url`／`run --rps` 補即時 TUI。
 
 ### 規模分級
 
-一般（改到行為）。分支 `feat/smart-entry`（不在 main 上 commit）。
+一般（改到行為；會寫檔，但只寫在使用者的工作目錄，不碰認證授權、CI、migration）。預估產品程式 diff 約 350–450 行（不含測試）。
 
 ### 目標
 
-- `ramplio https://api.x.com/health` 直接開始容量探測（等同 `discover --url`）。
-- `ramplio 'curl -X GET https://… -H "Authorization: Bearer …"'` 與 `pbpaste | ramplio -` 都能解析 DevTools「Copy as cURL」，帶著 header／body 探測。
-- 寫入型方法（POST/PUT/PATCH/DELETE）**不自動探測**：只送一發預檢、印出結果，並給出明確的進階指令（`ramplio discover --curl … --allow-write`）。
-- `discover` 新增 `-H`、`--method`、`--body`、`--curl`、`--allow-write`。
-- 歡迎畫面 ① 改為 `ramplio <網址或貼上 curl>`。
+- `run`（`--url`、`--rps`、`--scenario`）與 `discover`（含單一入口 `ramplio <網址|curl>`）每次跑完，自動存一筆紀錄到 `.ramplio/runs/`，不用加任何旗標。
+- 紀錄檔是 **baseline 格式的超集**：最上層就是 `baseline.Baseline` 的欄位，另外多 `target_key`（比對用）與 `report`（run 模式的完整 `reporter.Report`）。所以 `ramplio compare .ramplio/runs/a.json .ramplio/runs/b.json` 不用改程式就能讀。
+- 結尾自動跟「上一次同一個目標」比較，印一段白話變化（p99、錯誤率、吞吐量；discover 為安全上限／崩潰點）。**這段只是資訊，不影響 exit code。**
+- `ramplio compare` 不帶參數：比「最近一筆」與「同目標的前一筆」，沿用既有的退步 → exit 1 契約。
+- `ramplio report` 不帶參數：用最近一筆 run 紀錄產生 HTML。
+- 存檔失敗（唯讀目錄、磁碟滿）只印一行警告，不影響壓測結果、報告輸出與 exit code。
+- 存檔內容的網址一律經 `maskURLForDisplay` 遮罩。
+- `--no-history` 可關掉自動留存。
 
 ### 非目標
 
-- 不做 `.yaml`／`.har` 自動開跑（本卡只印出正確指令，例如「這是情境檔，請用 `ramplio run --scenario x.yaml`」）。
-- 不做自動留存與 TUI（第二張卡）。
-- 不支援 curl 的全部旗標：只支援 DevTools 產出的子集，遇到不認識的旗標要警告，不能默默吃掉。
+- 不做 `run --url`／`--rps` 的 TUI（卡 2b）。
+- 不改 `--output`／`--report`／`--save-baseline` 的行為與格式，舊檔照舊可用。
+- 不自動產 HTML（`ramplio report` 零參數即可產生）。
+- dashboard（`run --dashboard`）與分散式（`--worker`）不留存：兩者目前都拿不到結束時的 `metrics.Summary`，要改執行流程，另開卡。
+- 不遮罩情境檔內使用者自訂的 step 名稱（那是使用者自己寫的文字）。
 - 不新增第三方相依套件。
 
 ### 驗收情境（給定／當／則／對應測試）
 
-1. 給定一個本機 httptest server，當執行 `ramplio <URL>`，則走 discover 流程並印出容量報告。→ `smartentry_test.go: TestRootURLDispatchesDiscover`
-2. 給定 DevTools 格式的 curl（含 `\` 換行、單雙引號、`-H` 多個、`--data-raw`、`--compressed`），當解析，則 Method/URL/Headers/Body 正確；遇到不認識的旗標產生警告。→ `internal/curlparse/parse_test.go`（表格驅動）
-3. 給定 `curl -X POST …`，當執行 `ramplio '<curl>'`，則 server 只收到 1 個請求，輸出含 `--allow-write` 的建議指令，exit 0。→ `TestRootWriteMethodOnlyPreflights`（負向：斷言請求數 == 1）
-4. 給定 `discover --curl '<含 Authorization 的 curl>'`，當探測，則 server 收到的每個請求都帶該 header 與 body。→ `internal/discover/prober_test.go: TestProbeSendsHeadersAndBody`
-5. 給定打錯字 `ramplio dicover`（不是 URL、curl、檔案），則不開跑，回錯誤並附「你是不是要 discover？」與歡迎畫面指引，exit ≠ 0。→ `TestRootUnknownArgSuggests`
-6. 給定 `ramplio x.yaml`／`x.har`，則印出對應的 `run --scenario`／`import` 指令，不開跑。→ `TestRootFileArgPrintsHint`
-7. 隱式 POST：給定 `curl 'http://…' --data-raw '{"a":1}'`（沒有 `-X`，Chrome 的實際格式），則推導為 POST，只發 1 發預檢（**帶 header 與 body**），並要求加 `--allow-write`。→ `TestRootImplicitPostOnlyPreflights`
-8. discover 本身也守門：給定 `ramplio discover --url … --method POST`（沒加 `--allow-write`），則跟單一入口一樣只發 1 發就擋下，不開後門。→ `TestDiscoverWriteMethodRequiresAllowWrite`
-9. 不外洩憑證：給定帶 `Authorization`／`Cookie` 的 curl，則終端輸出與建議指令都不出現 token 原文（建議指令改用 `pbpaste | ramplio discover --curl - --allow-write`，header 只顯示名稱並遮罩值）。→ `TestSmartEntryMasksCredentials`
+存檔與內容
+
+1. 給定本機 httptest server、空的紀錄目錄，當執行 `run --url <server> -d 1s`，則 `runs/` 底下多 1 個檔，`baseline.Load` 讀得到（`Metrics` 非 nil），`report` 欄位存在。→ `cmd/ramplio/autohistory_test.go: TestHistoryRunAutoSaves`
+2. 給定同上，當執行 `discover --url <server>`（測試用縮短探測時間），則多 1 筆紀錄，`Discover` 非 nil、沒有 `report`。單一入口 `ramplio <server>` 也一樣。→ `TestHistoryDiscoverAutoSaves`
+3. 遮罩（負向）：給定網址 `…/?token=SECRET123#frag`，當 run 或 discover 跑完，則紀錄檔原文找不到 `SECRET123` 與 `frag`（含 `scenario`、`target_key`、`report.steps[].name`）。→ `TestHistoryMasksURL`
+4. 被擋下的寫入型 discover（POST 沒加 `--allow-write`）不存紀錄。→ `TestHistoryBlockedWriteNotSaved`
+5. `--no-history` 時不建立 `.ramplio/`、不寫任何檔。→ `TestHistoryNoHistoryFlag`
+
+失敗不影響結果（負向）
+
+6. 給定紀錄目錄是唯讀，當 `run --url` 跑完，則 stderr 有一行「無法存執行紀錄」的警告，摘要照印，RunE 回 nil（exit 0）。discover 同樣。→ `TestHistoryReadOnlyDirKeepsResult`
+7. 給定 `runs/` 裡有 1 個壞掉的 JSON，當這次跑完要找上一次，則略過壞檔並警告一行，本次照存、照比、exit code 不變。→ `TestHistorySkipsCorruptRecord`
+
+自動比對
+
+8. 給定同一目標、同樣負載參數已有 1 筆紀錄，當再跑一次，則結尾印「跟上一次（<時間>）比」段落，含 p99、錯誤率、吞吐量的前後值與持平／改善／退步。→ `TestHistoryAutoDiffSameTarget`
+9. 給定沒有同目標紀錄（第一次跑、換網址、或 `--vus` 不同），則不比較，只印「已存為這個目標的第一筆紀錄」。→ `TestHistoryAutoDiffSkipsDifferentTarget`
+10. 退步不改 exit code（負向）：給定上一次 p99 很低、這次 server 刻意變慢，當跑完，則比對段落標「退步」，但 RunE 仍回 nil。→ `TestHistoryAutoDiffRegressionKeepsExitCode`
+
+.gitignore 與保留上限
+
+11. 給定 `.ramplio/` 不存在，當第一次存檔，則同時寫 `.ramplio/.gitignore`（內容 `*`）並印一行說明；第二次不再印。→ `TestHistoryFirstCreateWritesGitignore`
+12. 給定已有 N 筆（N＝保留上限），當存第 N+1 筆，則最舊的一筆被刪，總數維持 N；刪檔失敗只警告。→ `internal/history/history_test.go: TestHistorySavePrunesOldest`
+
+零參數指令
+
+13. 給定同目標 2 筆紀錄且第 2 筆退步，當執行 `ramplio compare`（零參數），則印出比較並回錯誤（exit 1）；沒退步則 exit 0。→ `cmd/ramplio/compare_test.go: TestCompareZeroArgUsesHistory`
+14. 給定紀錄少於 2 筆（或最近一筆沒有同目標的前一筆），當 `ramplio compare`，則回錯誤並說明「先跑兩次同一個目標」的指令範例，exit ≠ 0。→ `TestCompareZeroArgNotEnoughHistory`
+15. 給定最近有 1 筆 run 紀錄，當 `ramplio report`（零參數），則產生 `report.html`，並印出用的是哪一筆（時間＋遮罩後目標）。只有 discover 紀錄時回錯誤並說明 discover 沒有 HTML 報告。→ `cmd/ramplio/report_test.go: TestReportZeroArgUsesLatestRun`、`TestReportZeroArgOnlyDiscover`
+16. 相容：`compare a.json b.json`、`report --input x.json`、`--save-baseline`、`--output` 既有測試不改、照樣綠；`compare` 只給 1 個參數回用法錯誤。→ 既有 `compare_test.go`、`baselinesave_test.go` ＋ `TestCompareOneArgRejected`
 
 ### 實作計畫（檔案）
 
-- 新增 `internal/curlparse/parse.go`＋`parse_test.go`：shell-like tokenizer（單引號、雙引號、`\` 換行、Chrome 的 ANSI-C `$'…'`，要處理 `\'`、`\n`、`\"`）＋旗標對應：`-X/--request`、`-H/--header`、`-d/--data/--data-raw/--data-binary`（有 body 且沒寫 -X 時預設 POST）、`--url`、`-b/--cookie`→Cookie header、`--compressed/-s/-k/-L/-i` 忽略；其餘旗標放進 `Warnings`。回傳不可變的 `Request{Method, URL, Headers, Body, Warnings}`。
-- 修改 `internal/discover/prober.go`：`Config` 加 `Headers map[string]string`、`Body []byte`，在 `probe()` 填進 `protocols.Request`（SetupSteps 跟 Steps 共用同一個 req）。
-- 修改 `cmd/ramplio/discover.go`：新增旗標；移除 `MarkFlagRequired("url")`（`discover.go:91`，否則 `--curl` 進不了 RunE），改在 RunE 驗證 `--url`／`--curl` 二擇一；`--curl` 跟 `-H/--method/--body` 同時給時，以明確給的旗標覆蓋 curl 解析出來的值；`--curl -` 從 stdin 讀；非冪等方法沒加 `--allow-write` 就只發一發預檢並擋下。把建 cfg 和印報告抽成 `runDiscover(ctx, w, cfg, …)`，讓 root 共用。
-- 修改 `cmd/ramplio/preflight.go`：`runPreflight` 改成接收 `protocols.Request`（目前 `preflight.go:55-63` 寫死只送 Method+URL，寫入型預檢會因為少了 Authorization／Content-Type 拿到 401/415）；既有呼叫端（`run.go`）跟著調整。
-- 新增 `cmd/ramplio/smartentry.go`＋`smartentry_test.go`：`classifyTarget(arg) → url | curl | stdin | yamlFile | harFile | unknown`；分派邏輯；寫入方法改用既有的 `runPreflight`（`cmd/ramplio/preflight.go:55`）只發一發。
-- 修改 `cmd/ramplio/main.go`：`rootCmd.Args = cobra.ArbitraryArgs`；`Run` 沒有參數時維持 `printWelcome`，有參數時呼叫 smartentry。未知參數要用 cobra 的 `SuggestionsFor` 給建議（避免打錯字的子指令被當成目標）。
-- 修改 `cmd/ramplio/guidance.go`：更新歡迎畫面 ①。
-- 修改 `README.md`、`docs/getting-started.md`：快速開始改成單一入口；新增 `changelog.d/` 片段（如果專案有這個慣例）。
+- 新增 `internal/history/history.go`＋`history_test.go`（純資料與檔案操作，不碰 cmd）：
+  - `type Record struct { baseline.Baseline（內嵌，JSON 攤平在最上層）; TargetKey string; Report *reporter.Report }`。
+  - `Save(dir string, rec Record, keep int) (path string, created bool, err error)`：`MkdirAll` → 第一次建立時寫 `.gitignore`（`*`）→ 檔名 `<UTC 時間 20261125T153012.123Z>-<run|discover>.json`，用 `O_EXCL` 避免撞名 → 暫存檔＋rename（照 `baseline.Save` 的做法）→ 依檔名排序刪掉超過 `keep` 的舊檔。
+  - `List(dir) ([]Entry, []error)`：新到舊，壞檔放進 errors 不中斷。
+  - `PreviousSameTarget(entries, key, excludePath)`、`Latest(entries, filter)`。
+  - 檔案權限 0o644／目錄 0o755，跟既有 baseline 一致。
+- 新增 `cmd/ramplio/autohistory.go`＋`autohistory_test.go`：
+  - `historyDir()`：預設 `.ramplio`（目前工作目錄），環境變數 `RAMPLIO_HISTORY_DIR` 可覆寫（測試隔離與 CI 用）。
+  - `targetKey(...)`：組出「模式＋方法＋遮罩後網址或情境檔路徑＋負載參數」字串（見待決定 3）。
+  - `recordAndDiff(outW, errW, rec)`：存檔 → 失敗只警告 → 找同目標前一筆 → `baseline.Compare` → `renderAutoDiff` 印精簡段落（重用 `baseline.MetricLabel`／`FormatMetricValue`，不重用 `renderComparison` 是因為它的結論句是守門口吻「建議先查再上」）。
+  - 新增 `TestMain`：把 `RAMPLIO_HISTORY_DIR` 設到暫存目錄，讓既有的 cobra 層測試不會在 `cmd/ramplio/` 底下留下 `.ramplio/`。
+- 修改 `cmd/ramplio/run.go`：
+  - 新增 `--no-history` 旗標。
+  - 在 `--save-baseline` 之後、threshold 判定與 `os.Exit(1)` 之前呼叫 `recordAndDiff`（threshold 失敗的那次也要留）。
+  - `runURL` 的 step 名稱 `req.Method + " " + req.URL` 改用 `maskURLForDisplay`，不然原始網址會跟著 `report.steps[].name` 存進檔（終端摘要也會變成遮罩後的網址，屬於刻意的改動）。
+- 修改 `cmd/ramplio/discover.go`：`discoverOptions` 加 `NoHistory`；`runDiscover` 存完 `--save-baseline` 後呼叫 `recordAndDiff`（`blockWrite` 路徑不走到這裡，天然不存）；新增 `--no-history` 旗標。單一入口走 `runDiscover`，自動受惠，`smartentry.go` 不用改。
+- 修改 `cmd/ramplio/compare.go`：`Args` 改成 0 或 2 個；0 個時從 history 取「最近一筆＋同目標前一筆」，其餘沿用 `baseline.Compare`＋`renderComparison`＋`compareVerdictErr`。更新 `Use`／`Long` 說明。
+- 修改 `cmd/ramplio/report.go`：拿掉 `MarkFlagRequired("input")`；沒給 `--input` 時取最近一筆有 `report` 的紀錄，交給既有的 `reporter.WriteHTMLFromReport`。
+- 新增 `cmd/ramplio/report_test.go`（目前沒有這個檔）；`cmd/ramplio/compare_test.go` 只新增測試，不改既有斷言。
+- 修改 `.gitignore`（本 repo 加 `.ramplio/`）、`README.md`、`docs/getting-started.md`（「比較兩次結果」改寫成零參數用法）、`CHANGELOG.md` 的 `[Unreleased]`（沿用卡 1 的決定：專案沒有 `changelog.d/`）。
 
-可重用：`runPreflight`／`preflightTarget`（preflight.go）、`printDiscoverReport`／`printDiscoverProbe`（discover.go）、`baseline.FromDiscover`、`discover.ProbeSequence`。
+可重用：`maskURLForDisplay`（preflight.go:137）、`baseline.FromSummary`／`FromDiscover`／`Compare`／`MetricLabel`／`FormatMetricValue`、`reporter.SummaryToReport`／`WriteHTMLFromReport`、`renderComparison`／`compareVerdictErr`（compare.go）、`currentGitCommit`、`writeBaselineFile` 的「失敗只警告」寫法。
 
 ### 完成檢查
 
-`go test ./internal/curlparse/... ./internal/discover/... ./cmd/ramplio/... -run 'Curl|Probe|Root|SmartEntry'`（實作前紅、實作後綠；第 5 段第 1 輪起加上 `SmartEntry`，讓情境 9 也在篩選內），接著 `go test -race ./...`、`golangci-lint run`、`go build ./...`。
+`go test ./internal/history/... ./cmd/ramplio/... -run 'History|ZeroArg|OneArg' -count=1`（實作前紅：套件不存在／測試失敗；實作後綠），接著 `go test -race -count=1 ./...`、`go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest run`、`go build ./...`。
 
 ### 驗證（端到端）
 
 1. `go run ./cmd/ramplio mock-server` 起本機目標。
-2. `go run ./cmd/ramplio http://localhost:<port>/` → 看到探測進度與容量報告。
-3. 在瀏覽器 DevTools 複製一則 GET 的 curl → `pbpaste | go run ./cmd/ramplio -` → 帶 header 探測。
-4. 複製一則 POST 的 curl → 確認只有一發預檢加上建議指令。
-5. `go run ./cmd/ramplio dicover` → 有建議、不開跑。
+2. 在暫存目錄跑兩次 `ramplio run --url http://localhost:<port>/ -d 5s` → 第一次看到「第一筆紀錄」與 `.gitignore` 說明，第二次看到「跟上一次比」段落。
+3. `ramplio compare` → 看到兩筆的比較；`ramplio report` → 產生 `report.html`。
+4. `chmod 500 .ramplio` 後再跑一次 → 只有一行警告，摘要正常，`echo $?` 為 0。
 
+### 待決定（請使用者確認；括號內為推薦）
+
+1. **存幾筆**：（推薦）所有目標合計保留最近 **50 筆**，超過刪最舊。每筆約 2–5 KB，50 筆不到 250 KB。另一種是每個目標各留 N 筆，但會讓少跑的目標佔著位置、清理邏輯也比較複雜。
+2. **放哪裡**：（推薦）**目前工作目錄的 `.ramplio/`**，跟著專案走，不同專案的紀錄不會混在一起，`RAMPLIO_HISTORY_DIR` 可以改位置。另一種是 `~/.ramplio`：不會弄髒專案，但不同專案會混在一起，在別的目錄下 `ramplio compare` 會比到別的專案。
+3. **「同一個目標」怎麼認定**：（推薦）**模式＋HTTP 方法＋遮罩後網址（情境模式用情境檔路徑）＋負載參數**全部相同才算。負載參數：run 是 `--vus` 或 `--rps` 加 `-d`；discover 是 `--tolerance`、`--max-rps` 與 `--probe-duration`。理由：50 VU 跟 10 VU 的吞吐量本來就不同，硬比會出現假的「退步」。代價：改了參數就從第一筆重新累積。
+4. **.gitignore 怎麼處理**：（推薦）第一次建立時**自動寫 `.ramplio/.gitignore`（內容 `*`）**，再印一行說明，使用者不用做任何事（`.pytest_cache` 也是這樣做）。另一種是只印提示請使用者自己加，容易忘，紀錄就被 commit 進去。
+5. **`compare` 零參數比哪兩筆**：（推薦）**最近一筆跟它同目標的前一筆**。另一種是單純比最近兩筆，但最近兩筆常常是不同目標，比出來沒有意義。
 
 ## Decisions
 
-- 2026-11-25：第一張卡先做單一入口，不做 agy 建議的「自動留存」（使用者決定：要先有亮眼、本人立刻有感的入口）。
-- 2026-11-25：寫入型方法預設只發一發預檢，要壓測得明確加 `--allow-write`（agy 提出的資料安全風險）。
-- 2026-11-25：curl 解析自己寫，不新增 shlex 相依套件。
-- 2026-11-25（實作）：計畫外但必要的測試檔改動——`cmd/ramplio/preflight_test.go`（跟著 `runPreflight` 新簽名調整呼叫，並新增 `TestRunPreflight_SendsHeadersAndBody`）、`internal/discover/prober_test.go`（情境 4 的測試放這）、`cmd/ramplio/discover_test.go`（情境 8）、`cmd/ramplio/guidance_test.go`（歡迎畫面 ① 文字改了，斷言跟著改）。只動測試、不放寬既有斷言。
-- 2026-11-25（實作）：專案沒有 `changelog.d/`，既有慣例是 `CHANGELOG.md` 的 `[Unreleased]` 區塊，所以改在那裡的「新增」加一條（只動 Unreleased，不碰歷史版本）。
-- 2026-11-25（實作）：`discover` 被 `--allow-write` 擋下時回錯誤（exit ≠ 0）；單一入口照情境 3 回 exit 0。理由：明確下 `discover` 的人（或 CI）要的是探測結果，沒跑成就該失敗；單一入口的擋下是引導。兩者共用 `runDiscover`，都只發一發預檢。
-- 2026-11-25（實作）：`main.go` 的 root 抽成 `newRootCmd()`（保留 `rootCmd` 變數），測試才能拿全新的 root 實跑 cobra 分派；cobra v1.8.0 的 `SuggestionsFor` 不會自己套預設距離，root 明確設 `SuggestionsMinimumDistance: 2`。
-- 2026-11-25（實作）：`smartentry_test.go` 兩處刻意的錯字 `dicover`（情境 5）被 golangci-lint 的 misspell 抓到，用逐行 `//nolint:misspell` 加理由處理；沒有改 `.golangci.yml`、沒有放寬全域規則。本機沒裝 golangci-lint，用 `go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest`（v2.15.0，與 CI 的 latest 對齊）跑，不動 go.mod。
-- 2026-11-25（第 5 段第 1 輪）：`run.go` 的那 1 行是 `runPreflight` 改吃 `protocols.Request` 的必要連動（實作計畫寫了「既有呼叫端跟著調整」），只把參數包成 Request，`run` 的行為不變；唯一可見差異是預檢輸出的網址現在也會遮罩（M1 改在 `runPreflight` 內，`run` 一起受惠）。
-- 2026-11-25（第 5 段第 1 輪）：Uncertain 採 fail-closed。curl 只要有不認識的旗標，或有無法重現的寫法（`-F`、`-T`、`-d @檔案`、`--data-urlencode @檔案`、`-x/--proxy`、`--resolve`、`-K` 等），就設 `Uncertain`。discover 與單一入口在 Uncertain 且沒加 `--allow-write` 時，跟寫入型一樣只送 1 發預檢就擋下，並說明是「無法完整解讀」。只影響 curl 本身輸出的帶值旗標（`-o`、`-m`、`-w`、`--cacert` 等）只警告、不設 Uncertain。
-- 2026-11-25（第 5 段第 1 輪）：M2 的處置：被擋下的那 1 發照舊送真實方法（不改成 OPTIONS/HEAD，那要另外回規格確認），擋下後明說「已送出 1 發真實 <METHOD> 預檢（伺服器已實際處理這一發，若是寫入就已經寫入一次）」。
-- 2026-11-25（第 5 段第 1 輪）：`discover` 被擋時回 exit ≠ 0、單一入口回 exit 0。**使用者已確認（2026-11-25）**。
-- 2026-11-25（第 5 段第 1 輪）：改了一組既有測試的輸入：`parse_test.go` 的「不認識的旗標產生警告」原本用結尾不帶值的 `--max-time` 當「不認識的旗標」。H2 要求 `--max-time` 改成已知的帶值旗標，所以改成合法寫法 `--max-time 5`。斷言沒有放寬：仍要求警告提到兩個旗標，並新增要求 `Uncertain == true`（因為 `--http2`）。
-- 2026-11-25（第 5 段第 1 輪）：H2 延伸：`discover -H` 格式錯誤的錯誤訊息原本用 `%q` 印出整段值，跟審查指出的外洩是同一類，改成只說「第 N 個 -H」。看不懂的參數回顯只顯示第一個詞並遮罩網址秘密。
-- 2026-11-25（第 5 段第 1 輪）：M4：大小寫不敏感的 header 覆蓋邏輯從 `discover.go` 移到 `curlparse.MergeHeaders`，解析器與 discover 共用同一份。
-- 2026-11-25（第 5 段第 2 輪）：M2 查證結論：`compare` 不是靠 URL 找對應資料，只在兩份 baseline 的 `Scenario`（discover 模式＝目標 URL）不同時印警告（`internal/baseline/compare.go:128`）；dashboard 只拿它來顯示。遮罩是確定性的，同一個目標前後兩次遮罩結果相同，比對不受影響。代價是：同一個網址只差在 token 值的兩份 baseline 會被視為同一目標，這本來就是同一目標，可以接受。
-- 2026-11-25（第 5 段第 2 輪）：M1 的遮罩改為不分大小寫的子字串比對，刻意寧可多遮：`code` 會連 `country_code`、`zipcode` 一起遮。fragment 只要存在就整段換成 `#***`。原本 `TestSmartEntryMaskURL` 預期 `#frag` 原樣保留，照審查要求改成預期 `#***`（變嚴格，不是放寬）。
-- 2026-11-25（第 5 段第 2 輪）：LOW 3 把 `--http2` 列為無害，跟第 1 輪「不認識的旗標」測試案例拿 `--http2` 當例子衝突。改用真的不認識的 `--frobnicate`，斷言不變（仍要求警告提到兩個旗標、`Uncertain == true`）。
-- 2026-11-25（第 5 段第 2 輪）：LOW 2 比審查要求多分一類：逾時或連線中斷時，請求可能已經送到伺服器，說「沒有寫入」可能是假的，所以改說「已送出但沒有收到回應，無法確定伺服器是否已處理（可能已寫入一次）」。只有其他沒送出的情況（例如網址無法解析）才說「預檢沒有送達目標，沒有寫入」。實作上把 `runPreflight` 拆成會回傳結果的 `preflightOnce`，`runPreflight` 的簽名不變，`run.go` 不用再動。
-- 2026-11-25（第 5 段第 2 輪）：LOW 1 兩層都擋：curl 裡出現的方法覆寫 header 由解析器設 Uncertain；`discover --url … -H "X-HTTP-Method-Override: …"` 明確給的，由 `resolveDiscoverRequest` 檢查。判斷邏輯共用 `curlparse.MethodOverrideHeaderNames`。
-- 2026-11-25（第 5 段第 2 輪）：LOW 5 的測試第一次跑就是綠的：第 1 輪已實作「已知帶值旗標缺值就回錯」，這次只是補回歸保護。
-- 2026-11-25（實作）：curl 的 tokenizer 跟解析放同一個 `parse.go`，不另開檔，守住「只改計畫列的檔案」。
-
-- 2026-11-25（使用者確認）：被擋下的寫入型請求維持真的送出 1 發預檢（畫面明說已送出），不改成完全不送。
-- 2026-11-25（第 4 段第 3 次審查）：LOW 不修、寫進 PR 說明：(1) 遮罩關鍵字沒涵蓋 `pwd`、`bearer`、`otp`、`pin`；(2) 沒有 `=` 的 query 片段（`?<secret>`）不遮，現實罕見。
+- 2026-11-25：原第二張卡的 4 點拆成兩張。**2a（本卡）**：自動留存＋自動比對＋`compare`／`report` 零參數，這三點共用同一份紀錄格式，分開做會改兩次介面。**2b（下一張）**：`run --url`／`--rps` 補即時 TUI。`runURL`／`runRPS` 要改成 runScenario 那種背景執行＋provider＋非終端改印進度行的結構，跟留存互不相依；4 點一起做會超過一天的量。
+- 2026-11-25：紀錄檔用「baseline 超集」一種檔案，不分 baseline／report 兩個檔。理由：`baseline.Load` 用 `encoding/json`，預設會略過不認識的欄位，所以紀錄檔可以直接給既有的 `compare` 吃；一次執行對應一個檔，清理與「同一筆」的認定都比較單純。`Record` 新增的欄位不寫進 `baseline.Baseline`，baseline 的 schema 不用升版。
+- 2026-11-25：自動比對只是資訊、不影響 exit code；守門仍由明確下 `compare` 或 thresholds 負責。理由：一般使用者每次跑完都會看到比對，網路雜訊就可能讓 exit code 跳來跳去，在 CI 會變成誤報。
+- 2026-11-25：觀察到的既有問題（計畫外，本卡不修，另開卡）：`run --url --save-baseline` 的 `Scenario` 直接存原始網址（`run.go` 的 `scenarioName = url`），沒有經過 `maskURLForDisplay`；discover 那條路徑卡 1 已遮。本卡的自動紀錄會另外遮罩，不受影響。
 
 ## History
 
-- 2026-11-25：與 agy 討論三輪後定出規格；建立分支與 worktree。
-- 2026-11-25：使用者確認規格；交給 herdr pane `impl`（wA:p4）實作。
-- 2026-11-25：第 2 段實作完成（TDD，每塊先看到預期原因的紅燈再實作）。commit：92d0f69 curl 解析器、b95ef92 prober header/body、d83f8ee 預檢送完整請求、1ee3b2f discover 旗標與寫入守門、edcd803 歡迎畫面、c1fe0e2 單一入口分派、fc2398c 文件與 CHANGELOG。
-- 2026-11-25：第 3 段測試輸出（實際結尾）：
-  - 完成檢查 `go test ./internal/curlparse/... ./internal/discover/... ./cmd/ramplio/... -run 'Curl|Probe|Root' -count=1`：
-    ```
-    ok  	github.com/machiko/ramplio/v3/internal/curlparse	0.677s
-    ok  	github.com/machiko/ramplio/v3/internal/discover	2.670s
-    ok  	github.com/machiko/ramplio/v3/cmd/ramplio	7.443s
-    ```
-  - `go test -race -count=1 ./...`：
-    ```
-    ok  	github.com/machiko/ramplio/v3/cmd/ramplio	50.169s
-    ok  	github.com/machiko/ramplio/v3/internal/curlparse	3.995s
-    ok  	github.com/machiko/ramplio/v3/internal/discover	11.029s
-    ok  	github.com/machiko/ramplio/v3/internal/engine	103.662s
-    ok  	github.com/machiko/ramplio/v3/internal/scenarios	2.370s
-    （其餘 10 個套件同為 ok，exit 0）
-    ```
-  - `golangci-lint run`（v2.15.0，經 go run）：`0 issues.`，exit 0
-  - `go build ./...`：exit 0，無輸出
-  - 注意：完成檢查的 `-run 'Curl|Probe|Root'` 篩不到情境 9 的 `TestSmartEntryMasksCredentials`（名稱沿用規格），它在 `go test -race ./...` 整套裡有跑且通過。
-  - 觀察到的既有問題（計畫外，未修）：任何指令回錯誤時訊息印兩次（cobra 的 `Error:` 加上 `main()` 自己再印一次）；`runPreflight` 不可達時的「可加 --no-preflight」提示在 discover／單一入口路徑不適用（這兩處沒有該旗標）。
-- 2026-11-25：**另開卡（本卡不修）**：(1) 任何指令回錯誤時訊息印兩次（cobra 的 `Error:` 加上 `main()` 自己再印一次）；(2) `runPreflight` 連不到目標時的「可加 --no-preflight」提示在 discover／單一入口路徑不適用。
-- 2026-11-25：第 5 段第 1 輪（審查 Block，2 HIGH）修正完成。commit：829c6e9 解析器（H1 旗標補齊＋叢集＋Uncertain、H2 憑證／帶值旗標＋警告不帶值、M4 MergeHeaders、LOW 大小寫一致）、5a4d4e9 cmd 層（H1 fail-closed 守門、M1 網址遮罩、M2 提示、M3 stdin 上限）、本筆（README curl 說明、CARD）。
-- 2026-11-25：第 5 段第 1 輪測試輸出（實際結尾）：
-  - 完成檢查 `go test ./internal/curlparse/... ./internal/discover/... ./cmd/ramplio/... -run 'Curl|Probe|Root|SmartEntry' -count=1`：
-    ```
-    ok  	github.com/machiko/ramplio/v3/internal/curlparse	0.348s
-    ok  	github.com/machiko/ramplio/v3/internal/discover	2.344s
-    ok  	github.com/machiko/ramplio/v3/cmd/ramplio	11.633s
-    ```
-  - `go test -race -count=1 ./...`：
-    ```
-    ok  	github.com/machiko/ramplio/v3/cmd/ramplio	52.876s
-    ok  	github.com/machiko/ramplio/v3/internal/curlparse	3.770s
-    ok  	github.com/machiko/ramplio/v3/internal/discover	10.080s
-    ok  	github.com/machiko/ramplio/v3/internal/engine	101.198s
-    ok  	github.com/machiko/ramplio/v3/internal/scenarios	1.919s
-    （其餘 10 個套件同為 ok，exit 0）
-    ```
-  - `go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest run`：`0 issues.`，exit 0
-  - `go build ./...`：exit 0，無輸出
-- 2026-11-25：**另開卡（第 2 輪新增）**：預檢沒有任何回應（例如網址無法解析）時，既有的 `printPreflightBreakdown` 還是印「✓ 預檢通過（無回應）」，跟緊接著的「預檢沒有送達目標，沒有寫入」矛盾。這段 `run --url` 也在用，是改動前就有的行為；這是最後一輪，修正清單沒列，本卡不修。
-- 2026-11-25：第 5 段第 2 輪（複審可進 PR，收 MEDIUM 與便宜的 LOW）修正完成。commit：8907bf3 解析器（LOW 1 方法覆寫 header、LOW 3 無害布林旗標、LOW 5 回歸測試）、f157caf cmd 層（M1 遮罩擴大＋fragment、M2 baseline 遮罩、LOW 1 discover -H、LOW 2 預檢送達說明、LOW 4 -H 去重）、本筆（README、CARD）。
-- 2026-11-25：第 5 段第 2 輪測試輸出（實際結尾）：
-  - 完成檢查 `go test ./internal/curlparse/... ./internal/discover/... ./cmd/ramplio/... -run 'Curl|Probe|Root|SmartEntry' -count=1`：
-    ```
-    ok  	github.com/machiko/ramplio/v3/internal/curlparse	0.265s
-    ok  	github.com/machiko/ramplio/v3/internal/discover	2.282s
-    ok  	github.com/machiko/ramplio/v3/cmd/ramplio	13.160s
-    ```
-  - `go test -race -count=1 ./...`：
-    ```
-    ok  	github.com/machiko/ramplio/v3/cmd/ramplio	56.383s
-    ok  	github.com/machiko/ramplio/v3/internal/curlparse	4.639s
-    ok  	github.com/machiko/ramplio/v3/internal/discover	13.670s
-    ok  	github.com/machiko/ramplio/v3/internal/engine	105.871s
-    ok  	github.com/machiko/ramplio/v3/internal/scenarios	3.038s
-    （其餘 10 個套件同為 ok，exit 0）
-    ```
-  - `go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest run`：`0 issues.`，exit 0
-  - `go build ./...`：exit 0，無輸出
-- 2026-11-25（第 4 段）：第 3 次獨立審查（go-reviewer，只拿規格＋diff）結論「可以進 PR」，無 CRITICAL／HIGH／MEDIUM，LOW 2 條記入 Decisions；Claude 主對話重跑 `go test -race -count=1 ./...` 15 套件 ok、golangci-lint `0 issues.`。進第 6 段。
+- 2026-11-25：讀程式釐清三種存檔格式（JSON 報告、baseline、HTML）各自的結構與消費者，決定拆成 2a／2b，寫出 2a 規格。
