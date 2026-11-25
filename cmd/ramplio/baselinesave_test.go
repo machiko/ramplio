@@ -1,12 +1,17 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/machiko/ramplio/v3/internal/baseline"
 	"github.com/machiko/ramplio/v3/internal/metrics"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // --save-baseline 的失敗處理契約:寫檔問題(權限/磁碟)與「壓測是否達標」無關,
@@ -42,4 +47,26 @@ func TestWriteBaselineFile(t *testing.T) {
 			t.Fatalf("存出的檔案應可 Load 回來: %v", err)
 		}
 	})
+}
+
+// 情境 17：run --save-baseline 存檔前也要遮罩網址裡的帳密與 token。
+func TestRunSaveBaselineMasksURL(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+	target := strings.Replace(srv.URL, "http://", "http://user:PASSWORD9@", 1) + "/?token=SECRET123"
+	path := filepath.Join(t.TempDir(), "b.json")
+
+	_, _, err := execRun(t, "--url", target, "-d", "300ms", "--save-baseline", path, "--no-tui")
+	require.NoError(t, err)
+
+	raw, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.NotContains(t, string(raw), "PASSWORD9", "帳密不可存進 baseline")
+	assert.NotContains(t, string(raw), "SECRET123", "token 不可存進 baseline")
+
+	b, err := baseline.Load(path)
+	require.NoError(t, err)
+	assert.Equal(t, maskURLForDisplay(target), b.Scenario)
 }

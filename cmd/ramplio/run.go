@@ -169,6 +169,12 @@ func newRunCmd() *cobra.Command {
 			if scenarioName == "" {
 				scenarioName = url
 			}
+			// Saved files outlive the terminal: the identity written into
+			// baseline and history files never carries URL credentials.
+			savedName := scenarioName
+			if scenarioFile == "" {
+				savedName = maskURLForDisplay(url)
+			}
 			for _, dsn := range sinkDSNs {
 				sink, sinkErr := reporter.ParseSink(dsn)
 				if sinkErr != nil {
@@ -203,7 +209,7 @@ func newRunCmd() *cobra.Command {
 			}
 
 			if baselineFile != "" {
-				b := baseline.FromSummary(sum, scenarioName)
+				b := baseline.FromSummary(sum, savedName)
 				b.GitCommit = currentGitCommit()
 				writeBaselineFile(os.Stdout, os.Stderr, baselineFile, b)
 			}
