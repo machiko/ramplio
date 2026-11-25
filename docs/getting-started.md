@@ -463,6 +463,14 @@ warning. URL credentials are masked in records. Corrupt records, or records
 written by a newer ramplio, are skipped with a warning but never deleted
 automatically.
 
+The header/body hash is **not encryption**: it is unsalted and only 8 hex
+chars, so short tokens or PINs can be brute-forced offline. Do not publish
+`.ramplio/` records or baseline files. The self-ignoring `.gitignore` is only
+written when the history directory belongs to ramplio (newly created, or
+holding nothing but `runs/`); if `RAMPLIO_HISTORY_DIR` points at a directory
+with other files, ramplio writes nothing and asks you once to ignore `runs/`
+yourself.
+
 The explicit flags still work when you want to manage file names yourself:
 
 ```bash
