@@ -3,8 +3,19 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
+
+	"github.com/machiko/ramplio/v3/internal/baseline"
+	"github.com/machiko/ramplio/v3/internal/history"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // TestMain points the automatic history at a throwaway directory so no test
@@ -36,4 +47,302 @@ func execRun(t *testing.T, args ...string) (stdout, stderr string, err error) {
 	cmd.SetArgs(args)
 	err = cmd.Execute()
 	return out.String(), errOut.String(), err
+}
+
+// useHistoryDir gives one test its own history directory (not yet created).
+func useHistoryDir(t *testing.T) string {
+	t.Helper()
+	dir := filepath.Join(t.TempDir(), ".ramplio")
+	t.Setenv(historyDirEnv, dir)
+	return dir
+}
+
+func historyFiles(t *testing.T, dir string) []string {
+	t.Helper()
+	files, err := filepath.Glob(filepath.Join(dir, history.RecordsSubdir, "*.json"))
+	require.NoError(t, err)
+	return files
+}
+
+// delayServer answers 200 after a delay that the test can change between runs.
+type delayServer struct {
+	*httptest.Server
+	delay atomic.Int64 // nanoseconds
+}
+
+func newDelayServer(t *testing.T) *delayServer {
+	t.Helper()
+	ds := &delayServer{}
+	ds.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(time.Duration(ds.delay.Load()))
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(ds.Close)
+	return ds
+}
+
+const quickRun = "300ms"
+
+// 情境 1：run --url 跑完自動存一筆，baseline.Load 讀得到，帶 report。
+func TestHistoryRunAutoSaves(t *testing.T) {
+	dir := useHistoryDir(t)
+	srv := newDelayServer(t)
+
+	stdout, _, err := execRun(t, "--url", srv.URL, "-d", quickRun, "--no-tui")
+	require.NoError(t, err)
+
+	files := historyFiles(t, dir)
+	require.Len(t, files, 1)
+	b, err := baseline.Load(files[0])
+	require.NoError(t, err)
+	require.NotNil(t, b.Metrics)
+	assert.Positive(t, b.Metrics.Total)
+
+	entries, errs := history.List(dir)
+	require.Empty(t, errs)
+	require.Len(t, entries, 1)
+	assert.NotNil(t, entries[0].Record.Report, "run 紀錄要帶完整報告")
+	assert.Equal(t, history.KindRun, entries[0].Record.Kind)
+	assert.Contains(t, stdout, files[0], "要告訴使用者存在哪裡")
+}
+
+// 情境 2：discover 與單一入口跑完都自動存，沒有 report。
+func TestHistoryDiscoverAutoSaves(t *testing.T) {
+	t.Run("discover 指令", func(t *testing.T) {
+		dir := useHistoryDir(t)
+		srv := newRecordingServer(t, "", "")
+
+		_, err := execDiscover(t, "", "--url", srv.URL, "--probe-duration", "1500ms", "--max-rps", "5")
+		require.NoError(t, err)
+
+		assertOneDiscoverRecord(t, dir)
+	})
+	t.Run("單一入口", func(t *testing.T) {
+		dir := useHistoryDir(t)
+		srv := newCapturingServer(t)
+
+		_, err := runEntry(t, "", srv.URL+"/health")
+		require.NoError(t, err)
+
+		assertOneDiscoverRecord(t, dir)
+	})
+}
+
+func assertOneDiscoverRecord(t *testing.T, dir string) {
+	t.Helper()
+	entries, errs := history.List(dir)
+	require.Empty(t, errs)
+	require.Len(t, entries, 1)
+	rec := entries[0].Record
+	assert.Equal(t, history.KindDiscover, rec.Kind)
+	assert.NotNil(t, rec.Discover)
+	assert.Nil(t, rec.Report, "discover 沒有 metrics.Summary，不該有 report")
+}
+
+// 情境 3（負向）：存檔內容不能出現網址裡的 token 與 fragment。
+func TestHistoryMasksURL(t *testing.T) {
+	const secret, frag = "SECRET123", "fragXYZ"
+
+	t.Run("run", func(t *testing.T) {
+		dir := useHistoryDir(t)
+		srv := newDelayServer(t)
+		target := srv.URL + "/?token=" + secret + "#" + frag
+
+		_, _, err := execRun(t, "--url", target, "-d", quickRun, "--no-tui")
+		require.NoError(t, err)
+
+		assertRecordsHide(t, dir, secret, frag)
+	})
+	t.Run("discover", func(t *testing.T) {
+		dir := useHistoryDir(t)
+		srv := newRecordingServer(t, "", "")
+		target := srv.URL + "/?token=" + secret + "#" + frag
+
+		_, err := execDiscover(t, "", "--url", target, "--probe-duration", "1500ms", "--max-rps", "5")
+		require.NoError(t, err)
+
+		assertRecordsHide(t, dir, secret, frag)
+	})
+}
+
+func assertRecordsHide(t *testing.T, dir string, secrets ...string) {
+	t.Helper()
+	files := historyFiles(t, dir)
+	require.Len(t, files, 1)
+	raw, err := os.ReadFile(files[0])
+	require.NoError(t, err)
+	for _, s := range secrets {
+		assert.NotContains(t, string(raw), s)
+	}
+	assert.Contains(t, string(raw), "token=***", "遮罩後的網址仍要能辨識目標")
+}
+
+// 情境 4（負向）：被擋下的寫入型 discover 不存紀錄。
+func TestHistoryBlockedWriteNotSaved(t *testing.T) {
+	t.Run("discover --method POST", func(t *testing.T) {
+		dir := useHistoryDir(t)
+		srv := newRecordingServer(t, "", "")
+
+		_, err := execDiscover(t, "", "--url", srv.URL, "--method", "POST", "--probe-duration", "1s", "--max-rps", "5")
+		require.Error(t, err)
+
+		assert.NoDirExists(t, dir)
+	})
+	t.Run("單一入口 curl POST", func(t *testing.T) {
+		dir := useHistoryDir(t)
+		srv := newCapturingServer(t)
+
+		_, err := runEntry(t, "", "curl -X POST '"+srv.URL+"'")
+		require.NoError(t, err)
+
+		assert.NoDirExists(t, dir)
+	})
+}
+
+// 情境 5（負向）：--no-history 不建立目錄、不寫檔。
+func TestHistoryNoHistoryFlag(t *testing.T) {
+	t.Run("run", func(t *testing.T) {
+		dir := useHistoryDir(t)
+		srv := newDelayServer(t)
+
+		stdout, _, err := execRun(t, "--url", srv.URL, "-d", quickRun, "--no-tui", "--no-history")
+		require.NoError(t, err)
+
+		assert.NoDirExists(t, dir)
+		assert.NotContains(t, stdout, "紀錄")
+	})
+	t.Run("discover", func(t *testing.T) {
+		dir := useHistoryDir(t)
+		srv := newRecordingServer(t, "", "")
+
+		_, err := execDiscover(t, "", "--url", srv.URL, "--probe-duration", "1500ms", "--max-rps", "5", "--no-history")
+		require.NoError(t, err)
+
+		assert.NoDirExists(t, dir)
+	})
+}
+
+// readOnlyHistoryDir returns a history path whose parent is not writable.
+func readOnlyHistoryDir(t *testing.T) string {
+	t.Helper()
+	if os.Geteuid() == 0 {
+		t.Skip("root 不受目錄權限限制")
+	}
+	parent := t.TempDir()
+	require.NoError(t, os.Chmod(parent, 0o500))
+	t.Cleanup(func() { _ = os.Chmod(parent, 0o700) })
+	dir := filepath.Join(parent, ".ramplio")
+	t.Setenv(historyDirEnv, dir)
+	return dir
+}
+
+// 情境 6（負向）：唯讀目錄只警告一行，結果照印、不回錯誤。
+func TestHistoryReadOnlyDirKeepsResult(t *testing.T) {
+	t.Run("run", func(t *testing.T) {
+		dir := readOnlyHistoryDir(t)
+		srv := newDelayServer(t)
+
+		_, stderr, err := execRun(t, "--url", srv.URL, "-d", quickRun, "--no-tui")
+
+		require.NoError(t, err, "存檔失敗不可影響 exit code")
+		assert.Equal(t, 1, strings.Count(stderr, "無法存執行紀錄"), "只警告一行，實際：%q", stderr)
+		assert.NoDirExists(t, dir)
+	})
+	t.Run("discover", func(t *testing.T) {
+		readOnlyHistoryDir(t)
+		srv := newRecordingServer(t, "", "")
+
+		out, err := execDiscover(t, "", "--url", srv.URL, "--probe-duration", "1500ms", "--max-rps", "5")
+
+		require.NoError(t, err)
+		assert.Contains(t, out, "容量報告", "報告照印")
+		assert.Equal(t, 1, strings.Count(out, "無法存執行紀錄"))
+	})
+}
+
+// 情境 7：有壞掉的紀錄檔時略過並警告，本次照存、照比。
+func TestHistorySkipsCorruptRecord(t *testing.T) {
+	dir := useHistoryDir(t)
+	srv := newDelayServer(t)
+	_, _, err := execRun(t, "--url", srv.URL, "-d", quickRun, "--no-tui")
+	require.NoError(t, err)
+	bad := filepath.Join(dir, history.RecordsSubdir, "99999999T999999.999Z-00-run.json")
+	require.NoError(t, os.WriteFile(bad, []byte("{broken"), 0o644))
+
+	stdout, stderr, err := execRun(t, "--url", srv.URL, "-d", quickRun, "--no-tui")
+
+	require.NoError(t, err)
+	assert.Contains(t, stderr, filepath.Base(bad), "要指出是哪個檔壞了")
+	assert.Len(t, historyFiles(t, dir), 3, "壞檔不刪，本次照存")
+	assert.Contains(t, stdout, "跟上一次", "略過壞檔後仍要找到上一筆好的紀錄來比")
+}
+
+// 情境 8：同目標同參數的第二次，結尾印比較段落。
+func TestHistoryAutoDiffSameTarget(t *testing.T) {
+	useHistoryDir(t)
+	srv := newDelayServer(t)
+
+	first, _, err := execRun(t, "--url", srv.URL, "-d", quickRun, "--no-tui")
+	require.NoError(t, err)
+	assert.Contains(t, first, "第一筆紀錄")
+	assert.NotContains(t, first, "跟上一次")
+
+	second, _, err := execRun(t, "--url", srv.URL, "-d", quickRun, "--no-tui")
+	require.NoError(t, err)
+	for _, want := range []string{"跟上一次", "p99", "錯誤率", "每秒請求", "→"} {
+		assert.Contains(t, second, want)
+	}
+	assert.Regexp(t, "持平|改善|退步", second)
+}
+
+// 情境 9：換網址或換負載參數就不比較。
+func TestHistoryAutoDiffSkipsDifferentTarget(t *testing.T) {
+	useHistoryDir(t)
+	srv := newDelayServer(t)
+	_, _, err := execRun(t, "--url", srv.URL+"/a", "-d", quickRun, "--no-tui")
+	require.NoError(t, err)
+
+	for name, args := range map[string][]string{
+		"不同網址":    {"--url", srv.URL + "/b", "-d", quickRun, "--no-tui"},
+		"不同 VU 數": {"--url", srv.URL + "/a", "-d", quickRun, "--no-tui", "--vus", "2"},
+		"不同時長":    {"--url", srv.URL + "/a", "-d", "400ms", "--no-tui"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			out, _, err := execRun(t, args...)
+			require.NoError(t, err)
+			assert.Contains(t, out, "第一筆紀錄")
+			assert.NotContains(t, out, "跟上一次")
+		})
+	}
+}
+
+// 情境 10（負向）：比出退步也不改 exit code。
+func TestHistoryAutoDiffRegressionKeepsExitCode(t *testing.T) {
+	useHistoryDir(t)
+	srv := newDelayServer(t)
+	_, _, err := execRun(t, "--url", srv.URL, "-d", quickRun, "--no-tui")
+	require.NoError(t, err)
+
+	srv.delay.Store(int64(30 * time.Millisecond))
+	out, _, err := execRun(t, "--url", srv.URL, "-d", quickRun, "--no-tui")
+
+	require.NoError(t, err, "自動比對只是資訊，不可回錯誤")
+	assert.Contains(t, out, "退步")
+}
+
+// 情境 11：第一次建立 .ramplio/ 自動寫 .gitignore 並說明一次。
+func TestHistoryFirstCreateWritesGitignore(t *testing.T) {
+	dir := useHistoryDir(t)
+	srv := newDelayServer(t)
+
+	first, _, err := execRun(t, "--url", srv.URL, "-d", quickRun, "--no-tui")
+	require.NoError(t, err)
+	ignore, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	require.NoError(t, err)
+	assert.Equal(t, "*\n", string(ignore))
+	assert.Contains(t, first, ".gitignore")
+
+	second, _, err := execRun(t, "--url", srv.URL, "-d", quickRun, "--no-tui")
+	require.NoError(t, err)
+	assert.NotContains(t, second, ".gitignore", "只在第一次建立時說明")
 }
