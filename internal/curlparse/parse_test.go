@@ -17,6 +17,9 @@ func TestParseCurl(t *testing.T) {
 		wantHeaders map[string]string
 		wantBody    string
 		wantWarns   []string // each must appear (substring) in some warning
+		// wantUncertain: the parser could not fully understand the command, so
+		// callers must fail closed (treat it like a write).
+		wantUncertain bool
 	}{
 		{
 			name:       "最簡 GET 只有網址",
@@ -103,17 +106,190 @@ func TestParseCurl(t *testing.T) {
 		},
 		{
 			name:       "不認識的旗標產生警告、不默默吃掉",
-			input:      `curl https://x.test/ --http2 --max-time`,
+			input:      `curl https://x.test/ --http2 --max-time 5`,
 			wantMethod: "GET",
 			wantURL:    "https://x.test/",
 			wantWarns:  []string{"--http2", "--max-time"},
+			// --http2 is unknown → fail closed
+			wantUncertain: true,
 		},
 		{
 			name:       "多出的位置參數也要警告",
 			input:      `curl https://x.test/a https://x.test/b`,
 			wantMethod: "GET",
 			wantURL:    "https://x.test/a",
-			wantWarns:  []string{"https://x.test/b"},
+			wantWarns:  []string{"第 2 個網址參數"},
+		},
+		// ---- H1：寫入型的各種寫法都要推導出正確方法 ----
+		{
+			name:          "-F 表單推導為 POST，multipart 無法重現 → Uncertain",
+			input:         `curl https://x.test/up -F a=b`,
+			wantMethod:    "POST",
+			wantURL:       "https://x.test/up",
+			wantWarns:     []string{"-F"},
+			wantUncertain: true,
+		},
+		{
+			name:          "--form-string 同樣推導為 POST",
+			input:         `curl https://x.test/up --form-string a=b`,
+			wantMethod:    "POST",
+			wantURL:       "https://x.test/up",
+			wantWarns:     []string{"--form-string"},
+			wantUncertain: true,
+		},
+		{
+			name:          "-T 上傳檔案推導為 PUT，檔案內容不讀 → Uncertain",
+			input:         `curl -T file.bin https://x.test/obj`,
+			wantMethod:    "PUT",
+			wantURL:       "https://x.test/obj",
+			wantWarns:     []string{"-T"},
+			wantUncertain: true,
+		},
+		{
+			name:       "--json 推導為 POST 並補 Content-Type／Accept",
+			input:      `curl https://x.test/api --json '{"a":1}'`,
+			wantMethod: "POST",
+			wantURL:    "https://x.test/api",
+			wantHeaders: map[string]string{
+				"Content-Type": "application/json",
+				"Accept":       "application/json",
+			},
+			wantBody: `{"a":1}`,
+		},
+		{
+			name:        "--json 不覆蓋使用者明確給的 content-type（大小寫不同也算）",
+			input:       `curl https://x.test/api -H 'content-type: application/vnd.x+json' --json '{}'`,
+			wantMethod:  "POST",
+			wantURL:     "https://x.test/api",
+			wantHeaders: map[string]string{"content-type": "application/vnd.x+json", "Accept": "application/json"},
+			wantBody:    `{}`,
+		},
+		{
+			name:       "--data-urlencode 推導為 POST 並編碼值",
+			input:      `curl https://x.test/s --data-urlencode 'q=a b&c'`,
+			wantMethod: "POST",
+			wantURL:    "https://x.test/s",
+			wantBody:   "q=a%20b%26c",
+		},
+		{
+			name:       "-G 把 data 併進網址、方法為 GET",
+			input:      `curl -G https://x.test/s?x=0 -d a=1 -d b=2`,
+			wantMethod: "GET",
+			wantURL:    "https://x.test/s?x=0&a=1&b=2",
+		},
+		{
+			name:       "-I 推導為 HEAD",
+			input:      `curl -I https://x.test/`,
+			wantMethod: "HEAD",
+			wantURL:    "https://x.test/",
+		},
+		{
+			name:       "短旗標叢集 -sXPOST",
+			input:      `curl -sXPOST https://x.test/a`,
+			wantMethod: "POST",
+			wantURL:    "https://x.test/a",
+		},
+		{
+			name:        "短旗標叢集 -sH 取下一個 token 當值",
+			input:       `curl -sH 'a: 1' https://x.test/a`,
+			wantMethod:  "GET",
+			wantURL:     "https://x.test/a",
+			wantHeaders: map[string]string{"a": "1"},
+		},
+		{
+			name:       "短旗標叢集 -skd 取下一個 token 當 data",
+			input:      `curl -skd x=1 https://x.test/a`,
+			wantMethod: "POST",
+			wantURL:    "https://x.test/a",
+			wantBody:   "x=1",
+		},
+		{
+			name:       "-sSL 全是可略過的布林旗標",
+			input:      `curl -sSL https://x.test/a`,
+			wantMethod: "GET",
+			wantURL:    "https://x.test/a",
+		},
+		{
+			name:          "叢集裡有不認識的字元 → 警告＋Uncertain",
+			input:         `curl -sZ https://x.test/a`,
+			wantMethod:    "GET",
+			wantURL:       "https://x.test/a",
+			wantWarns:     []string{"-Z"},
+			wantUncertain: true,
+		},
+		{
+			name:          "-d @file 會讀檔，無法重現 → Uncertain",
+			input:         `curl https://x.test/a -d @payload.json`,
+			wantMethod:    "POST",
+			wantURL:       "https://x.test/a",
+			wantBody:      "@payload.json",
+			wantWarns:     []string{"-d"},
+			wantUncertain: true,
+		},
+		// ---- H2：帶值旗標與憑證旗標 ----
+		{
+			name:        "-u user:pass 轉 Basic Authorization，不被當成網址",
+			input:       `curl -u admin:PW https://x.test/a`,
+			wantMethod:  "GET",
+			wantURL:     "https://x.test/a",
+			wantHeaders: map[string]string{"Authorization": "Basic YWRtaW46UFc="},
+		},
+		{
+			name:        "-uadmin:PW 黏在一起",
+			input:       `curl -uadmin:PW https://x.test/a`,
+			wantMethod:  "GET",
+			wantURL:     "https://x.test/a",
+			wantHeaders: map[string]string{"Authorization": "Basic YWRtaW46UFc="},
+		},
+		{
+			name:        "--user=admin:PW",
+			input:       `curl --user=admin:PW https://x.test/a`,
+			wantMethod:  "GET",
+			wantURL:     "https://x.test/a",
+			wantHeaders: map[string]string{"Authorization": "Basic YWRtaW46UFc="},
+		},
+		{
+			name:        "--oauth2-bearer 轉 Bearer Authorization",
+			input:       `curl --oauth2-bearer TOK https://x.test/a`,
+			wantMethod:  "GET",
+			wantURL:     "https://x.test/a",
+			wantHeaders: map[string]string{"Authorization": "Bearer TOK"},
+		},
+		{
+			name:        "-A／-e 轉 User-Agent／Referer",
+			input:       `curl -A 'my ua' -e https://ref.test/ https://x.test/a`,
+			wantMethod:  "GET",
+			wantURL:     "https://x.test/a",
+			wantHeaders: map[string]string{"User-Agent": "my ua", "Referer": "https://ref.test/"},
+		},
+		{
+			name:       "帶值但不影響請求的旗標要吃掉下一個 token",
+			input:      `curl -o out.txt -m 5 --connect-timeout 3 -w '%{http_code}' https://x.test/a`,
+			wantMethod: "GET",
+			wantURL:    "https://x.test/a",
+			wantWarns:  []string{"-o", "-m", "--connect-timeout", "-w"},
+		},
+		{
+			name:          "--proxy 會改變送達路徑 → 吃掉值並 Uncertain",
+			input:         `curl -x http://proxy:3128 https://x.test/a`,
+			wantMethod:    "GET",
+			wantURL:       "https://x.test/a",
+			wantWarns:     []string{"-x"},
+			wantUncertain: true,
+		},
+		// ---- M4：header 大小寫不敏感覆蓋 ----
+		{
+			name:        "-H cookie 與 -b 只留一個 Cookie",
+			input:       `curl https://x.test/a -H 'cookie: a=1' -b 'b=2'`,
+			wantMethod:  "GET",
+			wantURL:     "https://x.test/a",
+			wantHeaders: map[string]string{"Cookie": "b=2"},
+		},
+		{
+			name:       "大寫 CURL 也接受（與 classifyTarget 一致）",
+			input:      `CURL https://x.test/a`,
+			wantMethod: "GET",
+			wantURL:    "https://x.test/a",
 		},
 	}
 
@@ -134,6 +310,7 @@ func TestParseCurl(t *testing.T) {
 			if len(tt.wantWarns) == 0 {
 				assert.Empty(t, got.Warnings, "不該有警告")
 			}
+			assert.Equal(t, tt.wantUncertain, got.Uncertain, "Uncertain")
 			for _, w := range tt.wantWarns {
 				assert.True(t, containsSubstring(got.Warnings, w), "警告應提到 %q，實際 %v", w, got.Warnings)
 			}
@@ -184,4 +361,37 @@ func containsSubstring(list []string, sub string) bool {
 		}
 	}
 	return false
+}
+
+// H2：警告只能出現旗標名稱、第幾個參數、header 名稱，絕不能帶出值。
+func TestParseCurlWarningsNeverEchoValues(t *testing.T) {
+	const secret = "S3CRETV"
+	inputs := []string{
+		`curl https://x.test --unknown=` + secret,
+		`curl https://x.test -H 'Authorization Bearer ` + secret + `'`,
+		`curl https://x.test https://other.test/?k=` + secret,
+		`curl https://x.test --proxy-user u:` + secret,
+		`curl https://x.test -F 'f=` + secret + `'`,
+		`curl https://x.test -d @` + secret,
+		`curl https://x.test -sZ` + secret,
+	}
+	for _, in := range inputs {
+		t.Run(in, func(t *testing.T) {
+			got, err := Parse(in)
+			require.NoError(t, err)
+			require.NotEmpty(t, got.Warnings, "這些寫法都應該產生警告")
+			for _, w := range got.Warnings {
+				assert.NotContains(t, w, secret)
+			}
+		})
+	}
+}
+
+func TestMergeHeadersCaseInsensitive(t *testing.T) {
+	base := map[string]string{"authorization": "old", "X-Keep": "1"}
+	got := MergeHeaders(base, map[string]string{"Authorization": "new"})
+
+	assert.Equal(t, map[string]string{"Authorization": "new", "X-Keep": "1"}, got)
+	assert.Equal(t, "old", base["authorization"], "不能改到輸入的 map")
+	assert.Nil(t, MergeHeaders(nil, nil))
 }
