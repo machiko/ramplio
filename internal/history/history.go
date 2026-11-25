@@ -85,7 +85,7 @@ func Save(dir string, rec Record, keep int) (SaveResult, error) {
 	if err != nil {
 		return SaveResult{}, err
 	}
-	path, err := writeRecord(filepath.Join(dir, RecordsSubdir), rec.Kind, append(data, '\n'))
+	path, err := writeRecord(filepath.Join(dir, RecordsSubdir), append(data, '\n'))
 	if err != nil {
 		return SaveResult{}, err
 	}
@@ -110,11 +110,13 @@ func ensureDir(dir string) (bool, error) {
 
 // writeRecord reserves a unique file name with O_EXCL, then replaces it
 // atomically with the full content (temp file + rename), so a crash never
-// leaves a half-written record under a final name.
-func writeRecord(runsDir string, kind Kind, data []byte) (string, error) {
+// leaves a half-written record under a final name. The name is only time and
+// sequence, so name order is save order even within one millisecond (the
+// kind lives in the content).
+func writeRecord(runsDir string, data []byte) (string, error) {
 	stamp := time.Now().UTC().Format(timestampLayout)
 	for seq := 0; seq < maxNameAttempts; seq++ {
-		path := filepath.Join(runsDir, fmt.Sprintf("%s-%02d-%s%s", stamp, seq, kind, recordExt))
+		path := filepath.Join(runsDir, fmt.Sprintf("%s-%02d%s", stamp, seq, recordExt))
 		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 		if errors.Is(err, fs.ErrExist) {
 			continue
