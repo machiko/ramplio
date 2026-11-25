@@ -4,12 +4,12 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/machiko/ramplio/v3/internal/baseline"
+	"github.com/machiko/ramplio/v3/internal/history"
 	"github.com/spf13/cobra"
 )
 
@@ -24,13 +24,9 @@ func renderComparison(w io.Writer, c baseline.Comparison) {
 
 	regressedCount := 0
 	for _, d := range c.Deltas {
-		mark, word := "✓", "持平"
-		switch d.Verdict {
-		case baseline.VerdictRegressed:
-			mark, word = "✗", "退步"
+		mark, word := verdictMarkWord(d.Verdict)
+		if d.Verdict == baseline.VerdictRegressed {
 			regressedCount++
-		case baseline.VerdictImproved:
-			mark, word = "↑", "改善"
 		}
 		fmt.Fprintf(w, "  %s %-14s %s → %s(%+.1f%%,%s)\n",
 			mark, baseline.MetricLabel(d.Name),
@@ -50,6 +46,18 @@ func renderComparison(w io.Writer, c baseline.Comparison) {
 		fmt.Fprintf(w, "  結論:✗ 有 %d 項指標退步——這次改動讓你的服務更不能扛了,建議先查再上。\n", regressedCount)
 	} else {
 		fmt.Fprintln(w, "  結論:✓ 沒有超出容差的退步,整體持平或更好。")
+	}
+}
+
+// verdictMarkWord is the shared symbol and plain word for a metric verdict.
+func verdictMarkWord(v baseline.Verdict) (mark, word string) {
+	switch v {
+	case baseline.VerdictRegressed:
+		return "✗", "退步"
+	case baseline.VerdictImproved:
+		return "↑", "改善"
+	default:
+		return "✓", "持平"
 	}
 }
 
@@ -83,20 +91,18 @@ func newCompareCmd() *cobra.Command {
 	var strictTrust bool
 
 	cmd := &cobra.Command{
-		Use:   "compare <基準.json> <本次.json>",
-		Short: "比較兩份 baseline,回答「這次改動讓你撐的人數變多還是變少」",
-		Long: "讀取兩份由 --save-baseline 產生的快照,以雙門檻容差(相對 % + 絕對下限)判定每個指標的" +
-			"持平/改善/退步。有任何退步時以 exit code 1 結束,可放進 CI 當容量守門。",
-		Args: cobra.ExactArgs(2),
+		Use:   "compare [<基準.json> <本次.json>]",
+		Short: "比較兩次結果,回答「這次改動讓你撐的人數變多還是變少」",
+		Long: "不帶參數時,比較 .ramplio/ 執行紀錄裡最近一筆與同一目標的前一筆;" +
+			"帶兩個參數時,讀取兩份由 --save-baseline 產生的快照(或執行紀錄檔)。" +
+			"以雙門檻容差(相對 % + 絕對下限)判定每個指標的持平/改善/退步。" +
+			"有任何退步時以 exit code 1 結束,可放進 CI 當容量守門。",
+		Args: compareArgs,
 		// 退步是業務結論不是用法錯誤:不印 Usage、錯誤交由 main 統一輸出一次
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			before, err := baseline.Load(args[0])
-			if err != nil {
-				return err
-			}
-			after, err := baseline.Load(args[1])
+			before, after, err := loadComparePair(cmd.OutOrStdout(), cmd.ErrOrStderr(), args)
 			if err != nil {
 				return err
 			}
@@ -109,7 +115,7 @@ func newCompareCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			renderComparison(os.Stdout, result)
+			renderComparison(cmd.OutOrStdout(), result)
 			return compareVerdictErr(result, strictTrust)
 		},
 	}
@@ -118,4 +124,47 @@ func newCompareCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&strictTrust, "strict-trust", false,
 		"量測可信度存疑時視同失敗(CI 場景:不可信的通過是假陽性)")
 	return cmd
+}
+
+// compareArgs accepts zero arguments (use the run history) or exactly two files.
+func compareArgs(_ *cobra.Command, args []string) error {
+	if len(args) == 0 || len(args) == 2 {
+		return nil
+	}
+	return fmt.Errorf("compare 要 0 個參數（比較最近兩次同目標的執行紀錄）或 2 個參數（<基準.json> <本次.json>），收到 %d 個", len(args))
+}
+
+// loadComparePair reads the two files, or with no arguments picks the newest
+// record and the previous record of the same target from the run history.
+func loadComparePair(outW, errW io.Writer, args []string) (baseline.Baseline, baseline.Baseline, error) {
+	if len(args) == 2 {
+		before, err := baseline.Load(args[0])
+		if err != nil {
+			return baseline.Baseline{}, baseline.Baseline{}, err
+		}
+		after, err := baseline.Load(args[1])
+		return before, after, err
+	}
+
+	dir := historyDir()
+	entries, listErrs := history.List(dir)
+	for _, err := range listErrs {
+		fmt.Fprintf(errW, "warning: 略過無法讀取的執行紀錄: %v\n", err)
+	}
+	if len(entries) == 0 {
+		return baseline.Baseline{}, baseline.Baseline{}, fmt.Errorf(
+			"%s 裡還沒有執行紀錄。先對同一個目標跑兩次，例如：ramplio run --url https://example.com（每次跑完會自動留存）", dir)
+	}
+	latest := entries[0]
+	prev, ok := history.PreviousSameTarget(entries, latest.Record.TargetKey, latest.Path)
+	if !ok {
+		return baseline.Baseline{}, baseline.Baseline{}, fmt.Errorf(
+			"最近一筆紀錄（%s）還沒有同目標、同設定的前一筆可比。用同樣的參數再跑一次，例如：ramplio run --url https://example.com；"+
+				"或直接指定兩個檔：ramplio compare <基準.json> <本次.json>", latest.Record.Scenario)
+	}
+	fmt.Fprintf(outW, "比較執行紀錄：%s → %s（目標 %s）\n",
+		prev.Record.CreatedAt.Local().Format(historyTimeLayout),
+		latest.Record.CreatedAt.Local().Format(historyTimeLayout),
+		latest.Record.Scenario)
+	return prev.Record.Baseline, latest.Record.Baseline, nil
 }

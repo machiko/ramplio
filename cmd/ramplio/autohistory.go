@@ -106,13 +106,7 @@ func printSaved(outW, errW io.Writer, dir string, res history.SaveResult) {
 func renderAutoDiff(w io.Writer, prevAt time.Time, c baseline.Comparison) {
 	fmt.Fprintf(w, "\n跟上一次（%s）比：\n", prevAt.Local().Format(historyTimeLayout))
 	for _, d := range c.Deltas {
-		mark, word := "✓", "持平"
-		switch d.Verdict {
-		case baseline.VerdictRegressed:
-			mark, word = "✗", "退步"
-		case baseline.VerdictImproved:
-			mark, word = "↑", "改善"
-		}
+		mark, word := verdictMarkWord(d.Verdict)
 		fmt.Fprintf(w, "  %s %-14s %s → %s（%+.1f%%，%s）\n",
 			mark, baseline.MetricLabel(d.Name),
 			baseline.FormatMetricValue(d.Name, d.Before), baseline.FormatMetricValue(d.Name, d.After),
