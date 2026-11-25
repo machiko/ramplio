@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/machiko/ramplio/v3/internal/protocols"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -378,7 +380,10 @@ func TestSmartEntryMaskURL(t *testing.T) {
 		{"https://tokenonly@x.test/a", "https://***@x.test/a"},
 		{"https://x.test/a?token=1&key=2&api_key=3&apikey=4&access_token=5&sig=6&signature=7&password=8&q=ok",
 			"https://x.test/a?token=***&key=***&api_key=***&apikey=***&access_token=***&sig=***&signature=***&password=***&q=ok"},
-		{"https://x.test/a?Access_Token=abc#frag", "https://x.test/a?Access_Token=***#frag"},
+		{"https://x.test/a?Access_Token=abc#frag", "https://x.test/a?Access_Token=***#***"},
+		{"https://x.test/a#access_token=F", "https://x.test/a#***"},
+		{"http://u:P@h/p?Token=T&X-Amz-Signature=S&auth=A&client_secret=C&page=2#access_token=F",
+			"http://u:***@h/p?Token=***&X-Amz-Signature=***&auth=***&client_secret=***&page=2#***"},
 		{"https://x.test/a?token", "https://x.test/a?token"},
 		{"http://[::1:bad", "（無法解析的網址）"},
 	}
@@ -409,4 +414,67 @@ func TestRootStdinExactlyAtLimitIsAccepted(t *testing.T) {
 	// 剛好 1MiB 會被接受並解析；之後預檢連不到 127.0.0.1:1 而失敗是預期的。
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "超過")
+}
+
+// 第 2 輪 M1：審查指出的網址，所有憑證值與 fragment 都不能出現在顯示結果。
+func TestSmartEntryMaskURLHidesAllSecretValues(t *testing.T) {
+	secrets := map[string]string{
+		"Token": "V1", "X-Amz-Signature": "V2", "auth": "V3", "client_secret": "V4",
+		"Credential": "V5", "sessionid": "V6", "jwt": "V7", "code": "V8", "passwd": "V9",
+		"x-api-key": "V10",
+	}
+	q := make([]string, 0, len(secrets))
+	for k, v := range secrets {
+		q = append(q, k+"=SECRET"+v)
+	}
+	raw := "http://u:SECRETPW@h/p?" + strings.Join(q, "&") + "&page=2#access_token=SECRETFRAG"
+
+	got := maskURLForDisplay(raw)
+
+	assert.NotContains(t, got, "SECRET")
+	assert.Contains(t, got, "page=2", "一般參數照常顯示")
+	assert.True(t, strings.HasSuffix(got, "#***"))
+}
+
+// 第 2 輪 LOW 1：方法覆寫 header 讓 GET 也可能被當成寫入，只能送 1 發預檢。
+func TestRootMethodOverrideHeaderOnlyPreflights(t *testing.T) {
+	srv := newCapturingServer(t)
+	curl := "curl '" + srv.URL + "/items/1' -H 'X-HTTP-Method-Override: DELETE'"
+
+	out, err := runEntry(t, "", curl)
+
+	require.NoError(t, err)
+	assert.Len(t, srv.requests(), 1, "server 只能收到 1 個請求")
+	assert.Contains(t, out, "無法完整解讀")
+	assert.NotContains(t, out, "容量報告")
+}
+
+// 第 2 輪 LOW 2：預檢根本沒送出時，不准說「已送出…已經寫入一次」。
+func TestRootWritePreflightNotDeliveredSaysNoWrite(t *testing.T) {
+	out, err := runEntry(t, "", "curl -X POST 'http://exa mple.test/' -d a=1")
+
+	require.NoError(t, err)
+	assert.Contains(t, out, "預檢沒有送達目標，沒有寫入")
+	assert.NotContains(t, out, "已送出 1 發真實")
+}
+
+func TestSmartEntryPreflightOutcomeMessage(t *testing.T) {
+	tests := []struct {
+		name string
+		res  protocols.Result
+		want string
+		not  string
+	}{
+		{"有回應就是已送出", protocols.Result{StatusCode: 201}, "已送出 1 發真實 POST 預檢", "沒有送達"},
+		{"5xx 也算已送出", protocols.Result{StatusCode: 503}, "已送出 1 發真實 POST 預檢", "沒有送達"},
+		{"沒送出（例如網址無法解析）", protocols.Result{Error: errors.New("parse error")}, "預檢沒有送達目標，沒有寫入", "已送出"},
+		{"逾時：可能已送達但沒回應，不能說沒寫入", protocols.Result{Error: context.DeadlineExceeded}, "無法確定", "沒有寫入"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := preflightOutcomeMessage("POST", tt.res)
+			assert.Contains(t, got, tt.want)
+			assert.NotContains(t, got, tt.not)
+		})
+	}
 }

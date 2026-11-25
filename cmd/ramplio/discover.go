@@ -163,7 +163,15 @@ func resolveDiscoverRequest(cmd *cobra.Command, url, curlCmd, method, body strin
 	case req.Method == "":
 		req.Method = "GET"
 	}
-	return resolvedTarget{Request: req, Warnings: base.Warnings, Uncertain: base.Uncertain}, nil
+	resolved := resolvedTarget{Request: req, Warnings: base.Warnings, Uncertain: base.Uncertain}
+	// The curl parser already flags override headers it saw; explicit -H
+	// flags are checked here so `--url … -H "X-HTTP-Method-Override: DELETE"`
+	// is gated too.
+	for _, name := range curlparse.MethodOverrideHeaderNames(explicit) {
+		resolved.Uncertain = true
+		resolved.Warnings = append(resolved.Warnings, fmt.Sprintf("header %s 會讓伺服器改用其他方法處理（可能是寫入）", name))
+	}
+	return resolved, nil
 }
 
 func targetFromCurl(parsed curlparse.Request) resolvedTarget {
@@ -207,15 +215,17 @@ func readLimitedInput(r io.Reader) (string, error) {
 	return string(b), nil
 }
 
+// parseHeaderFlags turns repeated -H values into a map. Names are de-duplicated
+// case-insensitively and a later -H overrides an earlier one.
 func parseHeaderFlags(values []string) (map[string]string, error) {
-	out := make(map[string]string, len(values))
+	var out map[string]string
 	for i, v := range values {
 		name, val, ok := strings.Cut(v, ":")
 		if !ok || strings.TrimSpace(name) == "" {
 			// Never echo the value: a malformed header is often a token.
 			return nil, fmt.Errorf("第 %d 個 -H 格式不對，應為 \"名稱: 值\"", i+1)
 		}
-		out[strings.TrimSpace(name)] = strings.TrimSpace(val)
+		out = curlparse.MergeHeaders(out, map[string]string{strings.TrimSpace(name): strings.TrimSpace(val)})
 	}
 	return out, nil
 }
@@ -289,7 +299,10 @@ func runDiscover(ctx context.Context, w, errW io.Writer, opts discoverOptions) e
 	writeDiscoverReport(w, result, opts.Tolerance)
 
 	if opts.BaselineFile != "" {
-		b := baseline.FromDiscover(result, req.URL)
+		// Saved files outlive the terminal: mask credentials the same way.
+		// compare only warns when two baselines' targets differ, and masking
+		// is deterministic, so the same target still matches.
+		b := baseline.FromDiscover(result, maskURLForDisplay(req.URL))
 		b.GitCommit = currentGitCommit()
 		writeBaselineFile(w, errW, opts.BaselineFile, b)
 	}
@@ -307,10 +320,11 @@ func blockWrite(ctx context.Context, w io.Writer, opts discoverOptions) error {
 	if opts.Uncertain {
 		fmt.Fprintln(w, "  ⚠ 這段 curl 有無法完整解讀的部分（見上方警告），送出的請求可能與原指令不同、甚至會改動資料，預設不做壓測。")
 	}
-	if err := runPreflight(ctx, w, protocols.DefaultHTTPConfig(), opts.Request); err != nil {
+	res, err := preflightOnce(ctx, w, protocols.DefaultHTTPConfig(), opts.Request)
+	if err != nil {
 		return err
 	}
-	fmt.Fprintf(w, "\n  已送出 1 發真實 %s 預檢（伺服器已實際處理這一發，若是寫入就已經寫入一次）。\n", method)
+	fmt.Fprintf(w, "\n  %s\n", preflightOutcomeMessage(method, res))
 	step := nextStep{"在原本的指令後面加上", "--allow-write"}
 	if opts.FromCurl {
 		step = nextStep{"把 curl 留在剪貼簿，執行", "pbpaste | ramplio discover --curl - --allow-write"}

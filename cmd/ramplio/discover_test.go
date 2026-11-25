@@ -5,6 +5,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -253,4 +255,42 @@ func TestDiscoverCurlStdinOverLimitFails(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "輸入超過 1MiB")
+}
+
+// 第 2 輪 M2：--save-baseline 寫出的檔案也不能有網址裡的憑證。
+func TestDiscoverProbeSaveBaselineMasksCredentials(t *testing.T) {
+	srv := newRecordingServer(t, "", "")
+	path := filepath.Join(t.TempDir(), "b.json")
+	target := strings.Replace(srv.URL, "http://", "http://u:S3CRETPW@", 1) + "/x?token=S3CRETTOK&page=2"
+
+	_, err := execDiscover(t, "", "--url", target, "--save-baseline", path,
+		"--probe-duration", "1500ms", "--max-rps", "5")
+	require.NoError(t, err)
+
+	saved, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.NotContains(t, string(saved), "S3CRETPW")
+	assert.NotContains(t, string(saved), "S3CRETTOK")
+	assert.Contains(t, string(saved), "token=***")
+}
+
+// 第 2 輪 LOW 1（discover 層）：用 -H 明確加的方法覆寫 header 一樣要擋。
+func TestDiscoverProbeMethodOverrideHeaderRequiresAllowWrite(t *testing.T) {
+	srv := newRecordingServer(t, "", "")
+
+	out, err := execDiscover(t, "", "--url", srv.URL, "-H", "X-Method-Override: PUT",
+		"--probe-duration", "1s", "--max-rps", "5")
+
+	require.Error(t, err)
+	assert.Equal(t, int64(1), srv.total.Load(), "只能送出 1 發預檢")
+	assert.Contains(t, out, "X-Method-Override")
+	assert.NotContains(t, out, "容量報告")
+}
+
+// 第 2 輪 LOW 4：重複的 -H 不分大小寫去重，後者覆蓋前者。
+func TestDiscoverParseHeaderFlagsLaterWins(t *testing.T) {
+	got, err := parseHeaderFlags([]string{"authorization: first", "X-A: 1", "Authorization: second"})
+
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"Authorization": "second", "X-A": "1"}, got)
 }
