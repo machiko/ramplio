@@ -106,11 +106,11 @@ func TestParseCurl(t *testing.T) {
 		},
 		{
 			name:       "不認識的旗標產生警告、不默默吃掉",
-			input:      `curl https://x.test/ --http2 --max-time 5`,
+			input:      `curl https://x.test/ --frobnicate --max-time 5`,
 			wantMethod: "GET",
 			wantURL:    "https://x.test/",
-			wantWarns:  []string{"--http2", "--max-time"},
-			// --http2 is unknown → fail closed
+			wantWarns:  []string{"--frobnicate", "--max-time"},
+			// --frobnicate is unknown → fail closed
 			wantUncertain: true,
 		},
 		{
@@ -285,6 +285,47 @@ func TestParseCurl(t *testing.T) {
 			wantURL:     "https://x.test/a",
 			wantHeaders: map[string]string{"Cookie": "b=2"},
 		},
+		// ---- 第 2 輪 LOW 3：明確無害的布林旗標不警告、不設 Uncertain ----
+		{
+			name:       "-v --verbose -f --fail -4 -6 --http1.1 --http2 --http2-prior-knowledge 都略過",
+			input:      `curl -v --verbose -f --fail -4 -6 --http1.1 --http2 --http2-prior-knowledge https://x.test/a`,
+			wantMethod: "GET",
+			wantURL:    "https://x.test/a",
+		},
+		{
+			name:       "無害旗標也能出現在叢集裡 -vfs46",
+			input:      `curl -vfs46 https://x.test/a`,
+			wantMethod: "GET",
+			wantURL:    "https://x.test/a",
+		},
+		// ---- 第 2 輪 LOW 1：方法覆寫 header 讓伺服器改用其他方法 → Uncertain ----
+		{
+			name:          "X-HTTP-Method-Override（小寫也算）",
+			input:         `curl https://x.test/a -H 'x-http-method-override: DELETE'`,
+			wantMethod:    "GET",
+			wantURL:       "https://x.test/a",
+			wantHeaders:   map[string]string{"x-http-method-override": "DELETE"},
+			wantWarns:     []string{"x-http-method-override"},
+			wantUncertain: true,
+		},
+		{
+			name:          "X-Method-Override",
+			input:         `curl https://x.test/a -H 'X-Method-Override: PUT'`,
+			wantMethod:    "GET",
+			wantURL:       "https://x.test/a",
+			wantHeaders:   map[string]string{"X-Method-Override": "PUT"},
+			wantWarns:     []string{"X-Method-Override"},
+			wantUncertain: true,
+		},
+		{
+			name:          "X-HTTP-Method",
+			input:         `curl https://x.test/a -H 'X-HTTP-Method: PATCH'`,
+			wantMethod:    "GET",
+			wantURL:       "https://x.test/a",
+			wantHeaders:   map[string]string{"X-HTTP-Method": "PATCH"},
+			wantWarns:     []string{"X-HTTP-Method"},
+			wantUncertain: true,
+		},
 		{
 			name:       "大寫 CURL 也接受（與 classifyTarget 一致）",
 			input:      `CURL https://x.test/a`,
@@ -329,6 +370,10 @@ func TestParseCurlErrors(t *testing.T) {
 		{"沒有網址", "curl -H 'a: b'", "網址"},
 		{"引號沒關", "curl 'https://x.test", "引號"},
 		{"旗標缺值", "curl https://x.test -H", "-H"},
+		// 第 2 輪 LOW 5：已知帶值旗標放在結尾缺值，要回錯誤而不是靜默略過。
+		{"已知帶值短旗標在結尾缺值", "curl https://x.test -o", "-o"},
+		{"已知帶值長旗標在結尾缺值", "curl https://x.test --max-time", "--max-time"},
+		{"憑證旗標在結尾缺值", "curl https://x.test -u", "-u"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -394,4 +439,12 @@ func TestMergeHeadersCaseInsensitive(t *testing.T) {
 	assert.Equal(t, map[string]string{"Authorization": "new", "X-Keep": "1"}, got)
 	assert.Equal(t, "old", base["authorization"], "不能改到輸入的 map")
 	assert.Nil(t, MergeHeaders(nil, nil))
+}
+
+func TestHasMethodOverride(t *testing.T) {
+	assert.True(t, HasMethodOverride(map[string]string{"X-Http-Method-Override": "DELETE"}))
+	assert.True(t, HasMethodOverride(map[string]string{"x-method-override": "PUT"}))
+	assert.True(t, HasMethodOverride(map[string]string{"X-HTTP-METHOD": "PATCH"}))
+	assert.False(t, HasMethodOverride(map[string]string{"X-HTTP-Method-Note": "x", "Accept": "*/*"}))
+	assert.False(t, HasMethodOverride(nil))
 }

@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"maps"
 	"net/url"
+	"sort"
 	"strings"
 )
 
@@ -107,7 +108,11 @@ var knownFlags = map[string]flagKind{
 	"-I": flagHead, "--head": flagHead,
 
 	"--compressed": flagIgnored,
-	"-s":           flagIgnored, "--silent": flagIgnored,
+	"-v":           flagIgnored, "--verbose": flagIgnored,
+	"-f": flagIgnored, "--fail": flagIgnored,
+	"-4": flagIgnored, "-6": flagIgnored,
+	"--http1.1": flagIgnored, "--http2": flagIgnored, "--http2-prior-knowledge": flagIgnored,
+	"-s": flagIgnored, "--silent": flagIgnored,
 	"-S": flagIgnored, "--show-error": flagIgnored,
 	"-k": flagIgnored, "--insecure": flagIgnored,
 	"-L": flagIgnored, "--location": flagIgnored,
@@ -390,6 +395,10 @@ func (b *builder) build() (Request, error) {
 		}
 	}
 	headers := b.headers
+	for _, name := range MethodOverrideHeaderNames(headers) {
+		b.uncertain = true
+		b.warn("header %s 會讓伺服器改用其他方法處理（可能是寫入）", name)
+	}
 	if b.hasJSON {
 		headers = withDefaultHeader(headers, "Content-Type", "application/json")
 		headers = withDefaultHeader(headers, "Accept", "application/json")
@@ -630,4 +639,28 @@ func hexValue(r rune) int {
 		return int(r-'A') + 10
 	}
 	return -1
+}
+
+// methodOverrideHeaders make many frameworks treat a request as another
+// method (e.g. a GET carrying X-HTTP-Method-Override: DELETE).
+var methodOverrideHeaders = []string{"X-HTTP-Method-Override", "X-Method-Override", "X-HTTP-Method"}
+
+// HasMethodOverride reports whether h asks the server to use another method.
+func HasMethodOverride(h map[string]string) bool {
+	return len(MethodOverrideHeaderNames(h)) > 0
+}
+
+// MethodOverrideHeaderNames returns the method-override header names present
+// in h (as spelled in h), sorted for stable output.
+func MethodOverrideHeaderNames(h map[string]string) []string {
+	var names []string
+	for k := range h {
+		for _, o := range methodOverrideHeaders {
+			if strings.EqualFold(k, o) {
+				names = append(names, k)
+			}
+		}
+	}
+	sort.Strings(names)
+	return names
 }
