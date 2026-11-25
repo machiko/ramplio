@@ -39,6 +39,9 @@ const (
 	maxNameAttempts = 100
 )
 
+// nowFunc is the clock; tests replace it to simulate the clock going backwards.
+var nowFunc = time.Now
+
 // Kind tells which command produced a record.
 type Kind string
 
@@ -67,14 +70,15 @@ type Entry struct {
 // SaveResult describes a successful save.
 type SaveResult struct {
 	Path string
-	// Created is true when this save created the history directory.
-	Created bool
+	// WroteGitignore is true when this save wrote dir/.gitignore (it did not exist yet).
+	WroteGitignore bool
 	// PruneErr reports a failure to delete old records; the save itself succeeded.
 	PruneErr error
 }
 
-// Save writes rec into dir/runs, creating dir (with a self-ignoring
-// .gitignore) on first use, then deletes the oldest records beyond keep.
+// Save writes rec into dir/runs, creating dir when needed and adding a
+// self-ignoring .gitignore if there is none, then deletes the oldest records
+// beyond keep.
 func Save(dir string, rec Record, keep int) (SaveResult, error) {
 	if rec.Metrics == nil && rec.Discover == nil {
 		return SaveResult{}, errors.New("執行紀錄無效: Metrics 與 Discover 不可同時為 nil")
@@ -84,7 +88,7 @@ func Save(dir string, rec Record, keep int) (SaveResult, error) {
 		return SaveResult{}, fmt.Errorf("序列化執行紀錄失敗: %w", err)
 	}
 
-	created, err := ensureDir(dir)
+	wroteIgnore, err := ensureDir(dir)
 	if err != nil {
 		return SaveResult{}, err
 	}
@@ -92,23 +96,33 @@ func Save(dir string, rec Record, keep int) (SaveResult, error) {
 	if err != nil {
 		return SaveResult{}, err
 	}
-	return SaveResult{Path: path, Created: created, PruneErr: prune(filepath.Join(dir, RecordsSubdir), keep)}, nil
+	return SaveResult{Path: path, WroteGitignore: wroteIgnore, PruneErr: prune(filepath.Join(dir, RecordsSubdir), keep)}, nil
 }
 
-// ensureDir creates dir and dir/runs. On first creation it writes a
-// .gitignore that ignores everything, so records never end up in git.
+// ensureDir creates dir and dir/runs, and writes a .gitignore that ignores
+// everything when dir has none (also when the user created dir themselves),
+// so records never end up in git. An existing .gitignore is never touched.
+// It reports whether the .gitignore was written by this call.
 func ensureDir(dir string) (bool, error) {
-	_, statErr := os.Stat(dir)
-	created := errors.Is(statErr, fs.ErrNotExist)
 	if err := os.MkdirAll(filepath.Join(dir, RecordsSubdir), 0o755); err != nil {
 		return false, fmt.Errorf("建立紀錄目錄 %s 失敗: %w", dir, err)
 	}
-	if created {
-		if err := os.WriteFile(filepath.Join(dir, gitignoreName), []byte(gitignoreContent), 0o644); err != nil {
-			return true, fmt.Errorf("寫入 %s 失敗: %w", filepath.Join(dir, gitignoreName), err)
-		}
+	path := filepath.Join(dir, gitignoreName)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if errors.Is(err, fs.ErrExist) {
+		return false, nil
 	}
-	return created, nil
+	if err != nil {
+		return false, fmt.Errorf("寫入 %s 失敗: %w", path, err)
+	}
+	_, writeErr := f.WriteString(gitignoreContent)
+	if closeErr := f.Close(); writeErr == nil {
+		writeErr = closeErr
+	}
+	if writeErr != nil {
+		return true, fmt.Errorf("寫入 %s 失敗: %w", path, writeErr)
+	}
+	return true, nil
 }
 
 // writeRecord reserves a unique file name with O_EXCL, then replaces it
@@ -117,7 +131,7 @@ func ensureDir(dir string) (bool, error) {
 // sequence, so name order is save order even within one millisecond (the
 // kind lives in the content).
 func writeRecord(runsDir string, data []byte) (string, error) {
-	stamp := time.Now().UTC().Format(timestampLayout)
+	stamp := nextStamp(runsDir)
 	for seq := 0; seq < maxNameAttempts; seq++ {
 		path := filepath.Join(runsDir, fmt.Sprintf("%s-%02d%s", stamp, seq, recordExt))
 		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
@@ -144,6 +158,29 @@ func writeRecord(runsDir string, data []byte) (string, error) {
 	return "", fmt.Errorf("同一毫秒內的執行紀錄超過 %d 筆，放棄存檔", maxNameAttempts)
 }
 
+// nextStamp is the current time, or 1ms after the newest existing record if
+// that is later (the clock went backwards, or many saves in one millisecond),
+// so a new record always sorts after the existing ones.
+func nextStamp(runsDir string) string {
+	stamp := nowFunc().UTC()
+	names, err := recordNames(runsDir)
+	if err == nil && len(names) > 0 {
+		if latest, ok := stampOf(names[len(names)-1]); ok && !latest.Before(stamp) {
+			stamp = latest.Add(time.Millisecond)
+		}
+	}
+	return stamp.Format(timestampLayout)
+}
+
+// stampOf parses the timestamp prefix of a record file name.
+func stampOf(name string) (time.Time, bool) {
+	if len(name) < len(timestampLayout) {
+		return time.Time{}, false
+	}
+	t, err := time.Parse(timestampLayout, name[:len(timestampLayout)])
+	return t, err == nil
+}
+
 // recordNames lists record file names in runsDir, oldest first.
 func recordNames(runsDir string) ([]string, error) {
 	items, err := os.ReadDir(runsDir)
@@ -168,43 +205,54 @@ func prune(runsDir string, keep int) error {
 	if err != nil {
 		return fmt.Errorf("列出執行紀錄失敗: %w", err)
 	}
+	return removeOldest(runsDir, names, keep)
+}
+
+// removeOldest deletes all but the last keep of names (oldest first). A file
+// that is already gone (another process pruned it) is not a failure.
+func removeOldest(runsDir string, names []string, keep int) error {
 	var errs []error
 	for _, name := range names[:max(0, len(names)-keep)] {
-		if err := os.Remove(filepath.Join(runsDir, name)); err != nil {
+		err := os.Remove(filepath.Join(runsDir, name))
+		if err != nil && !errors.Is(err, fs.ErrNotExist) {
 			errs = append(errs, fmt.Errorf("刪除舊紀錄 %s 失敗: %w", name, err))
 		}
 	}
 	return errors.Join(errs...)
 }
 
-// List reads every record under dir, newest first. Unreadable or invalid
-// files are skipped and reported in the error slice; a missing directory is
-// simply empty.
-func List(dir string) ([]Entry, []error) {
+// List reads every record under dir, newest first. A missing directory is
+// simply empty. Invalid files are skipped and reported in skipped; files that
+// are being written (0 bytes) or vanished meanwhile are skipped silently.
+// err is set when the directory itself cannot be read (a file, no permission).
+func List(dir string) (entries []Entry, skipped []error, err error) {
 	runsDir := filepath.Join(dir, RecordsSubdir)
 	names, err := recordNames(runsDir)
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
+		return nil, nil, nil
 	}
 	if err != nil {
-		return nil, []error{fmt.Errorf("列出執行紀錄失敗: %w", err)}
+		return nil, nil, fmt.Errorf("讀取紀錄目錄 %s 失敗: %w", dir, err)
 	}
 
-	var (
-		entries []Entry
-		errs    []error
-	)
 	for i := len(names) - 1; i >= 0; i-- {
 		path := filepath.Join(runsDir, names[i])
-		rec, err := load(path)
-		if err != nil {
-			errs = append(errs, err)
+		rec, loadErr := load(path)
+		if errors.Is(loadErr, errInProgress) || errors.Is(loadErr, fs.ErrNotExist) {
+			continue
+		}
+		if loadErr != nil {
+			skipped = append(skipped, loadErr)
 			continue
 		}
 		entries = append(entries, Entry{Path: path, Record: rec})
 	}
-	return entries, errs
+	return entries, skipped, nil
 }
+
+// errInProgress marks an empty file: the O_EXCL placeholder of a record that
+// another process is still writing.
+var errInProgress = errors.New("執行紀錄寫入中")
 
 // load validates through baseline.Parse (same invariants and schema check as
 // compare) before decoding the record-only fields.
@@ -212,6 +260,9 @@ func load(path string) (Record, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return Record{}, fmt.Errorf("讀取執行紀錄 %s 失敗: %w", filepath.Base(path), err)
+	}
+	if len(raw) == 0 {
+		return Record{}, errInProgress
 	}
 	if _, err := baseline.Parse(raw); err != nil {
 		return Record{}, fmt.Errorf("執行紀錄 %s 無效: %w", filepath.Base(path), err)

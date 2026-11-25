@@ -23,6 +23,8 @@ func newReportCmd() *cobra.Command {
 		Example: `  ramplio report
   ramplio report --input results.json
   ramplio report --input results.json --output /tmp/report.html`,
+		// 找不到紀錄是「下一步」說明，不是用法錯誤：比照 compare 不印 Usage
+		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			r, err := loadReportSource(cmd.OutOrStdout(), cmd.ErrOrStderr(), inputFile)
 			if err != nil {
@@ -76,7 +78,10 @@ func loadReportSource(outW, errW io.Writer, inputFile string) (reporter.Report, 
 	}
 
 	dir := historyDir()
-	entries, listErrs := history.List(dir)
+	entries, listErrs, dirErr := history.List(dir)
+	if dirErr != nil {
+		return reporter.Report{}, dirErr
+	}
 	for _, err := range listErrs {
 		fmt.Fprintf(errW, "warning: 略過無法讀取的執行紀錄: %v\n", err)
 	}

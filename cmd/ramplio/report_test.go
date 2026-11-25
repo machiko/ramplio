@@ -109,3 +109,13 @@ func TestReportExplicitInputStillWorks(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(html), "333")
 }
+
+// L8：零參數沒有紀錄時是「下一步」說明，不是用法錯誤，不印 Usage。
+func TestReportZeroArgNoUsage(t *testing.T) {
+	useHistoryDir(t)
+
+	out, err := execReport(t, "--output", filepath.Join(t.TempDir(), "r.html"))
+
+	require.Error(t, err)
+	assert.NotContains(t, out, "Usage:")
+}

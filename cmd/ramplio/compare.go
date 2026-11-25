@@ -147,7 +147,10 @@ func loadComparePair(outW, errW io.Writer, args []string) (baseline.Baseline, ba
 	}
 
 	dir := historyDir()
-	entries, listErrs := history.List(dir)
+	entries, listErrs, dirErr := history.List(dir)
+	if dirErr != nil {
+		return baseline.Baseline{}, baseline.Baseline{}, dirErr
+	}
 	for _, err := range listErrs {
 		fmt.Fprintf(errW, "warning: 略過無法讀取的執行紀錄: %v\n", err)
 	}

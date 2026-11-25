@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/machiko/ramplio/v3/internal/baseline"
 	"github.com/machiko/ramplio/v3/internal/discover"
@@ -40,13 +41,13 @@ func listRecordFiles(t *testing.T, dir string) []string {
 	return matches
 }
 
-// 情境 11（資料層）：第一次建立目錄時要寫 .gitignore（內容 *）並回報 Created。
+// 情境 11（資料層）：第一次建立目錄時要寫 .gitignore（內容 *）並回報 WroteGitignore。
 func TestHistorySaveFirstCreateWritesGitignore(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), ".ramplio")
 
 	first, err := Save(dir, runRecord("k"), DefaultKeep)
 	require.NoError(t, err)
-	assert.True(t, first.Created, "第一次存檔應回報建立了目錄")
+	assert.True(t, first.WroteGitignore, "第一次存檔應回報寫了 .gitignore")
 
 	ignore, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
 	require.NoError(t, err)
@@ -54,7 +55,7 @@ func TestHistorySaveFirstCreateWritesGitignore(t *testing.T) {
 
 	second, err := Save(dir, runRecord("k"), DefaultKeep)
 	require.NoError(t, err)
-	assert.False(t, second.Created, "目錄已存在時不應再回報建立")
+	assert.False(t, second.WroteGitignore, ".gitignore 已存在時不應再回報寫入")
 	assert.NotEqual(t, first.Path, second.Path, "兩次存檔不可共用同一個檔名")
 }
 
@@ -109,7 +110,8 @@ func TestHistoryListNewestFirstSkipsCorrupt(t *testing.T) {
 	bad := filepath.Join(dir, RecordsSubdir, "00000000T000000.000Z-00-run.json")
 	require.NoError(t, os.WriteFile(bad, []byte("{not json"), 0o644))
 
-	entries, errs := List(dir)
+	entries, errs, err := List(dir)
+	require.NoError(t, err)
 
 	require.Len(t, entries, 2)
 	assert.Equal(t, b.Path, entries[0].Path, "最新的應排第一")
@@ -121,7 +123,8 @@ func TestHistoryListNewestFirstSkipsCorrupt(t *testing.T) {
 }
 
 func TestHistoryListMissingDirIsEmpty(t *testing.T) {
-	entries, errs := List(filepath.Join(t.TempDir(), "nope"))
+	entries, errs, err := List(filepath.Join(t.TempDir(), "nope"))
+	require.NoError(t, err)
 	assert.Empty(t, entries)
 	assert.Empty(t, errs)
 }
@@ -184,4 +187,117 @@ func TestHistoryRequestFingerprint(t *testing.T) {
 		"header 與 body 的邊界不可混淆")
 	assert.Equal(t, RequestFingerprint(nil, nil), RequestFingerprint(map[string]string{}, []byte{}),
 		"沒有 header 與 body 時結果穩定")
+}
+
+// L1：0 byte 的檔是另一個行程正在寫的佔位檔，靜默略過、不算壞檔。
+func TestHistoryListSkipsEmptyPlaceholderSilently(t *testing.T) {
+	dir := t.TempDir()
+	res, err := Save(dir, runRecord("k"), DefaultKeep)
+	require.NoError(t, err)
+	placeholder := filepath.Join(dir, RecordsSubdir, "29991231T235959.999Z-00.json")
+	require.NoError(t, os.WriteFile(placeholder, nil, 0o644))
+
+	entries, skipped, err := List(dir)
+
+	require.NoError(t, err)
+	assert.Empty(t, skipped, "佔位檔不可產生警告")
+	require.Len(t, entries, 1)
+	assert.Equal(t, res.Path, entries[0].Path)
+}
+
+// L2：要刪的舊檔已經被別人刪掉（並行清理），不算失敗。
+func TestHistoryRemoveOldestIgnoresMissing(t *testing.T) {
+	runsDir := t.TempDir()
+	keepMe := filepath.Join(runsDir, "b.json")
+	require.NoError(t, os.WriteFile(keepMe, []byte("{}"), 0o644))
+
+	err := removeOldest(runsDir, []string{"gone.json", "b.json"}, 1)
+
+	require.NoError(t, err)
+	assert.FileExists(t, keepMe)
+}
+
+// L3：時鐘倒退時，新紀錄的檔名仍要排在既有紀錄之後。
+func TestHistoryClockGoesBackwardKeepsOrder(t *testing.T) {
+	dir := t.TempDir()
+	t0 := time.Date(2026, 11, 25, 12, 0, 0, 0, time.UTC)
+	setClock(t, t0)
+	first, err := Save(dir, runRecord("k"), DefaultKeep)
+	require.NoError(t, err)
+
+	setClock(t, t0.Add(-time.Hour))
+	second, err := Save(dir, runRecord("k"), DefaultKeep)
+	require.NoError(t, err)
+
+	assert.Greater(t, filepath.Base(second.Path), filepath.Base(first.Path))
+	entries, _, err := List(dir)
+	require.NoError(t, err)
+	require.Len(t, entries, 2)
+	assert.Equal(t, second.Path, entries[0].Path, "最新存的要排第一")
+}
+
+func setClock(t *testing.T, at time.Time) {
+	t.Helper()
+	orig := nowFunc
+	nowFunc = func() time.Time { return at }
+	t.Cleanup(func() { nowFunc = orig })
+}
+
+// L5：整個紀錄目錄讀不了（是檔案、沒有權限）時回傳目錄層級的錯誤，跟個別壞檔分開。
+func TestHistoryListDirErrorIsSeparate(t *testing.T) {
+	t.Run("紀錄目錄是檔案", func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), "file")
+		require.NoError(t, os.WriteFile(dir, []byte("x"), 0o644))
+
+		entries, skipped, err := List(dir)
+
+		require.Error(t, err)
+		assert.Empty(t, entries)
+		assert.Empty(t, skipped)
+	})
+	t.Run("runs 不可讀", func(t *testing.T) {
+		if os.Geteuid() == 0 {
+			t.Skip("root 不受目錄權限限制")
+		}
+		dir := t.TempDir()
+		runsDir := filepath.Join(dir, RecordsSubdir)
+		require.NoError(t, os.Mkdir(runsDir, 0o000))
+		t.Cleanup(func() { _ = os.Chmod(runsDir, 0o700) })
+
+		_, _, err := List(dir)
+
+		require.Error(t, err)
+	})
+}
+
+// L6：使用者自己先建了目錄，也要補寫 .gitignore，而且只回報實際寫入的那次。
+func TestHistoryGitignoreWrittenWhenDirPreexists(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), ".ramplio")
+	require.NoError(t, os.Mkdir(dir, 0o755))
+
+	first, err := Save(dir, runRecord("k"), DefaultKeep)
+	require.NoError(t, err)
+	second, err := Save(dir, runRecord("k"), DefaultKeep)
+	require.NoError(t, err)
+
+	assert.True(t, first.WroteGitignore)
+	assert.False(t, second.WroteGitignore)
+	ignore, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	require.NoError(t, err)
+	assert.Equal(t, "*\n", string(ignore))
+}
+
+// L6（負向）：使用者自己的 .gitignore 不可被覆寫。
+func TestHistoryGitignoreKeepsUserFile(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), ".ramplio")
+	require.NoError(t, os.Mkdir(dir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("custom\n"), 0o644))
+
+	res, err := Save(dir, runRecord("k"), DefaultKeep)
+
+	require.NoError(t, err)
+	assert.False(t, res.WroteGitignore)
+	ignore, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	require.NoError(t, err)
+	assert.Equal(t, "custom\n", string(ignore))
 }

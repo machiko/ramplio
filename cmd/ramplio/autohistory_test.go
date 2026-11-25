@@ -98,7 +98,8 @@ func TestHistoryRunAutoSaves(t *testing.T) {
 	require.NotNil(t, b.Metrics)
 	assert.Positive(t, b.Metrics.Total)
 
-	entries, errs := history.List(dir)
+	entries, errs, err := history.List(dir)
+	require.NoError(t, err)
 	require.Empty(t, errs)
 	require.Len(t, entries, 1)
 	assert.NotNil(t, entries[0].Record.Report, "run 紀錄要帶完整報告")
@@ -130,7 +131,8 @@ func TestHistoryDiscoverAutoSaves(t *testing.T) {
 
 func assertOneDiscoverRecord(t *testing.T, dir string) {
 	t.Helper()
-	entries, errs := history.List(dir)
+	entries, errs, err := history.List(dir)
+	require.NoError(t, err)
 	require.Empty(t, errs)
 	require.Len(t, entries, 1)
 	rec := entries[0].Record
@@ -439,4 +441,52 @@ func assertFilesHide(t *testing.T, dir string, secrets ...string) {
 	for _, s := range secrets {
 		assert.NotContains(t, string(raw), s)
 	}
+}
+
+// L5（負向）：紀錄目錄本身不能用（是檔案、runs 不可讀）時只警告一行，不回錯誤。
+func TestHistoryUnusableDirWarnsOnce(t *testing.T) {
+	t.Run("紀錄目錄是檔案", func(t *testing.T) {
+		dir := filepath.Join(t.TempDir(), "not-a-dir")
+		require.NoError(t, os.WriteFile(dir, []byte("x"), 0o644))
+		t.Setenv(historyDirEnv, dir)
+		srv := newDelayServer(t)
+
+		_, stderr, err := execRun(t, "--url", srv.URL, "-d", quickRun, "--no-tui")
+
+		require.NoError(t, err)
+		assert.Equal(t, 1, strings.Count(stderr, "warning:"), "只警告一行，實際：%q", stderr)
+	})
+	t.Run("runs 不可讀", func(t *testing.T) {
+		if os.Geteuid() == 0 {
+			t.Skip("root 不受目錄權限限制")
+		}
+		dir := useHistoryDir(t)
+		runsDir := filepath.Join(dir, history.RecordsSubdir)
+		require.NoError(t, os.MkdirAll(runsDir, 0o755))
+		require.NoError(t, os.Chmod(runsDir, 0o000))
+		t.Cleanup(func() { _ = os.Chmod(runsDir, 0o700) })
+		srv := newDelayServer(t)
+
+		_, stderr, err := execRun(t, "--url", srv.URL, "-d", quickRun, "--no-tui")
+
+		require.NoError(t, err)
+		assert.Equal(t, 1, strings.Count(stderr, "warning:"), "只警告一行，實際：%q", stderr)
+	})
+}
+
+// L6：使用者自己先建好 .ramplio/ 時也補寫 .gitignore，說明只在實際寫入時印一次。
+func TestHistoryPreexistingDirGetsGitignoreNotice(t *testing.T) {
+	dir := useHistoryDir(t)
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	srv := newDelayServer(t)
+
+	first, _, err := execRun(t, "--url", srv.URL, "-d", quickRun, "--no-tui")
+	require.NoError(t, err)
+	second, _, err := execRun(t, "--url", srv.URL, "-d", quickRun, "--no-tui")
+	require.NoError(t, err)
+
+	assert.FileExists(t, filepath.Join(dir, ".gitignore"))
+	assert.Contains(t, first, ".gitignore")
+	assert.NotContains(t, first, "已建立", "目錄是使用者建的，不能說是我們建立的")
+	assert.NotContains(t, second, ".gitignore")
 }

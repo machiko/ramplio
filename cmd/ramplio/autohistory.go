@@ -70,7 +70,13 @@ func discoverTargetKey(req protocols.Request, tolerance time.Duration, maxRPS in
 // the same target. It never returns an error: saving and comparing are a
 // convenience and must not change the run's result or exit code.
 func recordAndDiff(outW, errW io.Writer, dir string, rec history.Record) {
-	entries, listErrs := history.List(dir)
+	entries, listErrs, dirErr := history.List(dir)
+	if dirErr != nil {
+		// The directory itself is unusable (a file, no permission): saving
+		// would fail for the same reason, so warn once and stop here.
+		fmt.Fprintf(errW, "warning: 無法存執行紀錄（不影響本次結果）: %v\n", dirErr)
+		return
+	}
 	for _, err := range listErrs {
 		fmt.Fprintf(errW, "warning: 略過無法讀取的執行紀錄: %v\n", err)
 	}
@@ -98,8 +104,8 @@ func recordAndDiff(outW, errW io.Writer, dir string, rec history.Record) {
 }
 
 func printSaved(outW, errW io.Writer, dir string, res history.SaveResult) {
-	if res.Created {
-		fmt.Fprintf(outW, "已建立 %s/ 存放執行紀錄（裡面已自動放 .gitignore，不會被 commit）。\n", dir)
+	if res.WroteGitignore {
+		fmt.Fprintf(outW, "執行紀錄放在 %s/（已在裡面自動放 .gitignore，不會被 commit）。\n", dir)
 	}
 	fmt.Fprintf(outW, "執行紀錄已存至 %s\n", res.Path)
 	if res.PruneErr != nil {
