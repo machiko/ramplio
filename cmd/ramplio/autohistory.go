@@ -10,6 +10,7 @@ import (
 
 	"github.com/machiko/ramplio/v3/internal/baseline"
 	"github.com/machiko/ramplio/v3/internal/history"
+	"github.com/machiko/ramplio/v3/internal/protocols"
 )
 
 const (
@@ -38,6 +39,8 @@ type runLoad struct {
 	VUs          int
 	RPS          int
 	Duration     string
+	Headers      map[string]string
+	Body         string
 }
 
 // runTargetKey identifies "the same target with the same load". The URL is
@@ -48,16 +51,19 @@ func runTargetKey(l runLoad) string {
 	}
 	method := strings.ToUpper(l.Method)
 	target := maskURLForDisplay(l.URL)
+	req := history.RequestFingerprint(l.Headers, []byte(l.Body))
 	if l.RPS > 0 {
-		return fmt.Sprintf("run|rps|%s %s|rps=%d|d=%s", method, target, l.RPS, l.Duration)
+		return fmt.Sprintf("run|rps|%s %s|req=%s|rps=%d|d=%s", method, target, req, l.RPS, l.Duration)
 	}
-	return fmt.Sprintf("run|vus|%s %s|vus=%d|d=%s", method, target, l.VUs, l.Duration)
+	return fmt.Sprintf("run|vus|%s %s|req=%s|vus=%d|d=%s", method, target, req, l.VUs, l.Duration)
 }
 
-// discoverTargetKey is runTargetKey for capacity probes.
-func discoverTargetKey(method, rawURL string, tolerance time.Duration, maxRPS int, probeDuration time.Duration) string {
-	return fmt.Sprintf("discover|%s %s|tolerance=%s|max-rps=%d|probe=%s",
-		strings.ToUpper(method), maskURLForDisplay(rawURL), tolerance, maxRPS, probeDuration)
+// discoverTargetKey is runTargetKey for capacity probes (also the smart entry).
+// Headers and body only enter the key as a hash, never as plain text.
+func discoverTargetKey(req protocols.Request, tolerance time.Duration, maxRPS int, probeDuration time.Duration) string {
+	return fmt.Sprintf("discover|%s %s|req=%s|tolerance=%s|max-rps=%d|probe=%s",
+		strings.ToUpper(req.Method), maskURLForDisplay(req.URL), history.RequestFingerprint(req.Headers, req.Body),
+		tolerance, maxRPS, probeDuration)
 }
 
 // recordAndDiff saves rec and prints how it compares with the previous run of

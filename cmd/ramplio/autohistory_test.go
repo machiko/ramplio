@@ -303,9 +303,11 @@ func TestHistoryAutoDiffSkipsDifferentTarget(t *testing.T) {
 	require.NoError(t, err)
 
 	for name, args := range map[string][]string{
-		"不同網址":    {"--url", srv.URL + "/b", "-d", quickRun, "--no-tui"},
-		"不同 VU 數": {"--url", srv.URL + "/a", "-d", quickRun, "--no-tui", "--vus", "2"},
-		"不同時長":    {"--url", srv.URL + "/a", "-d", "400ms", "--no-tui"},
+		"不同網址":      {"--url", srv.URL + "/b", "-d", quickRun, "--no-tui"},
+		"不同 VU 數":   {"--url", srv.URL + "/a", "-d", quickRun, "--no-tui", "--vus", "2"},
+		"不同時長":      {"--url", srv.URL + "/a", "-d", "400ms", "--no-tui"},
+		"多了 header": {"--url", srv.URL + "/a", "-d", quickRun, "--no-tui", "-H", "X-A: 1"},
+		"多了 body":   {"--url", srv.URL + "/a", "-d", quickRun, "--no-tui", "--body", "a"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			out, _, err := execRun(t, args...)
@@ -345,4 +347,96 @@ func TestHistoryFirstCreateWritesGitignore(t *testing.T) {
 	second, _, err := execRun(t, "--url", srv.URL, "-d", quickRun, "--no-tui")
 	require.NoError(t, err)
 	assert.NotContains(t, second, ".gitignore", "只在第一次建立時說明")
+}
+
+// 情境 9（M1）：header 值不同、body 不同都不比較。
+func TestHistoryAutoDiffSkipsDifferentRequest(t *testing.T) {
+	cases := map[string][2][]string{
+		"header 值不同": {{"-H", "X-A: 1"}, {"-H", "X-A: 2"}},
+		"body 不同":    {{"--body", "a"}, {"--body", "b"}},
+	}
+	for name, pair := range cases {
+		t.Run(name, func(t *testing.T) {
+			useHistoryDir(t)
+			srv := newDelayServer(t)
+			base := []string{"--url", srv.URL, "-d", quickRun, "--no-tui"}
+
+			_, _, err := execRun(t, append(base, pair[0]...)...)
+			require.NoError(t, err)
+			out, _, err := execRun(t, append(base, pair[1]...)...)
+			require.NoError(t, err)
+
+			assert.Contains(t, out, "第一筆紀錄")
+			assert.NotContains(t, out, "跟上一次")
+		})
+	}
+}
+
+// 情境 9（M1）：header 只差在順序或名稱大小寫，仍算同一目標。
+func TestHistoryAutoDiffHeaderOrderAndCaseSameTarget(t *testing.T) {
+	useHistoryDir(t)
+	srv := newDelayServer(t)
+	base := []string{"--url", srv.URL, "-d", quickRun, "--no-tui", "--body", "same"}
+
+	_, _, err := execRun(t, append(base, "-H", "X-A: 1", "-H", "X-B: 2")...)
+	require.NoError(t, err)
+	out, _, err := execRun(t, append(base, "-H", "x-b: 2", "-H", "x-a: 1")...)
+	require.NoError(t, err)
+
+	assert.Contains(t, out, "跟上一次")
+}
+
+// 情境 9（M1）：discover（與單一入口共用的 runDiscover）也納入 header。
+func TestHistoryDiscoverDifferentHeaderNotCompared(t *testing.T) {
+	useHistoryDir(t)
+	srv := newRecordingServer(t, "", "")
+	args := []string{"--url", srv.URL, "--probe-duration", "1500ms", "--max-rps", "5"}
+
+	_, err := execDiscover(t, "", append(args, "-H", "X-A: 1")...)
+	require.NoError(t, err)
+	same, err := execDiscover(t, "", append(args, "-H", "x-a: 1")...)
+	require.NoError(t, err)
+	diff, err := execDiscover(t, "", append(args, "-H", "X-A: 2")...)
+	require.NoError(t, err)
+
+	assert.Contains(t, same, "跟上一次", "只差名稱大小寫要算同一目標")
+	assert.Contains(t, diff, "第一筆紀錄")
+	assert.NotContains(t, diff, "跟上一次")
+}
+
+// 情境 9（M1，負向）：紀錄檔只存雜湊，找不到 header 值與 body 原文。
+func TestHistoryRecordOmitsHeaderAndBody(t *testing.T) {
+	const headerSecret, bodySecret = "HDRSECRET77", "BODYSECRET88"
+
+	t.Run("run", func(t *testing.T) {
+		dir := useHistoryDir(t)
+		srv := newDelayServer(t)
+
+		_, _, err := execRun(t, "--url", srv.URL, "-d", quickRun, "--no-tui",
+			"-H", "Authorization: Bearer "+headerSecret, "--body", bodySecret)
+		require.NoError(t, err)
+
+		assertFilesHide(t, dir, headerSecret, bodySecret)
+	})
+	t.Run("discover", func(t *testing.T) {
+		dir := useHistoryDir(t)
+		srv := newRecordingServer(t, "Bearer "+headerSecret, "")
+
+		_, err := execDiscover(t, "", "--url", srv.URL, "--probe-duration", "1500ms", "--max-rps", "5",
+			"-H", "Authorization: Bearer "+headerSecret)
+		require.NoError(t, err)
+
+		assertFilesHide(t, dir, headerSecret)
+	})
+}
+
+func assertFilesHide(t *testing.T, dir string, secrets ...string) {
+	t.Helper()
+	files := historyFiles(t, dir)
+	require.Len(t, files, 1)
+	raw, err := os.ReadFile(files[0])
+	require.NoError(t, err)
+	for _, s := range secrets {
+		assert.NotContains(t, string(raw), s)
+	}
 }

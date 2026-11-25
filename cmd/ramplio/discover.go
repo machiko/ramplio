@@ -319,7 +319,7 @@ func runDiscover(ctx context.Context, w, errW io.Writer, opts discoverOptions) e
 		rec := history.Record{
 			Baseline:  baseline.FromDiscover(result, maskURLForDisplay(req.URL)),
 			Kind:      history.KindDiscover,
-			TargetKey: discoverTargetKey(req.Method, req.URL, opts.Tolerance, opts.MaxRPS, opts.ProbeDuration),
+			TargetKey: discoverTargetKey(req, opts.Tolerance, opts.MaxRPS, opts.ProbeDuration),
 		}
 		rec.GitCommit = currentGitCommit()
 		recordAndDiff(w, errW, historyDir(), rec)

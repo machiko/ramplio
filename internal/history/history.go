@@ -7,9 +7,12 @@
 package history
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -242,4 +245,36 @@ func LatestWithReport(entries []Entry) (Entry, bool) {
 		}
 	}
 	return Entry{}, false
+}
+
+// fingerprintLen is how many hex characters of the sha256 are kept.
+const fingerprintLen = 8
+
+// RequestFingerprint summarises headers and body as the first 8 hex chars of
+// a sha256, so "same target" can include them without storing secrets.
+// Header names are case-insensitive and order does not matter; values and
+// body are compared exactly. Every part is length-prefixed so the boundary
+// between a header value and the body cannot be shifted.
+func RequestFingerprint(headers map[string]string, body []byte) string {
+	lower := make(map[string]string, len(headers))
+	for name, value := range headers {
+		lower[strings.ToLower(name)] = value
+	}
+	names := make([]string, 0, len(lower))
+	for name := range lower {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	h := sha256.New()
+	for _, name := range names {
+		writePart(h, name)
+		writePart(h, lower[name])
+	}
+	writePart(h, string(body))
+	return hex.EncodeToString(h.Sum(nil))[:fingerprintLen]
+}
+
+func writePart(w io.Writer, part string) {
+	_, _ = fmt.Fprintf(w, "%d:%s;", len(part), part) // hash.Hash writes never fail
 }

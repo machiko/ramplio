@@ -167,3 +167,21 @@ func TestHistorySaveRejectsInvalidRecord(t *testing.T) {
 	assert.True(t, strings.Contains(err.Error(), "Metrics") || strings.Contains(err.Error(), "無效"))
 	assert.Empty(t, listRecordFiles(t, dir))
 }
+
+// M1：header＋body 的雜湊。順序與名稱大小寫不影響；值或 body 不同就不同；不含明文。
+func TestHistoryRequestFingerprint(t *testing.T) {
+	base := RequestFingerprint(map[string]string{"X-A": "1", "X-B": "2"}, []byte("body"))
+
+	assert.Regexp(t, "^[0-9a-f]{8}$", base, "只取 sha256 前 8 碼")
+	assert.Equal(t, base, RequestFingerprint(map[string]string{"x-b": "2", "x-a": "1"}, []byte("body")),
+		"名稱大小寫與順序不影響")
+	assert.NotEqual(t, base, RequestFingerprint(map[string]string{"X-A": "9", "X-B": "2"}, []byte("body")),
+		"header 值不同要不同")
+	assert.NotEqual(t, base, RequestFingerprint(map[string]string{"X-A": "1", "X-B": "2"}, []byte("other")),
+		"body 不同要不同")
+	assert.NotEqual(t, RequestFingerprint(map[string]string{"X-A": "1b"}, nil),
+		RequestFingerprint(map[string]string{"X-A": "1"}, []byte("b")),
+		"header 與 body 的邊界不可混淆")
+	assert.Equal(t, RequestFingerprint(nil, nil), RequestFingerprint(map[string]string{}, []byte{}),
+		"沒有 header 與 body 時結果穩定")
+}

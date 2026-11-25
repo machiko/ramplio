@@ -227,6 +227,7 @@ func newRunCmd() *cobra.Command {
 					TargetKey: runTargetKey(runLoad{
 						ScenarioFile: scenarioFile, Method: method, URL: url,
 						VUs: vus, RPS: rps, Duration: duration,
+						Headers: parseHeaders(headers), Body: body,
 					}),
 					Report: &rep,
 				}
