@@ -3,7 +3,7 @@
 - 分支：`feat/auto-history`（worktree：`/Users/reyes/Workspace/ramplio-worktrees/auto-history`）
 - 基準：`main` @ 9a61b13
 - 規模：一般
-- 狀態：第 3 段完成，待獨立審查（2026-11-25）
+- 狀態：第 5 段第 1 輪完成，待複審（2026-11-25）
 
 ## 規格
 
@@ -142,6 +142,14 @@
 - 2026-11-25（實作）：產品程式 diff 是 +526／−34 行（不含測試與文件），比規格估的 350–450 行多。多出來的主要在 `internal/history`（245 行，含註解與錯誤處理）。
 - 2026-11-25：觀察到的既有問題（計畫外，本卡不修，另開卡）：`run --url` 的 `--output x.xml`（JUnit）和 `--sink` 收到的 `scenarioName` 仍是原始網址；終端的「Running … → <網址>」那行也沒遮罩。
 - 2026-11-25（使用者確認，第 5 段第 1 輪 M1）：「同一個目標」再加入 header＋body。把 header 依名稱排序（名稱轉小寫正規化，值不動）再接上 body，取 sha256 的前 8 碼放進 target key。**只存雜湊、不存明文**。代價：token 輪換後會被當成新目標，從第一筆重新累積。run、discover、單一入口一致；情境檔模式仍只看路徑。
+- 2026-11-25（第 5 段第 1 輪）：M1 的雜湊放在 `history.RequestFingerprint`（純函式）。每一段都先寫長度再寫內容，header 值跟 body 的邊界就不會被挪動（例如 `X-A: 1b`＋空 body 跟 `X-A: 1`＋body `b` 不會撞在一起）。target key 一律帶 `req=<8 碼>`，沒有 header 與 body 時也帶。`TestHistoryAutoDiffHeaderOrderAndCaseSameTarget` 與 `TestHistoryRecordOmitsHeaderAndBody` 在修正前就是綠的（原本 key 根本不看 header，紀錄檔也從來不存 header），兩條留著當回歸守門。
+- 2026-11-25（第 5 段第 1 輪）：L3 不只是取「現有最大時間戳」跟「現在」比較大的那個，而是用 `max(現在, 最大時間戳＋1ms)`。如果直接沿用最大時間戳，萬一有一個檔名在未來的檔（時鐘大幅倒退、手動放進來的檔），之後每次都會擠在同一毫秒，序號 00–99 用完就再也存不了；每次加 1ms 就不會用完。時鐘改成可注入的 package 變數 `nowFunc`，只有 history 的測試會替換它（該套件沒有平行測試）。
+- 2026-11-25（第 5 段第 1 輪）：L5 讓 `history.List` 回傳 `(entries, skipped, err)`，把「整個目錄讀不了」（`err`）跟「個別壞檔」（`skipped`）分開。`recordAndDiff` 遇到 `err` 就印一行警告後結束，不再 Save，也不比較；`compare`／`report` 零參數遇到時直接回錯誤。既有測試的 `List` 呼叫跟著改成三個回傳值，斷言沒有改。
+- 2026-11-25（第 5 段第 1 輪）：L1：0 byte 的檔（另一個行程 `O_EXCL` 佔位、還沒 rename 進來）和讀檔前就消失的檔（被並行清理掉）都靜默略過。L2：把刪檔拆成 `removeOldest`，測試可以直接餵一個不存在的檔名；`fs.ErrNotExist` 不算失敗。
+- 2026-11-25（第 5 段第 1 輪）：L6：`SaveResult.Created` 改名為 `WroteGitignore`，語意改成「這次有沒有實際寫入 .gitignore」。`.gitignore` 用 `O_EXCL` 建立，使用者自己的 `.gitignore` 絕不覆寫（`TestHistoryGitignoreKeepsUserFile`）。`TestHistorySaveFirstCreateWritesGitignore` 的斷言跟著改名，從 `first.Created` 改成 `first.WroteGitignore`，判斷的內容不變。提示文字從「已建立 X/ 存放執行紀錄」改成「執行紀錄放在 X/（已在裡面自動放 .gitignore…）」，因為目錄可能是使用者自己建的。
+- 2026-11-25（第 5 段第 1 輪）：L8：`report` 設 `SilenceUsage`。沒有像 `compare` 一樣設 `SilenceErrors`，所以錯誤訊息仍會印兩次，那是卡 1 記下的另開卡問題，這裡不處理。
+- 2026-11-25（第 5 段第 1 輪）：L4、L7 不改程式，寫進 README 與 getting-started。L4：壞檔或較新 schema 的紀錄檔會被略過並警告，但不會被自動刪除；檔名排在最新的壞檔需要手動刪。L7：情境檔模式只看檔案路徑，改了內容但路徑不變，仍會跟上一次比較。
+- 2026-11-25（第 5 段第 1 輪）：internal/history 新增的幾條 LOW 測試，紅燈原因是「新 API 不存在」（`removeOldest`、`nowFunc`、`WroteGitignore`、`List` 三個回傳值），沒有先看到行為上的紅。cmd 層的 L5、L6、L8 則是先只改成新簽名、行為不變，實際看到預期的紅（警告 2 行、「已建立」字樣、印出 Usage）之後才修。
 
 ## History
 
@@ -168,3 +176,23 @@
   - `go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest run`（v2.15.0）：`0 issues.`，exit 0
   - `go build ./...`：exit 0，無輸出
   - 測試跑完後 repo 內沒有殘留 `.ramplio/`（`TestMain` 把 `RAMPLIO_HISTORY_DIR` 指到暫存目錄）。
+- 2026-11-25：第 4 段獨立審查結論「可以進 PR」，無 CRITICAL／HIGH，1 MEDIUM＋8 LOW。使用者確認同目標判定加入 header＋body 雜湊（ea1233f 改規格）。
+- 2026-11-25：第 5 段第 1 輪修正完成。commit：ea1233f 規格、7fbc8ab M1 header＋body 雜湊、6a73811 L1／L2／L3／L5／L6／L8、062d1dc 文件（M1 說明、L4、L7）。
+- 2026-11-25：第 5 段第 1 輪測試輸出（實際結尾）：
+  - 完成檢查 `go test ./internal/history/... ./cmd/ramplio/... -run 'History|ZeroArg|OneArg|SaveBaselineMasks' -count=1`（篩選字串不用改，新測試名稱都含 `History` 或 `ZeroArg`；`-v` 數到 69 個 PASS，含子測試）：
+    ```
+    ok  	github.com/machiko/ramplio/v3/internal/history	0.366s
+    ok  	github.com/machiko/ramplio/v3/cmd/ramplio	25.968s
+    ```
+  - `go test -race -count=1 ./...`（exit 0）：
+    ```
+    ok  	github.com/machiko/ramplio/v3/cmd/ramplio	77.840s
+    ok  	github.com/machiko/ramplio/v3/internal/discover	12.791s
+    ok  	github.com/machiko/ramplio/v3/internal/engine	103.196s
+    ok  	github.com/machiko/ramplio/v3/internal/history	5.839s
+    ok  	github.com/machiko/ramplio/v3/internal/scenarios	3.463s
+    （其餘 11 個套件同為 ok，共 16 個套件）
+    ```
+  - `go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest run`：`0 issues.`，exit 0
+  - `go build ./...`：exit 0，無輸出
+  - repo 內沒有殘留 `.ramplio/`
