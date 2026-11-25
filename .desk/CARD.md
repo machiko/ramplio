@@ -65,7 +65,7 @@
 自動比對
 
 8. 給定同一目標、同樣負載參數已有 1 筆紀錄，當再跑一次，則結尾印「跟上一次（<時間>）比」段落，含 p99、錯誤率、吞吐量的前後值與持平／改善／退步。→ `TestHistoryAutoDiffSameTarget`
-9. 給定沒有同目標紀錄（第一次跑、換網址、或 `--vus` 不同），則不比較，只印「已存為這個目標的第一筆紀錄」。→ `TestHistoryAutoDiffSkipsDifferentTarget`
+9. 給定沒有同目標紀錄（第一次跑、換網址、`--vus` 不同、header 不同、body 不同），則不比較，只印「已存為這個目標的第一筆紀錄」。header 只差在順序或名稱大小寫時仍算同一目標。run 與 discover 一致。紀錄檔只存 header＋body 的雜湊，原文找不到 header 值與 body（負向）。→ `TestHistoryAutoDiffSkipsDifferentTarget`、`TestHistoryAutoDiffHeaderOrderAndCaseSameTarget`、`TestHistoryDiscoverDifferentHeaderNotCompared`、`TestHistoryRecordOmitsHeaderAndBody`、`internal`：`TestHistoryRequestFingerprint`
 10. 退步不改 exit code（負向）：給定上一次 p99 很低、這次 server 刻意變慢，當跑完，則比對段落標「退步」，但 RunE 仍回 nil。→ `TestHistoryAutoDiffRegressionKeepsExitCode`
 
 .gitignore 與保留上限
@@ -128,7 +128,7 @@
 - 2026-11-25：自動比對只是資訊、不影響 exit code；守門仍由明確下 `compare` 或 thresholds 負責。理由：一般使用者每次跑完都會看到比對，網路雜訊就可能讓 exit code 跳來跳去，在 CI 會變成誤報。
 - 2026-11-25（使用者確認）：保留筆數＝所有目標合計最近 50 筆，超過刪最舊。
 - 2026-11-25（使用者確認）：紀錄放目前工作目錄的 `.ramplio/`，`RAMPLIO_HISTORY_DIR` 可覆寫。
-- 2026-11-25（使用者確認）：「同一個目標」＝模式＋HTTP 方法＋遮罩後網址（情境模式用情境檔路徑）＋負載參數全部相同；run 的負載參數是 `--vus` 或 `--rps` 加 `-d`，discover 是 `--tolerance`、`--max-rps`、`--probe-duration`。
+- 2026-11-25（使用者確認）：「同一個目標」＝模式＋HTTP 方法＋遮罩後網址（情境模式用情境檔路徑）＋負載參數全部相同（2026-11-25 第 5 段第 1 輪再加上 header＋body，見下）；run 的負載參數是 `--vus` 或 `--rps` 加 `-d`，discover 是 `--tolerance`、`--max-rps`、`--probe-duration`。
 - 2026-11-25（使用者確認）：第一次建立 `.ramplio/` 時自動寫 `.ramplio/.gitignore`（內容 `*`）並印一行說明。
 - 2026-11-25（使用者確認）：`compare` 零參數比「最近一筆」與「同目標的前一筆」。
 - 2026-11-25（使用者確認，範圍擴充）：原本記為另開卡的既有問題——`run --url --save-baseline` 的 `Scenario` 存原始網址（`run.go:206` `baseline.FromSummary(sum, scenarioName)`）——併進本卡修，新增驗收情境 17。
@@ -141,6 +141,7 @@
 - 2026-11-25（實作）：`report_test.go` 比規格多兩條：`TestReportZeroArgNoHistory`（完全沒有紀錄）、`TestReportExplicitInputStillWorks`（情境 16 的 `report --input` 相容性，原本沒有測試）。
 - 2026-11-25（實作）：產品程式 diff 是 +526／−34 行（不含測試與文件），比規格估的 350–450 行多。多出來的主要在 `internal/history`（245 行，含註解與錯誤處理）。
 - 2026-11-25：觀察到的既有問題（計畫外，本卡不修，另開卡）：`run --url` 的 `--output x.xml`（JUnit）和 `--sink` 收到的 `scenarioName` 仍是原始網址；終端的「Running … → <網址>」那行也沒遮罩。
+- 2026-11-25（使用者確認，第 5 段第 1 輪 M1）：「同一個目標」再加入 header＋body。把 header 依名稱排序（名稱轉小寫正規化，值不動）再接上 body，取 sha256 的前 8 碼放進 target key。**只存雜湊、不存明文**。代價：token 輪換後會被當成新目標，從第一筆重新累積。run、discover、單一入口一致；情境檔模式仍只看路徑。
 
 ## History
 
