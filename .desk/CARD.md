@@ -3,7 +3,7 @@
 - 分支：`feat/auto-history`（worktree：`/Users/reyes/Workspace/ramplio-worktrees/auto-history`）
 - 基準：`main` @ 9a61b13
 - 規模：一般
-- 狀態：第 1 段規格待使用者確認（2026-11-25）
+- 狀態：第 1 段已確認，第 2 段實作中（2026-11-25）
 
 ## 規格
 
@@ -36,11 +36,12 @@
 - 存檔失敗（唯讀目錄、磁碟滿）只印一行警告，不影響壓測結果、報告輸出與 exit code。
 - 存檔內容的網址一律經 `maskURLForDisplay` 遮罩。
 - `--no-history` 可關掉自動留存。
+- （範圍擴充，使用者決定）`run --save-baseline` 存檔前也用 `maskURLForDisplay` 遮罩目標網址。
 
 ### 非目標
 
 - 不做 `run --url`／`--rps` 的 TUI（卡 2b）。
-- 不改 `--output`／`--report`／`--save-baseline` 的行為與格式，舊檔照舊可用。
+- 不改 `--output`／`--report`／`--save-baseline` 的格式，舊檔照舊可用（唯一的行為改動是 `run --save-baseline` 的網址改為遮罩後的值，見情境 17）。
 - 不自動產 HTML（`ramplio report` 零參數即可產生）。
 - dashboard（`run --dashboard`）與分散式（`--worker`）不留存：兩者目前都拿不到結束時的 `metrics.Summary`，要改執行流程，另開卡。
 - 不遮罩情境檔內使用者自訂的 step 名稱（那是使用者自己寫的文字）。
@@ -79,6 +80,10 @@
 15. 給定最近有 1 筆 run 紀錄，當 `ramplio report`（零參數），則產生 `report.html`，並印出用的是哪一筆（時間＋遮罩後目標）。只有 discover 紀錄時回錯誤並說明 discover 沒有 HTML 報告。→ `cmd/ramplio/report_test.go: TestReportZeroArgUsesLatestRun`、`TestReportZeroArgOnlyDiscover`
 16. 相容：`compare a.json b.json`、`report --input x.json`、`--save-baseline`、`--output` 既有測試不改、照樣綠；`compare` 只給 1 個參數回用法錯誤。→ 既有 `compare_test.go`、`baselinesave_test.go` ＋ `TestCompareOneArgRejected`
 
+`--save-baseline` 遮罩（範圍擴充）
+
+17. 負向：給定帶帳密與 token 的網址（`http://user:PASSWORD9@host/?token=SECRET123`），當執行 `run --url … --save-baseline b.json`，則讀回 `b.json` 原文找不到 `PASSWORD9` 與 `SECRET123`，`scenario` 等於該網址經 `maskURLForDisplay` 的結果。→ `cmd/ramplio/baselinesave_test.go: TestRunSaveBaselineMasksURL`
+
 ### 實作計畫（檔案）
 
 - 新增 `internal/history/history.go`＋`history_test.go`（純資料與檔案操作，不碰 cmd）：
@@ -89,12 +94,13 @@
   - 檔案權限 0o644／目錄 0o755，跟既有 baseline 一致。
 - 新增 `cmd/ramplio/autohistory.go`＋`autohistory_test.go`：
   - `historyDir()`：預設 `.ramplio`（目前工作目錄），環境變數 `RAMPLIO_HISTORY_DIR` 可覆寫（測試隔離與 CI 用）。
-  - `targetKey(...)`：組出「模式＋方法＋遮罩後網址或情境檔路徑＋負載參數」字串（見待決定 3）。
+  - `targetKey(...)`：組出「模式＋方法＋遮罩後網址或情境檔路徑＋負載參數」字串（見 Decisions「同一個目標」）。
   - `recordAndDiff(outW, errW, rec)`：存檔 → 失敗只警告 → 找同目標前一筆 → `baseline.Compare` → `renderAutoDiff` 印精簡段落（重用 `baseline.MetricLabel`／`FormatMetricValue`，不重用 `renderComparison` 是因為它的結論句是守門口吻「建議先查再上」）。
   - 新增 `TestMain`：把 `RAMPLIO_HISTORY_DIR` 設到暫存目錄，讓既有的 cobra 層測試不會在 `cmd/ramplio/` 底下留下 `.ramplio/`。
 - 修改 `cmd/ramplio/run.go`：
   - 新增 `--no-history` 旗標。
   - 在 `--save-baseline` 之後、threshold 判定與 `os.Exit(1)` 之前呼叫 `recordAndDiff`（threshold 失敗的那次也要留）。
+  - （情境 17）`--save-baseline` 的 `baseline.FromSummary(sum, scenarioName)` 改傳遮罩後的識別：`--url` 模式用 `maskURLForDisplay(url)`，情境模式維持檔名。
   - `runURL` 的 step 名稱 `req.Method + " " + req.URL` 改用 `maskURLForDisplay`，不然原始網址會跟著 `report.steps[].name` 存進檔（終端摘要也會變成遮罩後的網址，屬於刻意的改動）。
 - 修改 `cmd/ramplio/discover.go`：`discoverOptions` 加 `NoHistory`；`runDiscover` 存完 `--save-baseline` 後呼叫 `recordAndDiff`（`blockWrite` 路徑不走到這裡，天然不存）；新增 `--no-history` 旗標。單一入口走 `runDiscover`，自動受惠，`smartentry.go` 不用改。
 - 修改 `cmd/ramplio/compare.go`：`Args` 改成 0 或 2 個；0 個時從 history 取「最近一筆＋同目標前一筆」，其餘沿用 `baseline.Compare`＋`renderComparison`＋`compareVerdictErr`。更新 `Use`／`Long` 說明。
@@ -106,7 +112,7 @@
 
 ### 完成檢查
 
-`go test ./internal/history/... ./cmd/ramplio/... -run 'History|ZeroArg|OneArg' -count=1`（實作前紅：套件不存在／測試失敗；實作後綠），接著 `go test -race -count=1 ./...`、`go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest run`、`go build ./...`。
+`go test ./internal/history/... ./cmd/ramplio/... -run 'History|ZeroArg|OneArg|SaveBaselineMasks' -count=1`（實作前紅：套件不存在／測試失敗；實作後綠），接著 `go test -race -count=1 ./...`、`go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest run`、`go build ./...`。
 
 ### 驗證（端到端）
 
@@ -115,21 +121,19 @@
 3. `ramplio compare` → 看到兩筆的比較；`ramplio report` → 產生 `report.html`。
 4. `chmod 500 .ramplio` 後再跑一次 → 只有一行警告，摘要正常，`echo $?` 為 0。
 
-### 待決定（請使用者確認；括號內為推薦）
-
-1. **存幾筆**：（推薦）所有目標合計保留最近 **50 筆**，超過刪最舊。每筆約 2–5 KB，50 筆不到 250 KB。另一種是每個目標各留 N 筆，但會讓少跑的目標佔著位置、清理邏輯也比較複雜。
-2. **放哪裡**：（推薦）**目前工作目錄的 `.ramplio/`**，跟著專案走，不同專案的紀錄不會混在一起，`RAMPLIO_HISTORY_DIR` 可以改位置。另一種是 `~/.ramplio`：不會弄髒專案，但不同專案會混在一起，在別的目錄下 `ramplio compare` 會比到別的專案。
-3. **「同一個目標」怎麼認定**：（推薦）**模式＋HTTP 方法＋遮罩後網址（情境模式用情境檔路徑）＋負載參數**全部相同才算。負載參數：run 是 `--vus` 或 `--rps` 加 `-d`；discover 是 `--tolerance`、`--max-rps` 與 `--probe-duration`。理由：50 VU 跟 10 VU 的吞吐量本來就不同，硬比會出現假的「退步」。代價：改了參數就從第一筆重新累積。
-4. **.gitignore 怎麼處理**：（推薦）第一次建立時**自動寫 `.ramplio/.gitignore`（內容 `*`）**，再印一行說明，使用者不用做任何事（`.pytest_cache` 也是這樣做）。另一種是只印提示請使用者自己加，容易忘，紀錄就被 commit 進去。
-5. **`compare` 零參數比哪兩筆**：（推薦）**最近一筆跟它同目標的前一筆**。另一種是單純比最近兩筆，但最近兩筆常常是不同目標，比出來沒有意義。
-
 ## Decisions
 
 - 2026-11-25：原第二張卡的 4 點拆成兩張。**2a（本卡）**：自動留存＋自動比對＋`compare`／`report` 零參數，這三點共用同一份紀錄格式，分開做會改兩次介面。**2b（下一張）**：`run --url`／`--rps` 補即時 TUI。`runURL`／`runRPS` 要改成 runScenario 那種背景執行＋provider＋非終端改印進度行的結構，跟留存互不相依；4 點一起做會超過一天的量。
 - 2026-11-25：紀錄檔用「baseline 超集」一種檔案，不分 baseline／report 兩個檔。理由：`baseline.Load` 用 `encoding/json`，預設會略過不認識的欄位，所以紀錄檔可以直接給既有的 `compare` 吃；一次執行對應一個檔，清理與「同一筆」的認定都比較單純。`Record` 新增的欄位不寫進 `baseline.Baseline`，baseline 的 schema 不用升版。
 - 2026-11-25：自動比對只是資訊、不影響 exit code；守門仍由明確下 `compare` 或 thresholds 負責。理由：一般使用者每次跑完都會看到比對，網路雜訊就可能讓 exit code 跳來跳去，在 CI 會變成誤報。
-- 2026-11-25：觀察到的既有問題（計畫外，本卡不修，另開卡）：`run --url --save-baseline` 的 `Scenario` 直接存原始網址（`run.go` 的 `scenarioName = url`），沒有經過 `maskURLForDisplay`；discover 那條路徑卡 1 已遮。本卡的自動紀錄會另外遮罩，不受影響。
+- 2026-11-25（使用者確認）：保留筆數＝所有目標合計最近 50 筆，超過刪最舊。
+- 2026-11-25（使用者確認）：紀錄放目前工作目錄的 `.ramplio/`，`RAMPLIO_HISTORY_DIR` 可覆寫。
+- 2026-11-25（使用者確認）：「同一個目標」＝模式＋HTTP 方法＋遮罩後網址（情境模式用情境檔路徑）＋負載參數全部相同；run 的負載參數是 `--vus` 或 `--rps` 加 `-d`，discover 是 `--tolerance`、`--max-rps`、`--probe-duration`。
+- 2026-11-25（使用者確認）：第一次建立 `.ramplio/` 時自動寫 `.ramplio/.gitignore`（內容 `*`）並印一行說明。
+- 2026-11-25（使用者確認）：`compare` 零參數比「最近一筆」與「同目標的前一筆」。
+- 2026-11-25（使用者確認，範圍擴充）：原本記為另開卡的既有問題——`run --url --save-baseline` 的 `Scenario` 存原始網址（`run.go:206` `baseline.FromSummary(sum, scenarioName)`）——併進本卡修，新增驗收情境 17。
 
 ## History
 
 - 2026-11-25：讀程式釐清三種存檔格式（JSON 報告、baseline、HTML）各自的結構與消費者，決定拆成 2a／2b，寫出 2a 規格。
+- 2026-11-25：使用者確認規格（5 個待決定照推薦定案），併入 `run --save-baseline` 遮罩（情境 17）；進第 2 段。
