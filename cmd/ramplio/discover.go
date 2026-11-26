@@ -41,6 +41,8 @@ type discoverOptions struct {
 	Uncertain bool
 	// NoHistory skips the automatic run record and the comparison with the previous run.
 	NoHistory bool
+	// ScenarioFile, when set, saves a successful probe as a runnable scenario.
+	ScenarioFile string
 }
 
 // resolvedTarget is the request discover will send plus what the curl parser
@@ -70,6 +72,7 @@ func newDiscoverCmd() *cobra.Command {
 		probeDuration string
 		baselineFile  string
 		noHistory     bool
+		scenarioFile  string
 	)
 
 	cmd := &cobra.Command{
@@ -113,6 +116,7 @@ POST／PUT／PATCH／DELETE 等會改資料的方法，預設只送一發預檢�
 				AllowWrite:    allowWrite,
 				FromCurl:      curlCmd != "",
 				NoHistory:     noHistory,
+				ScenarioFile:  scenarioFile,
 			})
 		},
 	}
@@ -127,6 +131,7 @@ POST／PUT／PATCH／DELETE 等會改資料的方法，預設只送一發預檢�
 	cmd.Flags().IntVar(&maxRPS, "max-rps", defaultDiscoverMaxRPS, "Stop probing above this request rate")
 	cmd.Flags().StringVar(&probeDuration, "probe-duration", defaultDiscoverProbeDuration.String(), "Duration of each probe (e.g. 10s, 30s)")
 	cmd.Flags().StringVar(&baselineFile, "save-baseline", "", "把容量結果存成 baseline 快照(供 ramplio compare 守門)")
+	cmd.Flags().StringVar(&scenarioFile, "save-scenario", "", "探測成功後存成可直接 ramplio run --scenario 的情境檔（憑證改成環境變數引用，不覆蓋既有檔）")
 	cmd.Flags().BoolVar(&noHistory, "no-history", false, "不自動把這次結果存進 .ramplio/ 執行紀錄，也不跟上一次比較")
 
 	return cmd
@@ -276,6 +281,12 @@ func runDiscover(ctx context.Context, w, errW io.Writer, opts discoverOptions) e
 		fmt.Fprintf(w, "  Body：    %d bytes\n", len(req.Body))
 	}
 
+	if opts.ScenarioFile != "" {
+		if err := checkSaveScenarioTarget(opts.ScenarioFile, req); err != nil {
+			return err
+		}
+	}
+
 	if (!isSafeMethod(req.Method) || opts.Uncertain) && !opts.AllowWrite {
 		return blockWrite(ctx, w, opts)
 	}
@@ -315,7 +326,8 @@ func runDiscover(ctx context.Context, w, errW io.Writer, opts discoverOptions) e
 
 	// An interrupted probe is partial: recording it would make the next run
 	// look like a big change, so only completed probes are recorded.
-	if !opts.NoHistory && ctx.Err() == nil {
+	interrupted := ctx.Err() != nil
+	if !opts.NoHistory && !interrupted {
 		rec := history.Record{
 			Baseline:  baseline.FromDiscover(result, maskURLForDisplay(req.URL)),
 			Kind:      history.KindDiscover,
@@ -323,6 +335,13 @@ func runDiscover(ctx context.Context, w, errW io.Writer, opts discoverOptions) e
 		}
 		rec.GitCommit = currentGitCommit()
 		recordAndDiff(w, errW, historyDir(), rec)
+	}
+
+	if opts.ScenarioFile != "" {
+		return saveScenarioFromProbe(w, interrupted, opts, result)
+	}
+	if !interrupted && result.SafeLimit > 0 {
+		printSaveScenarioHint(w)
 	}
 	return nil
 }
