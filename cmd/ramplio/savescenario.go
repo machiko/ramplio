@@ -108,10 +108,10 @@ func checkSaveScenarioTarget(path string, req protocols.Request, tolerance time.
 	if u.User != nil {
 		return errors.New(`網址含帳號密碼（user:pass@），情境檔無法安全保存；請改用 -H "Authorization: Basic …" 帶憑證，未產生情境檔`)
 	}
-	if err := checkParentDir(path); err != nil {
+	if err = checkParentDir(path); err != nil {
 		return err
 	}
-	if _, err := os.Lstat(path); err == nil {
+	if _, err = os.Lstat(path); err == nil {
 		return fmt.Errorf("%s 已存在，不覆蓋；請換一個檔名或先自行移走", path)
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("無法檢查 %s：%w", path, err)

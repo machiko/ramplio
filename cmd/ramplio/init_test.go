@@ -107,7 +107,7 @@ func runWizardWithInput(t *testing.T, lines ...string) string {
 	os.Stdin, os.Stdout = inR, outW
 	t.Cleanup(func() { os.Stdin, os.Stdout = origIn, origOut })
 
-	if _, err := io.WriteString(inW, strings.Join(lines, "\n")+"\n"); err != nil {
+	if _, err := inW.WriteString(strings.Join(lines, "\n") + "\n"); err != nil {
 		t.Fatal(err)
 	}
 	_ = inW.Close()
