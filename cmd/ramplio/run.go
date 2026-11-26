@@ -169,7 +169,11 @@ func newRunCmd() *cobra.Command {
 			if interrupted {
 				fmt.Fprintln(cmd.ErrOrStderr(), "\n已中斷：上面是中斷前的部分結果；不存執行紀錄、不做門檻判定。")
 			}
-			thresholdMsg := checkThresholds(sum, thresholds)
+			// 中斷的結果不完整,不做門檻判定:也不可以寫進 --output 的 JUnit。
+			thresholdMsg := ""
+			if !interrupted {
+				thresholdMsg = checkThresholds(sum, thresholds)
+			}
 
 			scenarioName := strings.TrimSuffix(scenarioFile, filepath.Ext(scenarioFile))
 			if scenarioName == "" {

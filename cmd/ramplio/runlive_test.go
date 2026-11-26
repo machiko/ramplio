@@ -186,12 +186,17 @@ func TestRunLiveRPSStartsTUIOnTTY(t *testing.T) {
 
 // 情境 3（負向）：非 TTY 不開畫面，也不多印進度行（D1）。
 func TestRunLiveNonTTYSkipsTUI(t *testing.T) {
-	for _, mode := range [][]string{{}, {"--rps", "5"}} {
-		name := "vus"
-		if len(mode) > 0 {
-			name = "rps"
-		}
-		t.Run(name, func(t *testing.T) {
+	cases := []struct {
+		name    string
+		mode    []string
+		running string // 改動前就有的開頭行
+	}{
+		{"vus", nil, "Running 1 VUs for " + progressProbe + " → GET "},
+		{"rps", []string{"--rps", "5"}, "Running rate mode: 5 req/s for " + progressProbe + " → GET "},
+	}
+	for _, c := range cases {
+		mode := c.mode
+		t.Run(c.name, func(t *testing.T) {
 			useHistoryDir(t)
 			fake := useFakeLive(t, false, nil)
 			srv := newDelayServer(t)
@@ -203,7 +208,11 @@ func TestRunLiveNonTTYSkipsTUI(t *testing.T) {
 
 			assert.Zero(t, fake.calls(), "非 TTY 不可開畫面")
 			assert.NotContains(t, out, "VUs=", "非 TTY 的 stdout 要跟改動前一樣，不印進度行")
+			assert.Contains(t, out, c.running, "開頭行要跟改動前一樣")
 			assert.Contains(t, out, summaryMark)
+			for _, frame := range []string{"╭", "╰", "█", "░"} {
+				assert.NotContains(t, out, frame, "非 TTY 不可以出現 TUI 的框線或進度條")
+			}
 		})
 	}
 }
@@ -408,7 +417,7 @@ type zeroProvider struct{}
 
 func (zeroProvider) Snapshot() reporter.LiveSnapshot { return reporter.LiveSnapshot{} }
 
-// R2：TUI 開不起來（回錯誤）時，run 照樣跑完、不算中斷（跟改動前一致）。
+// R2：TUI 無法初始化（例如沒有 /dev/tty，回錯誤）時，run 照樣跑完、不算中斷（跟改動前一致）。
 func TestWatchRunTUIErrorKeepsRunning(t *testing.T) {
 	sigs := make(chan os.Signal, 1)
 	env := liveEnv{
@@ -432,24 +441,89 @@ func TestWatchRunTUIErrorKeepsRunning(t *testing.T) {
 	}
 }
 
-// R2：TUI 回錯誤（例如 stdin 不是終端時 bubbletea 收到 SIGINT）後，訊號仍然能停下 run。
-func TestWatchRunTUIErrorThenSignalStops(t *testing.T) {
-	sigs := make(chan os.Signal, 1)
-	env := liveEnv{
-		isTTY: func() bool { return true },
-		runTUI: func(reporter.LiveProvider, context.CancelFunc, <-chan struct{}) error {
-			return fmt.Errorf("interrupted")
-		},
-		signals: func() (<-chan os.Signal, func()) { return sigs, func() {} },
+// R2：TUI 無法初始化（例如沒有 /dev/tty）時，訊號仍能停止壓測。
+// M-1：收到第一個訊號後，要先釋放訊號（第二次 Ctrl-C 才會恢復預設、強制結束）再取消 run。
+func TestWatchRunSignalReleasedBeforeStop(t *testing.T) {
+	cases := []struct {
+		name  string
+		isTTY bool
+	}{
+		{"TUI 初始化失敗", true},
+		{"非 TTY", false},
 	}
-	done := make(chan struct{})
-	var once sync.Once
-	cancel := func() { once.Do(func() { close(done) }) }
-	sigs <- os.Interrupt
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			sigs := make(chan os.Signal, 1)
+			var mu sync.Mutex
+			released := 0
+			env := liveEnv{
+				isTTY: func() bool { return c.isTTY },
+				runTUI: func(reporter.LiveProvider, context.CancelFunc, <-chan struct{}) error {
+					return fmt.Errorf("could not open a new TTY")
+				},
+				signals: func() (<-chan os.Signal, func()) {
+					return sigs, func() { mu.Lock(); released++; mu.Unlock() }
+				},
+			}
+			done := make(chan struct{})
+			var once sync.Once
+			releasedAtCancel := -1
+			cancel := func() {
+				once.Do(func() {
+					mu.Lock()
+					releasedAtCancel = released
+					mu.Unlock()
+					close(done)
+				})
+			}
+			sigs <- os.Interrupt
 
-	start := time.Now()
-	interrupted := watchRun(env, watchOpts{}, zeroProvider{}, cancel, done)
+			start := time.Now()
+			interrupted := watchRun(env, watchOpts{}, zeroProvider{}, cancel, done)
 
-	assert.True(t, interrupted)
-	assert.Less(t, time.Since(start), interruptBound)
+			assert.True(t, interrupted)
+			assert.Less(t, time.Since(start), interruptBound)
+			assert.Positive(t, releasedAtCancel, "取消 run 之前就要先釋放訊號，第二次 Ctrl-C 才能強制結束")
+		})
+	}
+}
+
+// M-3：被中斷時不做門檻判定，--output 不可以寫進用部分結果算出的門檻失敗。
+func TestRunLiveInterruptOutputHasNoThresholdVerdict(t *testing.T) {
+	for _, ext := range []string{".json", ".xml"} {
+		t.Run(ext, func(t *testing.T) {
+			useHistoryDir(t)
+			fake := useFakeLive(t, false, nil)
+			srv := newDelayServer(t)
+			srv.delay.Store(int64(5 * time.Millisecond))
+
+			// p50_ms: 1 在 5ms 的目標上一定會被觸發。先 100ms 爬到 2 VU：
+			// 單一 stage 會從 0 VU 線性爬升，中斷前可能一個請求都沒有。
+			yaml := fmt.Sprintf(`name: interrupt threshold
+stages:
+  - duration: 100ms
+    target: 2
+  - duration: 30s
+    target: 2
+steps:
+  - name: GET slow
+    method: GET
+    url: %s/
+thresholds:
+  p50_ms: 1
+`, srv.URL)
+			tmp := t.TempDir()
+			path := filepath.Join(tmp, "s.yaml")
+			require.NoError(t, os.WriteFile(path, []byte(yaml), 0o644))
+			out := filepath.Join(tmp, "result"+ext)
+
+			_, _, _, err := runInterrupted(t, fake, os.Interrupt, "--scenario", path, "--output", out)
+			require.ErrorIs(t, err, errRunInterrupted)
+
+			raw, readErr := os.ReadFile(out)
+			require.NoError(t, readErr)
+			assert.NotContains(t, string(raw), "p50 ", "中斷的結果不做門檻判定")
+			assert.NotContains(t, string(raw), "<failure", "JUnit 不可以記成門檻失敗")
+		})
+	}
 }
