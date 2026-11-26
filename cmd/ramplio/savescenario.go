@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"net/url"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -32,6 +33,12 @@ const (
 	savedStepName     = "探測目標"
 	// Saved files may carry a plaintext body; keep them private to the owner.
 	savedScenarioPerm = 0o600
+	// templateMarker starts a template token; run renders URL, headers and
+	// body, so a literal one in the saved request would break every request.
+	templateMarker = "{{"
+
+	unsetEnvNote    = "這些環境變數沒設時會送出空值"
+	literalPathNote = "網址路徑照原文保存，若路徑含秘密請手動改寫"
 )
 
 // sensitiveHeaderExtraParts adds what the shared query keyword list does not
@@ -93,7 +100,7 @@ func (b envBindings) names() []string {
 
 // checkSaveScenarioTarget rejects what can be rejected before probing, so the
 // user does not wait through a full probe only to be told the file exists.
-func checkSaveScenarioTarget(path string, req protocols.Request) error {
+func checkSaveScenarioTarget(path string, req protocols.Request, tolerance time.Duration) error {
 	u, err := url.Parse(req.URL)
 	if err != nil {
 		return errors.New("網址無法解析，未產生情境檔")
@@ -101,10 +108,65 @@ func checkSaveScenarioTarget(path string, req protocols.Request) error {
 	if u.User != nil {
 		return errors.New(`網址含帳號密碼（user:pass@），情境檔無法安全保存；請改用 -H "Authorization: Basic …" 帶憑證，未產生情境檔`)
 	}
+	if err := checkParentDir(path); err != nil {
+		return err
+	}
 	if _, err := os.Lstat(path); err == nil {
 		return fmt.Errorf("%s 已存在，不覆蓋；請換一個檔名或先自行移走", path)
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("無法檢查 %s：%w", path, err)
+	}
+	// Everything that does not depend on the probe result (template markers,
+	// env name collisions, the p99 threshold) is checked now with a stand-in
+	// load, so the user is not made to wait through the probe first.
+	_, _, err = buildSavedScenario(req, 1, tolerance)
+	return err
+}
+
+func checkParentDir(path string) error {
+	dir := filepath.Dir(path)
+	info, err := os.Stat(dir)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("%s 的上層目錄 %s 不存在，請先建立目錄，未產生情境檔", path, dir)
+		}
+		return fmt.Errorf("無法檢查 %s 的上層目錄：%w", path, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%s 的上層 %s 不是目錄，未產生情境檔", path, dir)
+	}
+	return nil
+}
+
+// checkNoTemplateMarkers rejects literal "{{" that would stay in the saved
+// file. Sensitive values are already replaced by env references, which are
+// removed before the check, so only text kept verbatim is inspected. The
+// message names the part, never the value (it may be a secret).
+func checkNoTemplateMarkers(stepURL string, headers map[string]string, body []byte, envNames []string) error {
+	const hint = "run 會把它當成模板解析而失敗，請改掉後再存或手動寫情境檔，未產生情境檔"
+	stripped := stepURL
+	for _, name := range envNames {
+		stripped = strings.ReplaceAll(stripped, envRef(name), "")
+	}
+	if strings.Contains(stripped, templateMarker) {
+		return fmt.Errorf("網址含 %s，%s", templateMarker, hint)
+	}
+	names := make([]string, 0, len(headers))
+	for name := range headers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		value := headers[name]
+		if isSensitiveHeaderName(name) {
+			continue // replaced by an env reference
+		}
+		if strings.Contains(value, templateMarker) {
+			return fmt.Errorf("header %s 的值含 %s，%s", name, templateMarker, hint)
+		}
+	}
+	if bytes.Contains(body, []byte(templateMarker)) {
+		return fmt.Errorf("body 含 %s，%s", templateMarker, hint)
 	}
 	return nil
 }
@@ -170,6 +232,13 @@ func buildSavedScenario(req protocols.Request, safeLimit int, tolerance time.Dur
 	if err != nil {
 		return scenarios.Scenario{}, nil, err
 	}
+	envNames := env.names()
+	if err := checkNoTemplateMarkers(stepURL, req.Headers, req.Body, envNames); err != nil {
+		return scenarios.Scenario{}, nil, err
+	}
+	if tolerance < time.Millisecond {
+		return scenarios.Scenario{}, nil, fmt.Errorf("--tolerance %s 不到 1ms，換算成 p99_ms 門檻會是 0，未產生情境檔", tolerance)
+	}
 	p99 := float64(tolerance.Milliseconds())
 	errRate := savedErrorRatePct
 	sc := scenarios.Scenario{
@@ -187,7 +256,7 @@ func buildSavedScenario(req protocols.Request, safeLimit int, tolerance time.Dur
 		}},
 		Thresholds: &scenarios.Thresholds{P99Ms: &p99, ErrorRatePct: &errRate},
 	}
-	return sc, env.names(), nil
+	return sc, envNames, nil
 }
 
 // renderSavedScenario marshals the scenario with a header comment and checks
@@ -204,6 +273,7 @@ func renderSavedScenario(sc scenarios.Scenario, envNames []string) ([]byte, erro
 		for _, name := range envNames {
 			buf.WriteString("#   export " + name + "=…\n")
 		}
+		buf.WriteString("# " + unsetEnvNote + "，請求會帶著空的 header／參數送出。\n")
 	}
 	buf.Write(body)
 	if _, err := scenarios.Parse(bytes.NewReader(buf.Bytes())); err != nil {
@@ -265,15 +335,28 @@ func printSavedScenario(w io.Writer, opts discoverOptions, safeLimit int, envNam
 	fmt.Fprintf(w, "    門檻：p99 超過 %dms 或錯誤率超過 %.0f%% 就判定失敗（exit 1）\n",
 		opts.Tolerance.Milliseconds(), savedErrorRatePct)
 	if len(envNames) > 0 {
-		fmt.Fprintln(w, "    憑證沒有存進檔案，執行前先設定（值是原本完整的 header／參數值，這裡不顯示）：")
+		fmt.Fprintln(w, "    憑證沒有存進檔案，執行前先設定（值是原本完整的 header／參數值，這裡不顯示；"+unsetEnvNote+"）：")
 		for _, name := range envNames {
 			fmt.Fprintf(w, "      export %s=…\n", name)
 		}
+	}
+	if hasNonRootPath(opts.Request.URL) {
+		fmt.Fprintln(w, "    ⚠ "+literalPathNote+"。")
 	}
 	if len(opts.Request.Body) > 0 {
 		fmt.Fprintln(w, "    ⚠ body 以明文存進檔案，commit 前請確認裡面沒有密碼或 token。")
 	}
 	fmt.Fprintf(w, "    重跑：ramplio run --scenario %s\n", opts.ScenarioFile)
+}
+
+// hasNonRootPath reports whether the URL has a path beyond "/", which is saved
+// verbatim and may itself carry an ID or a secret.
+func hasNonRootPath(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	return u.Path != "" && u.Path != "/"
 }
 
 // printSaveScenarioHint points a successful probe at --save-scenario. It names

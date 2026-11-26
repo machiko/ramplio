@@ -282,7 +282,7 @@ func runDiscover(ctx context.Context, w, errW io.Writer, opts discoverOptions) e
 	}
 
 	if opts.ScenarioFile != "" {
-		if err := checkSaveScenarioTarget(opts.ScenarioFile, req); err != nil {
+		if err := checkSaveScenarioTarget(opts.ScenarioFile, req, opts.Tolerance); err != nil {
 			return err
 		}
 	}

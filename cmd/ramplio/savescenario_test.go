@@ -44,8 +44,9 @@ func readFile(t *testing.T, path string) string {
 
 func assertNoFile(t *testing.T, path string) {
 	t.Helper()
+	// Any stat error counts: under a non-directory parent it is ENOTDIR, not ENOENT.
 	_, err := os.Stat(path)
-	assert.True(t, os.IsNotExist(err), "不該產生 %s", path)
+	assert.Error(t, err, "不該產生 %s", path)
 }
 
 // 驗收情境 1：存出的檔案能直接被 scenarios 解析驗證，負載與門檻來自這次探測。
@@ -322,4 +323,165 @@ func TestScenarioEnvName(t *testing.T) {
 	for _, c := range cases {
 		assert.Equal(t, c.want, scenarioEnvName(c.prefix, c.in))
 	}
+}
+
+// 第 5 段 MEDIUM-2：會被 run 當成模板的 '{{' 出現在網址、非敏感 header 或 body 時，
+// 存檔會產生跑不起來的情境，所以在探測前就拒絕；敏感值改走 env，不受影響。
+func TestSaveScenarioRefusesLiteralTemplateMarkers(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"網址路徑", []string{"--url", "{SRV}/a{{b}}"}, "網址"},
+		{"非敏感 query", []string{"--url", "{SRV}/?page={{n}}"}, "網址"},
+		{"非敏感 header", []string{"--url", "{SRV}", "-H", "X-Trace: {{id}}"}, "X-Trace"},
+		{"body", []string{"--url", "{SRV}", "--body", `{"t":"{{x}}"}`, "--allow-write"}, "body"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			srv := newRecordingServer(t, "", "")
+			path := scenarioPath(t)
+			args := make([]string, len(c.args))
+			for i, a := range c.args {
+				args[i] = strings.ReplaceAll(a, "{SRV}", srv.URL)
+			}
+
+			_, err := execDiscover(t, "", discoverArgs(append(args, "--save-scenario", path)...)...)
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "{{")
+			assert.Contains(t, err.Error(), c.want)
+			assertNoFile(t, path)
+			assert.Equal(t, int64(0), srv.total.Load(), "探測前就能判斷，不該送出請求")
+		})
+	}
+}
+
+// MEDIUM-2：敏感值含 '{{' 時改寫成 env 引用，原文不進檔案，照常存檔。
+// （這種請求連 discover 本身都會被模板渲染擋下，所以直接測產生情境的那一層。）
+func TestSaveScenarioAllowsTemplateMarkersInSensitiveValues(t *testing.T) {
+	req := protocols.Request{
+		Method:  "GET",
+		URL:     "http://example.test/?token={{t}}",
+		Headers: map[string]string{"Authorization": "Bearer {{x}}"},
+	}
+
+	sc, envNames, err := buildSavedScenario(req, fastSafeLimit, 2*time.Second)
+	require.NoError(t, err)
+	data, err := renderSavedScenario(sc, envNames)
+	require.NoError(t, err)
+
+	assert.NotContains(t, string(data), "{{t}}")
+	assert.NotContains(t, string(data), "{{x}}")
+}
+
+// MEDIUM-1：輸出與 YAML 註解都要寫明環境變數沒設時會送出空值。
+func TestSaveScenarioWarnsUnsetEnvSendsEmpty(t *testing.T) {
+	srv := newRecordingServer(t, "Bearer s", "")
+	path := scenarioPath(t)
+
+	out, err := execDiscover(t, "", discoverArgs("--url", srv.URL, "-H", "Authorization: Bearer s", "--save-scenario", path)...)
+	require.NoError(t, err, out)
+
+	const want = "這些環境變數沒設時會送出空值"
+	assert.Contains(t, out, want)
+	assert.Contains(t, readFile(t, path), "# "+want)
+}
+
+// MEDIUM-3：網址路徑照原文保存，路徑不是根目錄時提醒秘密要手動改寫。
+func TestSaveScenarioWarnsLiteralPath(t *testing.T) {
+	const want = "網址路徑照原文保存，若路徑含秘密請手動改寫"
+	for _, c := range []struct {
+		path   string
+		isWarn bool
+	}{{"/users/42/reset", true}, {"/", false}, {"", false}} {
+		srv := newRecordingServer(t, "", "")
+		file := scenarioPath(t)
+
+		out, err := execDiscover(t, "", discoverArgs("--url", srv.URL+c.path, "--save-scenario", file)...)
+		require.NoError(t, err, out)
+
+		if c.isWarn {
+			assert.Contains(t, out, want, "路徑 %q", c.path)
+		} else {
+			assert.NotContains(t, out, want, "路徑 %q", c.path)
+		}
+	}
+}
+
+// LOW-1：上層目錄不存在或不是目錄時，探測前就報錯、不送任何請求。
+func TestSaveScenarioRefusesMissingParentDir(t *testing.T) {
+	dir := t.TempDir()
+	notDir := filepath.Join(dir, "plain")
+	require.NoError(t, os.WriteFile(notDir, []byte("x"), 0o600))
+
+	for _, path := range []string{
+		filepath.Join(dir, "missing", "out.yaml"),
+		filepath.Join(notDir, "out.yaml"),
+	} {
+		srv := newRecordingServer(t, "", "")
+
+		_, err := execDiscover(t, "", discoverArgs("--url", srv.URL, "--save-scenario", path)...)
+
+		require.Error(t, err, path)
+		assert.Contains(t, err.Error(), "目錄")
+		assert.Equal(t, int64(0), srv.total.Load(), "應在探測前擋下：%s", path)
+		assertNoFile(t, path)
+	}
+}
+
+// LOW-3：tolerance 換算成 p99_ms 不到 1 時拒絕存檔（避免寫出 0 的門檻），探測前就擋。
+func TestSaveScenarioRefusesSubMillisecondTolerance(t *testing.T) {
+	srv := newRecordingServer(t, "", "")
+	path := scenarioPath(t)
+
+	_, err := execDiscover(t, "", "--url", srv.URL, "--save-scenario", path,
+		"--probe-duration", "1500ms", "--max-rps", "5", "--tolerance", "500us")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "--tolerance")
+	assert.Equal(t, int64(0), srv.total.Load())
+	assertNoFile(t, path)
+}
+
+// cancelOnPass cancels the context once a passing probe line has been written,
+// so the probe is interrupted after at least one level passed.
+type cancelOnPass struct {
+	mu     sync.Mutex
+	buf    bytes.Buffer
+	cancel context.CancelFunc
+}
+
+func (c *cancelOnPass) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if bytes.Contains(p, []byte("✓  p99=")) {
+		c.cancel()
+	}
+	return c.buf.Write(p)
+}
+
+// LOW-4：至少一個等級 PASS（SafeLimit > 0）後才中斷，仍不寫檔。
+func TestSaveScenarioRefusesInterruptedAfterPass(t *testing.T) {
+	srv := newRecordingServer(t, "", "")
+	path := scenarioPath(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	out := &cancelOnPass{cancel: cancel}
+
+	err := runDiscover(ctx, out, out, discoverOptions{
+		Request:       protocols.Request{Method: "GET", URL: srv.URL},
+		Tolerance:     2 * time.Second,
+		MaxRPS:        50,
+		ProbeDuration: 500 * time.Millisecond,
+		NoHistory:     true,
+		ScenarioFile:  path,
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "中斷")
+	assert.Contains(t, out.buf.String(), "✓  p99=", "前提：中斷前至少一個等級 PASS")
+	assert.Contains(t, out.buf.String(), "安全上限：    每秒約", "前提：SafeLimit > 0")
+	assertNoFile(t, path)
 }
