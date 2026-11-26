@@ -8,6 +8,7 @@ Ramplio 的所有重要變更都記錄於此。
 ## [Unreleased]
 
 ### 新增
+- **`discover --save-scenario <檔名>`**: 探測完成後一步存成可直接 `ramplio run --scenario` 重跑的情境檔——30s 內爬升到這次的安全上限(`target_rps`)再維持 2m,門檻 p99 不超過 `--tolerance`、錯誤率不超過 1%(與探測判定安全的標準一致),退步就 exit 1。敏感 header 與網址參數改寫成 `{{env "RAMPLIO_H_…"}}`／`{{env "RAMPLIO_Q_…"}}`,存檔後只列出要 export 的變數名稱、不印值;body 照原文存並提醒。安全上限為 0、探測被中斷、寫入型方法沒加 `--allow-write`、目標檔已存在、網址含 `user:pass@` 時不寫檔並 exit 1。沒加此旗標的成功探測結尾會提示可以存成情境檔。`init` 選 Session Cookie 時不再叫人執行不存在的 `generate_sessions.sh`,改說明 sessions.csv 的格式。
 - **`run --url`／`run --rps` 即時畫面**: 在終端跑時顯示跟 `run --scenario` 一樣的即時 TUI(VU、RPS、p99、錯誤率、經過時間),不再只有一行「Running …」看起來像卡住。輸出不是終端(CI、管線、重新導向)或加 `--no-tui` 時不開畫面,stdout 與先前完全一致(不加進度行)。
 - **自動留存與比對**: `run`／`discover`（含單一入口）每次跑完自動存一筆執行紀錄到 `.ramplio/runs/`（保留最近 50 筆,目錄自帶 `.gitignore`），不必事先記得加 `--output`／`--save-baseline`;結尾自動跟「上一次同目標、同設定」(含 header＋body,只存雜湊不存原文)比較 p99、錯誤率、吞吐量,這段只是參考、不影響結束碼。`ramplio compare` 不帶參數時比較最近一筆與同目標的前一筆（退步照舊 exit 1）,`ramplio report` 不帶參數時用最近一筆 run 紀錄產生 HTML。存檔失敗只警告;`--no-history` 可關閉,`RAMPLIO_HISTORY_DIR` 可改位置。紀錄檔是 baseline 格式的超集,舊的 `compare a.json b.json` 可直接讀。
 - **單一入口 `ramplio <網址 | 'curl …' | ->`**: 不必記子指令,直接給網址、貼上瀏覽器 DevTools 的「Copy as cURL」或 `pbpaste | ramplio -`,就帶著 header／body 開始容量探測;`.yaml`／`.har` 會印出正確指令,打錯字的子指令會給建議且不會開跑。POST／PUT／PATCH／DELETE(含 Chrome 只有 `--data-raw` 的隱式 POST)預設只送一發預檢,確定要壓測需明確加 `--allow-write`;終端輸出與建議指令只顯示 header 名稱,不會印出 token。`discover` 同步新增 `--curl`、`-H`、`--method`、`--body`、`--allow-write`,開跑前的預檢也改為送出完整請求(含 header 與 body),寫入型預檢不再因少了授權拿到假的 401/415。

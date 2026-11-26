@@ -362,6 +362,20 @@ measurements fail the gate outright.
 `discover` also supports `--save-baseline`, so you can gate on discovered
 capacity (`safe_limit_rps` / `breaking_point_rps`) instead of a fixed-rate run.
 
+To turn a probe into a repeatable gate without writing YAML, add
+`--save-scenario scenario.yaml`: discover writes a scenario that ramps to the
+discovered safe limit in 30s, holds it for 2m, and fails when p99 exceeds
+`--tolerance` or the error rate exceeds 1%. Sensitive header and query values
+are written as `{{env "RAMPLIO_H_<NAME>"}}` / `{{env "RAMPLIO_Q_<KEY>"}}`
+references, and the variable names to export are printed after saving. An
+existing file is never overwritten.
+
+```bash
+ramplio discover --url https://api.example.com/me -H "Authorization: Bearer $TOKEN" --save-scenario scenario.yaml
+export RAMPLIO_H_AUTHORIZATION="Bearer $TOKEN"
+ramplio run --scenario scenario.yaml
+```
+
 ---
 
 ## Bottleneck correlation (`--observe`)

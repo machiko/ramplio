@@ -56,12 +56,7 @@ func runWizard() error {
 			auth.Kind = "cookie"
 			fmt.Println()
 			fmt.Println("  ── Session Cookie 設定 ──")
-			fmt.Println("  你需要先用以下指令預先登入，取得 session cookie：")
-			fmt.Println()
-			fmt.Println("    BASE_URL=" + baseURL + " \\")
-			fmt.Println("    COOKIE_NAME=session \\")
-			fmt.Println("    COUNT=200 \\")
-			fmt.Println("    ./scripts/generate_sessions.sh")
+			fmt.Println("  sessions.csv 需要每列一個已登入的 session cookie 值（請自行登入取得後填入）。")
 			fmt.Println()
 			auth.CSVFile = wPrompt(sc, "sessions.csv 的路徑？", "sessions.csv")
 			auth.CookieName = wPrompt(sc, "Cookie 的名稱是什麼？（在 DevTools → Application → Cookies 可以看到）", "session")

@@ -2,8 +2,11 @@ package main
 
 import (
 	"bufio"
+	"io"
+	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/machiko/ramplio/v3/internal/scenariogen"
 )
@@ -83,5 +86,68 @@ func TestPromptDataFileConfig_KeepsUppercaseCSVSuffix(t *testing.T) {
 		scannerOf("y", "kw", "2", "n", "50", "REPORT.CSV"), scenariogen.Auth{})
 	if file != "REPORT.CSV" {
 		t.Errorf("file = %q, want REPORT.CSV unchanged", file)
+	}
+}
+
+// runWizardWithInput drives the real init wizard with scripted stdin inside a
+// temp directory and returns everything it printed to stdout.
+func runWizardWithInput(t *testing.T, lines ...string) string {
+	t.Helper()
+	t.Chdir(t.TempDir())
+
+	inR, inW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	outR, outW, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	origIn, origOut := os.Stdin, os.Stdout
+	os.Stdin, os.Stdout = inR, outW
+	t.Cleanup(func() { os.Stdin, os.Stdout = origIn, origOut })
+
+	if _, err := inW.WriteString(strings.Join(lines, "\n") + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	_ = inW.Close()
+
+	captured := make(chan string, 1)
+	go func() {
+		b, _ := io.ReadAll(outR)
+		captured <- string(b)
+	}()
+
+	done := make(chan error, 1)
+	go func() { done <- runWizard() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("runWizard: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("init 精靈沒有結束：腳本答案與題目對不上")
+	}
+	_ = outW.Close()
+	return <-captured
+}
+
+// 驗收情境 10：選 Session Cookie 登入時，不再叫使用者執行不存在的 generate_sessions.sh，
+// 改說明 sessions.csv 每列放一個已登入的 session cookie 值。
+func TestInitCookieGuidanceOmitsMissingScript(t *testing.T) {
+	out := runWizardWithInput(t,
+		"", "https://x.test", "y", "1", "", "", // 名稱、網址、要登入、Session Cookie、csv 路徑、cookie 名稱
+		"/", "1", "", "", "n", // 步驟：路徑、GET、狀態碼、暫停、不再加
+		"", "", "", "", "", "out.yaml", // VU、時長、模式、錯誤率、p95、檔名
+	)
+
+	if !strings.Contains(out, "Session Cookie 設定") {
+		t.Fatalf("腳本沒有走到 cookie 設定段落，輸出：\n%s", out)
+	}
+	if strings.Contains(out, "generate_sessions.sh") {
+		t.Errorf("init 輸出仍推薦不存在的 generate_sessions.sh：\n%s", out)
+	}
+	if !strings.Contains(out, "每列一個已登入的 session cookie 值") {
+		t.Errorf("init 應說明 sessions.csv 的格式，輸出：\n%s", out)
 	}
 }
