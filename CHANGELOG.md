@@ -8,10 +8,13 @@ Ramplio 的所有重要變更都記錄於此。
 ## [Unreleased]
 
 ### 新增
+- **`run --url`／`run --rps` 即時畫面**: 在終端跑時顯示跟 `run --scenario` 一樣的即時 TUI(VU、RPS、p99、錯誤率、經過時間),不再只有一行「Running …」看起來像卡住。輸出不是終端(CI、管線、重新導向)或加 `--no-tui` 時不開畫面,stdout 與先前完全一致(不加進度行)。
 - **自動留存與比對**: `run`／`discover`（含單一入口）每次跑完自動存一筆執行紀錄到 `.ramplio/runs/`（保留最近 50 筆,目錄自帶 `.gitignore`），不必事先記得加 `--output`／`--save-baseline`;結尾自動跟「上一次同目標、同設定」(含 header＋body,只存雜湊不存原文)比較 p99、錯誤率、吞吐量,這段只是參考、不影響結束碼。`ramplio compare` 不帶參數時比較最近一筆與同目標的前一筆（退步照舊 exit 1）,`ramplio report` 不帶參數時用最近一筆 run 紀錄產生 HTML。存檔失敗只警告;`--no-history` 可關閉,`RAMPLIO_HISTORY_DIR` 可改位置。紀錄檔是 baseline 格式的超集,舊的 `compare a.json b.json` 可直接讀。
 - **單一入口 `ramplio <網址 | 'curl …' | ->`**: 不必記子指令,直接給網址、貼上瀏覽器 DevTools 的「Copy as cURL」或 `pbpaste | ramplio -`,就帶著 header／body 開始容量探測;`.yaml`／`.har` 會印出正確指令,打錯字的子指令會給建議且不會開跑。POST／PUT／PATCH／DELETE(含 Chrome 只有 `--data-raw` 的隱式 POST)預設只送一發預檢,確定要壓測需明確加 `--allow-write`;終端輸出與建議指令只顯示 header 名稱,不會印出 token。`discover` 同步新增 `--curl`、`-H`、`--method`、`--body`、`--allow-write`,開跑前的預檢也改為送出完整請求(含 header 與 body),寫入型預檢不再因少了授權拿到假的 401/415。
 
 ### 修正
+- **`run --url`／`run --rps` 按 Ctrl-C 什麼都沒留下**: 這兩種模式原本沒有任何訊號處理,Ctrl-C／SIGTERM 讓行程直接結束,摘要、`--output`、`--report` 全部不會產生。現在中斷會停止壓測、照樣印出中斷前的摘要並產生使用者要求的輸出檔;`--output` 的 JUnit 不會把用部分結果算出的門檻失敗記進去。
+- **中斷收尾在各模式間不一致**: `run --url`／`--rps`／`--scenario` 被中斷(Ctrl-C 或 SIGTERM,有沒有 TUI 都一樣)時統一為:印摘要、照常產生 `--output`／`--report`／`--save-baseline`／`--sink`、**不存自動執行紀錄**(避免下次自動比較看起來像大退步)、**以 exit 1 結束**並說明結果不完整。**行為變更**:`run --scenario` 被中斷時以前會照常存紀錄、依 thresholds 決定結束碼(可能是 0),現在一律 exit 1、不做門檻判定;CI 裡被砍掉的壓測不會再顯示成通過。TUI 無法初始化(例如沒有 /dev/tty)時,訊號仍能停止壓測。分散式 `--worker` 的結束碼不變。
 - **`run --save-baseline` 存下網址裡的帳密與 token**: `run --url` 存 baseline 時直接寫入原始網址,網址裡的密碼與 `token=` 之類的參數會留在檔案裡（discover 早已遮罩）。現在與畫面一樣遮成 `***`;`run --url` 的步驟名稱（會出現在摘要與存檔報告）也一併遮罩。
 - **`auth:` 步驟在多 VU 下並發寫入共用 header map**: 有 `auth:` 但沒寫 `headers:` 的步驟,其 header 模板由所有 VU 共用,auth 標頭卻被寫回模板本身——可能觸發 Go runtime `fatal error: concurrent map writes` 直接終止壓測,啟動瞬間也可能讓 VU 帶到別人的 token(假 401)。現在 auth 一律寫在每次請求自己的 map 上,模板永不被修改;沒有 header 的請求也順帶省下一次配置。
 - **熔斷器觸發旗標的 data race**: 熔斷器的觸發旗標在記錄失敗時持鎖寫入,但每個 VU 與 rate 模式的派發器在每次請求前都不持鎖讀取它——違反 Go 記憶體模型,多 VU 啟用 `circuit_breaker` 時 `-race` 會報錯。旗標改為原子變數;行為不變(x86 上指令與修正前相同,arm64 每次檢查多不到 1 ns)。

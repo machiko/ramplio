@@ -31,7 +31,7 @@ pbpaste | ramplio -              # 或在瀏覽器 DevTools 對請求按「Copy 
 - **Coordinated Omission 修正** — rate 模式並陳「服務延遲」與「壓力下實際延遲」，不會像 closed-loop 工具低報慢請求
 - **開跑前 pre-flight 預檢** — 正式施壓前先單發探測目標可達性，連得上就印出連線分解（DNS／連線／TLS／首位元組），連不上直接給白話原因與建議
 - **量測可信度判語** — 報告末尾自評產生器健康度（丟棄樣本比例、GC 暫停、尖峰 goroutine），直接告訴你這次數字能不能信
-- **即時 TUI** — 終端機內的即時儀表板，顯示階段進度、RPS、延遲與各步驟指標
+- **即時 TUI** — 終端機內的即時儀表板，顯示階段進度、RPS、延遲與各步驟指標。`run --url`、`run --rps`、`run --scenario`、分散式都有；輸出不是終端（CI、管線、重新導向）時自動關閉，也可用 `--no-tui` 關掉。跑到一半按 Ctrl-C（或收到 SIGTERM）會停止壓測、照樣印摘要與 `--output`／`--report` 等輸出，但不存自動執行紀錄、以 exit 1 結束（結果不完整，不做門檻判定）
 - **即時網頁儀表板** — 由執行檔本身提供的 Vue 3 + Chart.js SPA，零額外設定
 - **Prometheus 整合** — 將指標匯出至 Grafana 或任何相容 Prometheus 的監控系統
 - **CI 友善** — 閾值超標時以 exit code `1` 退出

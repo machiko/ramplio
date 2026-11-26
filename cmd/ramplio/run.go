@@ -143,29 +143,37 @@ func newRunCmd() *cobra.Command {
 			}
 
 			var (
-				sum        metrics.Summary
-				thresholds *scenarios.Thresholds
-				err        error
+				sum         metrics.Summary
+				thresholds  *scenarios.Thresholds
+				interrupted bool
+				err         error
 			)
 
 			runStart := time.Now()
 			switch {
 			case scenarioFile != "":
-				sum, thresholds, err = runScenario(scenarioFile, prometheusAddr, httpCfg, noTUI)
+				sum, thresholds, interrupted, err = runScenario(scenarioFile, prometheusAddr, httpCfg, noTUI)
 			case rps > 0:
-				sum, err = runRPS(url, method, rps, duration, headers, body, httpCfg)
+				sum, interrupted, err = runRPS(url, method, rps, duration, headers, body, httpCfg, noTUI)
 			default:
 				if !cmd.Flags().Changed("vus") {
 					fmt.Println("提示：目前用 1 個虛擬用戶（預設）。加上 --vus 50 可模擬更多同時流量。")
 				}
-				sum, err = runURL(url, method, vus, duration, headers, body, httpCfg)
+				sum, interrupted, err = runURL(url, method, vus, duration, headers, body, httpCfg, noTUI)
 			}
 			if err != nil {
 				return err
 			}
 
 			reporter.PrintSummary(os.Stdout, sum)
-			thresholdMsg := checkThresholds(sum, thresholds)
+			if interrupted {
+				fmt.Fprintln(cmd.ErrOrStderr(), "\n已中斷：上面是中斷前的部分結果；不存執行紀錄、不做門檻判定。")
+			}
+			// 中斷的結果不完整,不做門檻判定:也不可以寫進 --output 的 JUnit。
+			thresholdMsg := ""
+			if !interrupted {
+				thresholdMsg = checkThresholds(sum, thresholds)
+			}
 
 			scenarioName := strings.TrimSuffix(scenarioFile, filepath.Ext(scenarioFile))
 			if scenarioName == "" {
@@ -219,7 +227,9 @@ func newRunCmd() *cobra.Command {
 			// Automatic record + comparison with the previous run of the same
 			// target. Runs before the threshold exits below so a failing run is
 			// recorded too; it never changes the exit code.
-			if !noHistory {
+			// An interrupted run is partial: saving it would make the next
+			// automatic comparison look like a big regression.
+			if !noHistory && !interrupted {
 				rep := reporter.SummaryToReport(sum)
 				rec := history.Record{
 					Baseline: baseline.FromSummary(sum, savedName),
@@ -237,7 +247,9 @@ func newRunCmd() *cobra.Command {
 
 			// 觀測失敗預設只警告不中斷:trace 關聯是補充,不可污染 exit code。
 			observeTrusted := false
-			if observeSrc != nil {
+			if observeSrc != nil && interrupted {
+				fmt.Fprintln(os.Stderr, "warning: 測試被中斷，實際區間跟 -d 不符，略過觀測")
+			} else if observeSrc != nil {
 				if runDur, durErr := time.ParseDuration(duration); durErr == nil {
 					rampDur, holdDur := rateProfile(runDur)
 					observeTrusted = runObservation(os.Stdout, os.Stderr, observeSrc, runStart, rampDur, holdDur)
@@ -261,6 +273,12 @@ func newRunCmd() *cobra.Command {
 						fmt.Printf("Report saved to %s\n", reportFile)
 					}
 				}
+			}
+
+			// 中斷的結果不完整:輸出產物照樣留下(可診斷),但不判門檻、一律失敗(D2/D3)。
+			if interrupted {
+				cmd.SilenceUsage = true
+				return errRunInterrupted
 			}
 
 			// strict-trust 守門刻意放在所有輸出產物(sink/output/baseline/report)
@@ -316,7 +334,7 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&tlsSkipVerify, "tls-skip-verify", false, "Skip TLS verification for https:// workers (self-signed certs)")
 	cmd.Flags().StringVar(&pollInterval, "poll-interval", "", "Live-metrics polling interval for distributed runs (e.g. 500ms, 2s; default 1s)")
 	cmd.Flags().StringVar(&assignTimeout, "assign-timeout", "", "Timeout for broadcasting work to workers (e.g. 10s, 30s; default 10s)")
-	cmd.Flags().BoolVar(&noTUI, "no-tui", false, "Disable the live TUI and print plain progress lines (auto-enabled when output is not a terminal)")
+	cmd.Flags().BoolVar(&noTUI, "no-tui", false, "Disable the live TUI (auto-enabled when output is not a terminal); --scenario and --worker print plain progress lines instead")
 	cmd.Flags().BoolVar(&noPreflight, "no-preflight", false, "Skip the quick reachability check before the test (run even if the target looks unreachable)")
 	cmd.Flags().BoolVar(&noHistory, "no-history", false, "不自動把這次結果存進 .ramplio/ 執行紀錄，也不跟上一次比較")
 
@@ -422,12 +440,19 @@ type rampProvider struct {
 	col       *metrics.Collector
 	ramp      *engine.RampEngine
 	startedAt time.Time
+	// hideSteps drops the per-step table: a single-request run has one row
+	// that only repeats the totals.
+	hideSteps bool
 }
 
 func (p *rampProvider) Snapshot() reporter.LiveSnapshot {
 	sum := p.col.LiveSummary()
 	p50, p90, p95, p99 := p.col.LivePercentiles()
 	cur, total, pct := p.ramp.StageInfo()
+	var steps []metrics.StepSummary
+	if !p.hideSteps {
+		steps = p.col.LiveStepMetrics()
+	}
 	return reporter.LiveSnapshot{
 		Total:        sum.Total,
 		Errors:       sum.Errors,
@@ -442,14 +467,14 @@ func (p *rampProvider) Snapshot() reporter.LiveSnapshot {
 		StageTotal:   total,
 		StagePct:     pct,
 		Elapsed:      time.Since(p.startedAt),
-		StepMetrics:  p.col.LiveStepMetrics(),
+		StepMetrics:  steps,
 	}
 }
 
-func runScenario(path, promAddr string, httpCfg protocols.HTTPConfig, noTUI bool) (metrics.Summary, *scenarios.Thresholds, error) {
+func runScenario(path, promAddr string, httpCfg protocols.HTTPConfig, noTUI bool) (metrics.Summary, *scenarios.Thresholds, bool, error) {
 	sc, err := scenarios.ParseFile(path)
 	if err != nil {
-		return metrics.Summary{}, nil, fmt.Errorf("loading scenario: %w", err)
+		return metrics.Summary{}, nil, false, fmt.Errorf("loading scenario: %w", err)
 	}
 
 	if h := sc.HTTP; h != nil {
@@ -477,7 +502,7 @@ func runScenario(path, promAddr string, httpCfg protocols.HTTPConfig, noTUI bool
 		}
 		rows, err := scenarios.LoadDataFile(dataFile)
 		if err != nil {
-			return metrics.Summary{}, nil, fmt.Errorf("loading data file: %w", err)
+			return metrics.Summary{}, nil, false, fmt.Errorf("loading data file: %w", err)
 		}
 		dataRows = rows
 		dataMode = sc.VarsFrom.Mode
@@ -522,11 +547,7 @@ func runScenario(path, promAddr string, httpCfg protocols.HTTPConfig, noTUI bool
 
 	// TUI 需要真終端;CI/pipe(或 --no-tui)下改印進度行,
 	// 否則 TUI 立即退出並 cancel,壓測提早結束(與分散式同一修法)。
-	if noTUI || !isTerminal() {
-		runHeadlessProgress(provider, cancel, done, 0)
-	} else if err := reporter.RunTUI(provider, cancel, done); err != nil {
-		<-done
-	}
+	interrupted := watchRun(newLiveEnv(), watchOpts{noTUI: noTUI, progress: true}, provider, cancel, done)
 	cancel()
 	if len(sc.Teardown) > 0 {
 		waitForCleanup(os.Stderr, done, fmt.Sprintf(
@@ -534,7 +555,7 @@ func runScenario(path, promAddr string, httpCfg protocols.HTTPConfig, noTUI bool
 	}
 	<-done
 
-	return sum, sc.Thresholds, nil
+	return sum, sc.Thresholds, interrupted, nil
 }
 
 // distOptions carries the authentication, TLS and timing knobs for a
@@ -631,11 +652,8 @@ func runDistributed(scenarioFile string, workerAddrs []string, promAddr string, 
 	// The TUI needs a real terminal. In CI/piped output (or with --no-tui),
 	// fall back to plain progress lines so the run completes instead of the
 	// TUI exiting immediately and cancelling the test.
-	if opts.noTUI || !isTerminal() {
-		runHeadlessProgress(provider, cancel, done, opts.pollInterval)
-	} else if tuiErr := reporter.RunTUI(provider, cancel, done); tuiErr != nil {
-		<-done
-	}
+	// Distributed keeps its exit code on interruption (out of scope for card 2b).
+	_ = watchRun(newLiveEnv(), watchOpts{noTUI: opts.noTUI, progress: true, interval: opts.pollInterval}, provider, cancel, done)
 	cancel()
 	cleanup := "正在停止 worker"
 	if len(sc.Teardown) > 0 {
@@ -663,10 +681,10 @@ func (p *coordinatorProvider) Snapshot() reporter.LiveSnapshot {
 	return snap
 }
 
-func runURL(url, method string, vus int, duration string, headers []string, body string, httpCfg protocols.HTTPConfig) (metrics.Summary, error) {
+func runURL(url, method string, vus int, duration string, headers []string, body string, httpCfg protocols.HTTPConfig, noTUI bool) (metrics.Summary, bool, error) {
 	dur, err := time.ParseDuration(duration)
 	if err != nil {
-		return metrics.Summary{}, fmt.Errorf("invalid duration %q: %w", duration, err)
+		return metrics.Summary{}, false, fmt.Errorf("invalid duration %q: %w", duration, err)
 	}
 
 	req := protocols.Request{
@@ -687,15 +705,16 @@ func runURL(url, method string, vus int, duration string, headers []string, body
 	}, col)
 
 	fmt.Printf("Running %d VUs for %s → %s %s\n\n", vus, duration, req.Method, url)
-	return eng.Run(context.Background()), nil
+	sum, interrupted := watchRamp(eng, col, noTUI)
+	return sum, interrupted, nil
 }
 
 // runRPS drives a rate-mode load test (fixed RPS via token bucket).
 // Stages: ramp-up 25% → hold 50% → ramp-down 25%.
-func runRPS(url, method string, targetRPS int, duration string, headers []string, body string, httpCfg protocols.HTTPConfig) (metrics.Summary, error) {
+func runRPS(url, method string, targetRPS int, duration string, headers []string, body string, httpCfg protocols.HTTPConfig, noTUI bool) (metrics.Summary, bool, error) {
 	dur, err := time.ParseDuration(duration)
 	if err != nil {
-		return metrics.Summary{}, fmt.Errorf("invalid duration %q: %w", duration, err)
+		return metrics.Summary{}, false, fmt.Errorf("invalid duration %q: %w", duration, err)
 	}
 
 	req := protocols.Request{
@@ -720,7 +739,28 @@ func runRPS(url, method string, targetRPS int, duration string, headers []string
 
 	fmt.Printf("Running rate mode: %d req/s for %s → %s %s\n", targetRPS, duration, req.Method, url)
 	fmt.Printf("%s\n\n", rateProfileLine(targetRPS, rampDur, holdDur))
-	return eng.Run(context.Background()), nil
+	sum, interrupted := watchRamp(eng, col, noTUI)
+	return sum, interrupted, nil
+}
+
+// watchRamp runs a single-request load test in the background and shows it
+// live (TUI on a terminal; nothing extra otherwise, so piped output is
+// unchanged). It reports whether Ctrl-C / SIGTERM stopped it early.
+func watchRamp(eng *engine.RampEngine, col *metrics.Collector, noTUI bool) (metrics.Summary, bool) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	var sum metrics.Summary
+	go func() {
+		defer close(done)
+		sum = eng.Run(ctx)
+	}()
+
+	provider := &rampProvider{col: col, ramp: eng, startedAt: time.Now(), hideSteps: true}
+	interrupted := watchRun(newLiveEnv(), watchOpts{noTUI: noTUI}, provider, cancel, done)
+	cancel()
+	<-done
+	return sum, interrupted
 }
 
 // saveResults writes results to path. Uses JUnit XML format for .xml files,
@@ -831,36 +871,6 @@ func isTerminal() bool {
 		return false
 	}
 	return fi.Mode()&os.ModeCharDevice != 0
-}
-
-// runHeadlessProgress prints periodic plain-text progress lines until the run
-// finishes, and cancels the run on SIGINT/SIGTERM. Used in place of the TUI in
-// non-interactive environments.
-func runHeadlessProgress(provider reporter.LiveProvider, cancel context.CancelFunc, done <-chan struct{}, interval time.Duration) {
-	if interval <= 0 {
-		interval = 2 * time.Second
-	}
-	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
-	defer signal.Stop(sigs)
-
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-done:
-			return
-		case <-sigs:
-			fmt.Fprintln(os.Stderr, "\nInterrupted — stopping the test...")
-			cancel()
-			return
-		case <-ticker.C:
-			s := provider.Snapshot()
-			fmt.Printf("[%s] VUs=%d  reqs=%d  errors=%d  rps=%.0f  p99=%dms\n",
-				s.Elapsed.Round(time.Second), s.ActiveVUs, s.Total, s.Errors, s.RPS, s.P99.Milliseconds())
-		}
-	}
 }
 
 // openBrowser opens url in the default system browser. Failures are silently
