@@ -3,7 +3,7 @@
 - 分支：`feat/save-scenario`（worktree：`/Users/reyes/Workspace/ramplio-worktrees/save-scenario`）
 - 基準：`main` @ e6072a9
 - 規模：一般
-- 狀態：第 4 段複審通過，待使用者同意 push 與開 PR（2026-11-26）
+- 狀態：第 6 段 CI 全綠，待使用者手動測試與合併（2026-11-26）
 
 ## 規格
 
@@ -95,9 +95,10 @@
 
 - 2026-11-26 開卡，規格經使用者確認。
 - 2026-11-26 第 2 段：先寫測試，放最小骨架（欄位、旗標、空的 `scenarioEnvName`）後跑完成檢查為紅，失敗原因皆符合預期（沒產檔／沒擋／沒提示／init 仍印 generate_sessions.sh；情境 7 與「SafeLimit 0 不提示」原本就成立故為綠）。實作後完成檢查 15 個測試全綠（16.7s）。
-- 2026-11-26 第 3 段：`go test -race ./...` 16 個套件全 ok；`go build ./...` ok；`go vet ./...` ok；`gofmt -l` 無輸出；`golangci-lint` 本機未安裝，待 CI 確認。端到端：mock-server（20ms）＋`discover --max-rps 20 --save-scenario /tmp/s.yaml` 產出檔案無憑證原文、權限 0600；`validate` 通過；`run --scenario` 跑滿 2m30s、2,696 次 0 失敗、exit 0；縮短版把 `p99_ms` 改 1 後 exit 1（門檻有判定）。
+- 2026-11-26 第 3 段：`go test -race ./...` 16 個套件全 ok；`go build ./...` ok；`go vet ./...` ok；`gofmt -l` 無輸出；`golangci-lint` 本機未安裝，待 CI 確認 ✅（PR #4 CI lint pass）。端到端：mock-server（20ms）＋`discover --max-rps 20 --save-scenario /tmp/s.yaml` 產出檔案無憑證原文、權限 0600；`validate` 通過；`run --scenario` 跑滿 2m30s、2,696 次 0 失敗、exit 0；縮短版把 `p99_ms` 改 1 後 exit 1（門檻有判定）。
 - 2026-11-26 commit：3926d11（feat：--save-scenario）、03befb4（fix：init 說明）、e9938e0（docs：README／getting-started／CHANGELOG）。
 - 2026-11-26 第 4 段獨立審查：無 CRITICAL／HIGH；MEDIUM-1～3、LOW-1／3／4 進第 5 段，LOW-2 不處理。
 - 2026-11-26 第 5 段第 1 輪：先加測試，跑出預期的紅（`{{` 四種情況都只得到「安全上限為 0」、輸出沒有空值／路徑提醒、上層目錄不存在時 server 收到請求、tolerance 500µs 沒報錯）。LOW-4 測試（PASS 一級後才中斷）因既有中斷判斷已涵蓋而一開始就綠；暫時拿掉中斷判斷後確認轉紅（`An error is expected but got nil`），再還原。修正後完成檢查全綠（21.5s）；`go test -race ./...` 16 個套件全 ok（只有 cmd/ramplio 有改動，其餘為 cache）；`go build ./...`、`go vet ./...` ok；`gofmt -l` 無輸出。
 - 2026-11-26 第 5 段 commit：21cb258（fix：六項修正與測試）、f7289c3（docs：README）。
 - 2026-11-26 第 4 段複審：無 CRITICAL／HIGH，第 5 段第 1 輪各項確認修好；LOW-A 接受、LOW-B 不處理（見 Decisions）。待使用者同意 push 與開 PR。
+- 2026-11-26 第 6 段：PR #4 CI lint 失敗，修兩輪（不動行為）：21e8586（preferStringWriter、err 遮蔽）、e84685a（sloppyReassign，改用獨立錯誤變數名）。之後 CI 全綠（lint pass、test pass 2m32s）。待使用者手動測試與合併。
