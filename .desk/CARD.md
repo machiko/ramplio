@@ -3,7 +3,7 @@
 - 分支：`feat/run-tui`（worktree：`/Users/reyes/Workspace/ramplio-worktrees/run-tui`）
 - 基準：`main` @ e2a2eb0
 - 規模：一般
-- 狀態：第 1 段已確認，第 2 段實作中（2026-11-26）
+- 狀態：第 3 段完成，待獨立審查（2026-11-26）
 
 ## 規格
 
@@ -131,7 +131,32 @@
 - 2026-11-26：可測試性用注入（`liveEnv`＋package 變數 `newLiveEnv`），不在測試裡對自己的行程送真訊號（如果沒先註冊好就會殺掉整個測試行程）。
 - 2026-11-26：中斷時 `--output`／`--report`／`--save-baseline`／`--sink` 照樣產生：使用者明確要求的輸出，中斷的結果也有診斷價值（跟 `--strict-trust` 註解「不可信 ≠ 不可看」同一個想法）。只有自動紀錄不存，避免下次自動比較看起來像大退步（跟 2a 的 discover 一致）。
 
+- 2026-11-26（實作，修正規格 R1）：讀 bubbletea v1.3.10 原始碼（`tea.go` `handleSignals`）後發現，bubbletea 自己會 `signal.Notify(SIGINT, SIGTERM)`：SIGTERM 讓 TUI 正常結束（`Run` 回 nil），原本的程式接著就 `cancel()`，**所以 scenario／distributed 的 TUI 路徑收到 SIGTERM 並不會讓行程直接死**，規格 R1 這段寫錯了。真正的問題在 R2：stdin 不是終端時，Ctrl-C 讓 TUI 回 `ErrInterrupted`，原本的程式接著 `<-done`，**壓測會一直跑到結束**。設計不變（`watchRun` 一律自己註冊訊號；Go 會把訊號送給每個註冊的 channel，跟 bubbletea 並存沒有問題），但 `watchTUI` 多了一條規則：TUI 回 nil 時 run 還沒結束，就代表是被訊號關掉的，當成中斷（不然 TUI 跟我們的 goroutine 誰先處理訊號是競態）；TUI 回錯誤時照舊等 run 跑完，訊號仍能停下它。
+- 2026-11-26（實作）：`runHeadlessProgress` 刪掉，由 `runlive.go` 的 `watchPlain` 取代（進度行格式與 2 秒間隔不變，scenario／distributed 才印，D1）。非 TUI 模式的「Interrupted — stopping the test...」照舊印在 stderr；TUI 模式不印，避免把畫面弄亂，改由 RunE 結束後印「已中斷：…」。
+- 2026-11-26（實作，計畫外的測試檔）：`runScenario` 多回傳 `interrupted`，`runscenario_headless_test.go` 的呼叫從 `sum, _, err :=` 改成 `sum, _, _, err :=`，斷言沒有動。
+- 2026-11-26（實作）：被中斷時 `--observe` 直接略過並在 stderr 警告（R3）；因為最後一律回中斷錯誤，`--strict-trust` 的守門不會走到，結果一樣是 exit 1。中斷錯誤回傳前設 `cmd.SilenceUsage = true`，不印 cobra 的 Usage（`assertInterrupted` 斷言 stderr 沒有 `Usage:`）。
+- 2026-11-26（實作，測試修正）：`TestRunLiveOutputOrder` 第一次跑紅燈的原因在測試本身：標記「測試結果」同時出現在摘要後面的「測試結果說明」段落，被數成 2 次。改成完整的段落標題 `\n測試結果\n`，斷言內容（各 1 次、順序固定）沒有放寬。
+- 2026-11-26（實作，比規格多的測試）：`TestWatchRunTUIErrorKeepsRunning`、`TestWatchRunTUIErrorThenSignalStops` 守 R2 的兩個分支。這兩條是在實作之後寫的，寫完就是綠的；另外用變異測試確認它們有效：把 `watchTUI` 改成 TUI 回錯誤也取消 run，第一條就會紅（`Should be false`），之後已還原。`TestRunLiveNonTTYSkipsTUI`、`TestRunLiveNoTUIFlag`、`TestRunDistributedUsesWatchRun` 在實作前就是綠的（它們斷言的是「沒有發生」或「跟以前一樣」），留著當回歸守門。
+- 2026-11-26（實作）：產品程式 diff 是 `run.go` +66／−60、`runlive.go` +172（含註解），在規格估的 150–250 行內。
 ## History
 
 - 2026-11-26：讀 `run.go`（runURL／runRPS／runScenario／runDistributed／runHeadlessProgress）、`reporter/tui.go`、`autohistory.go`，確認 url／rps 沒有訊號處理、TUI 路徑沒攔 SIGTERM、TUI 為 inline 模式不會蓋掉摘要。寫出 2b 規格，3 個待決定附推薦。
 - 2026-11-26：使用者確認規格，D1–D3 照推薦定案；進第 2 段。
+- 2026-11-26：第 2 段實作完成（TDD：先補 `liveEnv`／`shouldUseTUI` 骨架讓測試能編譯，看到行為上的紅燈——沒開畫面、中斷後跑滿 30 秒、中斷後仍存紀錄、RunE 回 nil——才實作）。commit：a3e0614 CARD 定案、50627d2 實作與測試、4b0edd0 README／CHANGELOG。
+- 2026-11-26：第 3 段測試輸出（實際結尾）：
+  - 完成檢查 `go test ./cmd/ramplio/... -run 'RunLive|ShouldUseTUI' -count=1`（exit 0）：
+    ```
+    ok  	github.com/machiko/ramplio/v3/cmd/ramplio	13.068s
+    ```
+  - `go test -race -count=1 ./...`（exit 0）：
+    ```
+    ok  	github.com/machiko/ramplio/v3/cmd/ramplio	92.380s
+    ok  	github.com/machiko/ramplio/v3/internal/distributed	13.342s
+    ok  	github.com/machiko/ramplio/v3/internal/engine	101.873s
+    ok  	github.com/machiko/ramplio/v3/internal/reporter	2.806s
+    （其餘 12 個套件同為 ok，共 16 個套件）
+    ```
+  - `go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest run`：`0 issues.`，exit 0
+  - `go build ./...`：exit 0，無輸出
+  - repo 內沒有殘留 `.ramplio/`
+  - 端到端驗證（真終端的 TUI、`kill -TERM`、管線輸出跟 main 的 binary 比對）**待確認**：這個對話沒有終端，起背景 mock-server 加 `kill` 的指令被權限擋下，留給主對話做（步驟見「驗證」）。
