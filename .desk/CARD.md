@@ -3,7 +3,7 @@
 - 分支：`feat/run-tui`（worktree：`/Users/reyes/Workspace/ramplio-worktrees/run-tui`）
 - 基準：`main` @ e2a2eb0
 - 規模：一般
-- 狀態：第 5 段第 2 輪完成，待複審（2026-11-26）
+- 狀態：第 4 段通過，第 6 段 PR 等 CI（2026-11-26）
 
 ## 規格
 
@@ -207,3 +207,4 @@
   - `go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest run`：`0 issues.`，exit 0
   - `go build ./...`：exit 0，無輸出
   - repo 內沒有殘留 `.ramplio/`
+- 2026-11-26（第 4 段）：第 1 輪後複審可進 PR；第 2 輪只改測試與註解，主對話讀過新測試、重跑 `go test -race ./...` 16 套件 ok、lint 0 issues，視為複審通過。
