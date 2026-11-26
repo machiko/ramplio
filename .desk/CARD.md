@@ -3,7 +3,7 @@
 - 分支：`feat/run-tui`（worktree：`/Users/reyes/Workspace/ramplio-worktrees/run-tui`）
 - 基準：`main` @ e2a2eb0
 - 規模：一般
-- 狀態：第 5 段第 1 輪完成，待複審（2026-11-26）
+- 狀態：第 5 段第 2 輪完成，待複審（2026-11-26）
 
 ## 規格
 
@@ -136,7 +136,7 @@
 - 2026-11-26（實作，計畫外的測試檔）：`runScenario` 多回傳 `interrupted`，`runscenario_headless_test.go` 的呼叫從 `sum, _, err :=` 改成 `sum, _, _, err :=`，斷言沒有動。
 - 2026-11-26（實作）：被中斷時 `--observe` 直接略過並在 stderr 警告（R3）；因為最後一律回中斷錯誤，`--strict-trust` 的守門不會走到，結果一樣是 exit 1。中斷錯誤回傳前設 `cmd.SilenceUsage = true`，不印 cobra 的 Usage（`assertInterrupted` 斷言 stderr 沒有 `Usage:`）。
 - 2026-11-26（實作，測試修正）：`TestRunLiveOutputOrder` 第一次跑紅燈的原因在測試本身：標記「測試結果」同時出現在摘要後面的「測試結果說明」段落，被數成 2 次。改成完整的段落標題 `\n測試結果\n`，斷言內容（各 1 次、順序固定）沒有放寬。
-- 2026-11-26（實作，比規格多的測試）：`TestWatchRunTUIErrorKeepsRunning`、`TestWatchRunTUIErrorThenSignalStops` 守 R2 的兩個分支。這兩條是在實作之後寫的，寫完就是綠的；另外用變異測試確認它們有效：把 `watchTUI` 改成 TUI 回錯誤也取消 run，第一條就會紅（`Should be false`），之後已還原。`TestRunLiveNonTTYSkipsTUI`、`TestRunLiveNoTUIFlag`、`TestRunDistributedUsesWatchRun` 在實作前就是綠的（它們斷言的是「沒有發生」或「跟以前一樣」），留著當回歸守門。
+- 2026-11-26（實作，比規格多的測試）：`TestWatchRunTUIErrorKeepsRunning`、`TestWatchRunTUIErrorThenSignalStops` 守 R2 的兩個分支。這兩條是在實作之後寫的，寫完就是綠的；另外用變異測試確認它們有效：把 `watchTUI` 改成 TUI 回錯誤也取消 run，第一條就會紅（`Should be false`），之後已還原。`TestRunLiveNonTTYSkipsTUI`、`TestRunLiveNoTUIFlag`、`TestRunDistributedUsesWatchRun` 在實作前就是綠的（它們斷言的是「沒有發生」或「跟以前一樣」），留著當回歸守門。（第 5 段第 1 輪註：`TestWatchRunTUIErrorThenSignalStops` 已併入 `TestWatchRunSignalReleasedBeforeStop` 的「TUI 初始化失敗」子測試。）
 - 2026-11-26（實作）：產品程式 diff 是 `run.go` +66／−60、`runlive.go` +172（含註解），在規格估的 150–250 行內。
 - 2026-11-26（第 5 段第 1 輪，M-2，更正 R2）：bubbletea v1.3.10（`tea.go:600-617`）在 stdin 不是終端時會改開 `/dev/tty` 讀按鍵，所以 `ramplio run … < file` 時 Ctrl-C 仍然是按鍵，不會變成 SIGINT；實作那筆 Decisions 寫的「stdin 不是終端時 TUI 回 `ErrInterrupted`、壓測跑到結束」前提不成立。真正會走到「TUI 回錯誤」分支的是 TUI 無法初始化（例如沒有 /dev/tty）。程式不用改：該分支仍是「照舊等 run 跑完、訊號仍能停下它」。CHANGELOG、R2、`TestWatchRunTUIErrorKeepsRunning` 的註解同步更正。
 - 2026-11-26（第 5 段第 1 輪，M-1）：新增 `TestWatchRunSignalReleasedBeforeStop`（TUI 初始化失敗／非 TTY 兩個子測試）：假訊號來源的 stop 會記錄呼叫次數，在 cancel 被呼叫的那一刻斷言 stop 已經被呼叫過（只看結束後的次數不夠，`watchRun` 的 defer 一定會呼叫）。修正前就是綠的（行為本來就對，缺的是守門）；變異測試確認有效：拿掉 `watchSignals` 裡的 `stopSignals()`，兩個子測試都紅（「取消 run 之前就要先釋放訊號」）。它的「TUI 初始化失敗」子測試涵蓋原本的 `TestWatchRunTUIErrorThenSignalStops`（同樣的設定與 `interrupted`、時間斷言，再多一條釋放順序），所以把舊的那條併進來、刪掉。
@@ -146,6 +146,9 @@
 - 2026-11-26（第 5 段第 1 輪，L-3，不改程式）：中斷時 `--output`／`--report` 的內容就是中斷前的部分結果，檔案本身沒有標記「被中斷」；使用者從結束碼與 stderr 得知。要在檔案裡加標記會改到輸出格式，不在本卡範圍。
 - 2026-11-26（第 5 段第 1 輪，L-4，不改程式，既有問題）：中斷錯誤由 `main.go` 印一次，cobra 也會印一次（`SilenceErrors` 沒設），跟卡 1 記下的另開卡問題相同，留在另開卡清單。
 - 2026-11-26（使用者決定，另開卡）：既有問題：`run --url --vus N -d D` 只建一個 stage（`run.go` `runURL` 的 `Stages: []scenarios.Stage{{Duration: dur, Target: vus}}`，審查時在第 697 行），引擎從 0 線性內插，整段時間從 0 慢慢爬到 N。主對話用真 pty 實測：即時畫面前幾秒顯示 VUs: 0、Total: 0，量到的數字也比實際 N VU 低。本卡不修（M-3 的測試就是被這個行為卡住，才改成先爬升再持續）。
+- 2026-11-26（第 5 段第 2 輪，M-A）：新增 `TestRunLiveThresholdFailureWithoutInterrupt`，守「沒有中斷時照常做門檻判定」。門檻失敗走 `run.go` 的 `os.Exit(1)`，在測試行程裡斷言不了，也沒有現成的注入點（不改產品程式），所以測試重新執行自己的 test binary 當子行程（環境變數 `RAMPLIO_TEST_THRESHOLD_CHILD` 帶 run 參數），子行程跑真的 `run --scenario … --output result.xml --no-tui`；如果 run 沒有 os.Exit 就以 exit 3 結束，父行程分得出來。父行程斷言：exit 1、stderr 有「未達標準：p50 」且沒有「已中斷」、xml 有 `<failure` 與 `p50 `。這條是回歸守門，寫完就是綠的。
+- 2026-11-26（第 5 段第 2 輪，M-A 變異驗證，跟清單寫法不同）：清單寫「把 `!interrupted` 改成恆真時測試要紅」，實測恆真時紅的是第 1 輪的 `TestRunLiveInterruptOutputHasNoThresholdVerdict/.xml`（中斷也做了判定），M-A 的新測試仍綠（恆真時沒中斷的 run 照樣判定，本來就該綠）；改成**恆假**時 M-A 的新測試才紅（「門檻失敗要 exit 1」「沒有中斷時 JUnit 要記成門檻失敗」），中斷那條則綠。兩條測試合起來把條件的兩個方向都守住了。兩次變異驗完都還原，`git diff` 確認 `run.go` 無改動。
+- 2026-11-26（第 5 段第 2 輪，L-A／L-B／L-C）：只改註解：CARD 第 139 行加註舊測試已併入；`TestRunLiveInterruptOutputHasNoThresholdVerdict` 標明 .json 只是守門；`progressProbe` 註解把 `runHeadlessProgress` 改成 `watchPlain`。
 ## History
 
 - 2026-11-26：讀 `run.go`（runURL／runRPS／runScenario／runDistributed／runHeadlessProgress）、`reporter/tui.go`、`autohistory.go`，確認 url／rps 沒有訊號處理、TUI 路徑沒攔 SIGTERM、TUI 為 inline 模式不會蓋掉摘要。寫出 2b 規格，3 個待決定附推薦。
@@ -181,6 +184,24 @@
     ok  	github.com/machiko/ramplio/v3/internal/distributed	15.125s
     ok  	github.com/machiko/ramplio/v3/internal/engine	99.993s
     ok  	github.com/machiko/ramplio/v3/internal/reporter	3.504s
+    （其餘 12 個套件同為 ok，共 16 個套件）
+    ```
+  - `go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest run`：`0 issues.`，exit 0
+  - `go build ./...`：exit 0，無輸出
+  - repo 內沒有殘留 `.ramplio/`
+- 2026-11-26：第 4 段複審「可以進 PR」，無 CRITICAL／HIGH，1 MEDIUM＋3 LOW。
+- 2026-11-26：第 5 段第 2 輪（最後一輪，只補測試與註解，產品程式沒改）完成。commit：47baab2 M-A 回歸測試＋L-B／L-C 註解、本筆（CARD：L-A 加註、M-A 變異驗證結果、History）。
+- 2026-11-26：第 5 段第 2 輪測試輸出（實際結尾）：
+  - 完成檢查 `go test ./cmd/ramplio/... -run 'RunLive|ShouldUseTUI' -count=1`（exit 0；篩選字串不用改，`-v` 數到 15 個頂層 PASS，含新的 `TestRunLiveThresholdFailureWithoutInterrupt`）：
+    ```
+    ok  	github.com/machiko/ramplio/v3/cmd/ramplio	14.997s
+    ```
+  - `go test -race -count=1 ./...`（exit 0）：
+    ```
+    ok  	github.com/machiko/ramplio/v3/cmd/ramplio	95.820s
+    ok  	github.com/machiko/ramplio/v3/internal/distributed	15.459s
+    ok  	github.com/machiko/ramplio/v3/internal/engine	102.788s
+    ok  	github.com/machiko/ramplio/v3/internal/reporter	4.806s
     （其餘 12 個套件同為 ok，共 16 個套件）
     ```
   - `go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest run`：`0 issues.`，exit 0
