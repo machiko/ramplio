@@ -108,19 +108,19 @@ func checkSaveScenarioTarget(path string, req protocols.Request, tolerance time.
 	if u.User != nil {
 		return errors.New(`網址含帳號密碼（user:pass@），情境檔無法安全保存；請改用 -H "Authorization: Basic …" 帶憑證，未產生情境檔`)
 	}
-	if err = checkParentDir(path); err != nil {
-		return err
+	if dirErr := checkParentDir(path); dirErr != nil {
+		return dirErr
 	}
-	if _, err = os.Lstat(path); err == nil {
+	if _, statErr := os.Lstat(path); statErr == nil {
 		return fmt.Errorf("%s 已存在，不覆蓋；請換一個檔名或先自行移走", path)
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("無法檢查 %s：%w", path, err)
+	} else if !errors.Is(statErr, fs.ErrNotExist) {
+		return fmt.Errorf("無法檢查 %s：%w", path, statErr)
 	}
 	// Everything that does not depend on the probe result (template markers,
 	// env name collisions, the p99 threshold) is checked now with a stand-in
 	// load, so the user is not made to wait through the probe first.
-	_, _, err = buildSavedScenario(req, 1, tolerance)
-	return err
+	_, _, buildErr := buildSavedScenario(req, 1, tolerance)
+	return buildErr
 }
 
 func checkParentDir(path string) error {
