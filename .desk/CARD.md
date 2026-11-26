@@ -3,7 +3,7 @@
 - 分支：`feat/save-scenario`（worktree：`/Users/reyes/Workspace/ramplio-worktrees/save-scenario`）
 - 基準：`main` @ e6072a9
 - 規模：一般
-- 狀態：第 2、3 段完成（2026-11-26），golangci-lint 待 CI 確認；下一步第 4 段獨立審查
+- 狀態：第 4 段無 CRITICAL／HIGH，第 5 段第 1 輪修正完成（2026-11-26），golangci-lint 待 CI 確認；下一步回第 4 段複審
 
 ## 規格
 
@@ -82,7 +82,12 @@
 - 2026-11-26 userinfo 與「目標檔已存在」在探測前就擋（不用等整輪探測才說不行），寫檔時仍以 `O_EXCL` 防競態；URL fragment 不會送到伺服器，存檔時拿掉。
 - 2026-11-26 檔案權限 0600（body 可能含明文帳密）；YAML 開頭加註解列出要 export 的變數；寫檔前先用 `scenarios.Parse` 驗證產物，壞檔不落地。
 - 2026-11-26 存檔提示只在「未中斷且 SafeLimit > 0」時印，提示內不帶網址與 header；單一入口也走 `runDiscover`，因此同樣會看到導向 `discover --save-scenario` 的提示（符合非目標：單一入口本身不接受旗標）。
-- 2026-11-26 已知限制（未處理、未改 schema）：原請求的 URL／header／body 若本來就含 `{{`，run 時會被當成模板解析而失敗。
+- 2026-11-26 ~~已知限制：原請求含 `{{` 時 run 會失敗~~ → 第 5 段 MEDIUM-2 改為拒絕存檔（見下）。
+- 2026-11-26 第 5 段 MEDIUM-2：網址、非敏感 header、body 原本就含 `{{` 時拒絕存檔，訊息只指出位置（網址／header 名稱／body），不印值；敏感值換成 env 引用後才檢查，不受影響。所有不依賴探測結果的檢查（`{{`、env 撞名、tolerance）在探測前用替代負載先建一次情境來判斷。另發現：含 `{{` 的請求連 discover 探測本身都會失敗（探測也走引擎的模板渲染，未知 token 直接報錯，SafeLimit 為 0），屬既有問題，不在本卡範圍，另開卡。
+- 2026-11-26 第 5 段 MEDIUM-1／MEDIUM-3：存檔輸出與 YAML 註解註明「這些環境變數沒設時會送出空值」；網址路徑非空且不是 `/` 時，輸出提醒「網址路徑照原文保存，若路徑含秘密請手動改寫」。
+- 2026-11-26 第 5 段 LOW-1：探測前檢查上層目錄存在且是目錄。
+- 2026-11-26 第 5 段 LOW-3：tolerance 不到 1ms 時**拒絕**存檔（不進位成 1）：進位會悄悄放寬使用者指定的標準，拒絕讓使用者自己決定。1ms 以上仍以整數毫秒截斷（如 1500µs → 1ms），沒有改成小數。
+- 2026-11-26 第 5 段 LOW-2 不處理（刻意取捨，負載卡在安全上限）：README 補一句偶發波動可能讓門檻失敗、需要餘裕可自行調低 `target_rps`。
 
 ## History
 
@@ -90,3 +95,6 @@
 - 2026-11-26 第 2 段：先寫測試，放最小骨架（欄位、旗標、空的 `scenarioEnvName`）後跑完成檢查為紅，失敗原因皆符合預期（沒產檔／沒擋／沒提示／init 仍印 generate_sessions.sh；情境 7 與「SafeLimit 0 不提示」原本就成立故為綠）。實作後完成檢查 15 個測試全綠（16.7s）。
 - 2026-11-26 第 3 段：`go test -race ./...` 16 個套件全 ok；`go build ./...` ok；`go vet ./...` ok；`gofmt -l` 無輸出；`golangci-lint` 本機未安裝，待 CI 確認。端到端：mock-server（20ms）＋`discover --max-rps 20 --save-scenario /tmp/s.yaml` 產出檔案無憑證原文、權限 0600；`validate` 通過；`run --scenario` 跑滿 2m30s、2,696 次 0 失敗、exit 0；縮短版把 `p99_ms` 改 1 後 exit 1（門檻有判定）。
 - 2026-11-26 commit：3926d11（feat：--save-scenario）、03befb4（fix：init 說明）、e9938e0（docs：README／getting-started／CHANGELOG）。
+- 2026-11-26 第 4 段獨立審查：無 CRITICAL／HIGH；MEDIUM-1～3、LOW-1／3／4 進第 5 段，LOW-2 不處理。
+- 2026-11-26 第 5 段第 1 輪：先加測試，跑出預期的紅（`{{` 四種情況都只得到「安全上限為 0」、輸出沒有空值／路徑提醒、上層目錄不存在時 server 收到請求、tolerance 500µs 沒報錯）。LOW-4 測試（PASS 一級後才中斷）因既有中斷判斷已涵蓋而一開始就綠；暫時拿掉中斷判斷後確認轉紅（`An error is expected but got nil`），再還原。修正後完成檢查全綠（21.5s）；`go test -race ./...` 16 個套件全 ok（只有 cmd/ramplio 有改動，其餘為 cache）；`go build ./...`、`go vet ./...` ok；`gofmt -l` 無輸出。
+- 2026-11-26 第 5 段 commit：21cb258（fix：六項修正與測試）、f7289c3（docs：README）。
