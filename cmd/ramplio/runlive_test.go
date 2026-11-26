@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -132,7 +133,7 @@ const (
 	interruptAfter = 500 * time.Millisecond
 	// interruptBound is how long an interrupted 30s run may take at most.
 	interruptBound = 5 * time.Second
-	// progressProbe outlasts runHeadlessProgress's 2s tick, so a progress
+	// progressProbe outlasts watchPlain's 2s tick, so a progress
 	// line would show up if the non-TTY path printed one.
 	progressProbe = "2500ms"
 )
@@ -490,6 +491,7 @@ func TestWatchRunSignalReleasedBeforeStop(t *testing.T) {
 
 // M-3：被中斷時不做門檻判定，--output 不可以寫進用部分結果算出的門檻失敗。
 func TestRunLiveInterruptOutputHasNoThresholdVerdict(t *testing.T) {
+	// .json：JSON 輸出本來就不寫門檻訊息，這條只是守門；會因修正前後而不同的是 .xml（JUnit）。
 	for _, ext := range []string{".json", ".xml"} {
 		t.Run(ext, func(t *testing.T) {
 			useHistoryDir(t)
@@ -526,4 +528,60 @@ thresholds:
 			assert.NotContains(t, string(raw), "<failure", "JUnit 不可以記成門檻失敗")
 		})
 	}
+}
+
+// thresholdChildEnv marks the child process of TestRunLiveThresholdFailureWithoutInterrupt.
+const thresholdChildEnv = "RAMPLIO_TEST_THRESHOLD_CHILD"
+
+// M-A（回歸）：沒有中斷時照常做門檻判定：--output 的 JUnit 記成失敗、exit 1。
+// 門檻失敗走 os.Exit(1)，測試行程內斷言不了，所以重新執行測試 binary
+// 當子行程跑真的 run，再由父行程斷言結束碼、stderr 與輸出檔。
+func TestRunLiveThresholdFailureWithoutInterrupt(t *testing.T) {
+	if args := os.Getenv(thresholdChildEnv); args != "" {
+		_, _, err := execRun(t, strings.Split(args, "\n")...)
+		// 走到這裡代表沒有 os.Exit(1)；用不同的結束碼讓父行程分得出來。
+		fmt.Fprintf(os.Stderr, "child: run returned %v without exiting\n", err)
+		os.Exit(3)
+	}
+
+	srv := newDelayServer(t)
+	srv.delay.Store(int64(5 * time.Millisecond))
+	// p50_ms: 1 在 5ms 的目標上一定會被觸發；先短爬升再持續，比照 M-3 的測試。
+	yaml := fmt.Sprintf(`name: threshold fails
+stages:
+  - duration: 100ms
+    target: 2
+  - duration: 500ms
+    target: 2
+steps:
+  - name: GET slow
+    method: GET
+    url: %s/
+thresholds:
+  p50_ms: 1
+`, srv.URL)
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "s.yaml")
+	require.NoError(t, os.WriteFile(path, []byte(yaml), 0o644))
+	out := filepath.Join(tmp, "result.xml")
+
+	child := exec.Command(os.Args[0], "-test.run=^TestRunLiveThresholdFailureWithoutInterrupt$", "-test.count=1")
+	child.Env = append(os.Environ(),
+		thresholdChildEnv+"="+strings.Join([]string{"--scenario", path, "--output", out, "--no-tui"}, "\n"),
+		historyDirEnv+"="+filepath.Join(tmp, ".ramplio"),
+	)
+	var stderr bytes.Buffer
+	child.Stderr = &stderr
+	runErr := child.Run()
+
+	var exitErr *exec.ExitError
+	require.ErrorAs(t, runErr, &exitErr, "門檻失敗要以非 0 結束：%s", stderr.String())
+	assert.Equal(t, 1, exitErr.ExitCode(), "門檻失敗要 exit 1：%s", stderr.String())
+	assert.Contains(t, stderr.String(), "未達標準：p50 ")
+	assert.NotContains(t, stderr.String(), "已中斷")
+
+	raw, err := os.ReadFile(out)
+	require.NoError(t, err)
+	assert.Contains(t, string(raw), "<failure", "沒有中斷時 JUnit 要記成門檻失敗")
+	assert.Contains(t, string(raw), "p50 ")
 }
