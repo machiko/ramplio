@@ -436,6 +436,17 @@ ramplio discover --url https://example.com --max-rps 1000
 ramplio discover --url https://example.com --probe-duration 10s
 ```
 
+**把探測結果存成守門情境：** 加 `--save-scenario scenario.yaml`，探測完成後直接產生可 `ramplio run --scenario scenario.yaml` 重跑的情境檔——30s 內爬升到這次的安全上限（`target_rps`）再維持 2m，門檻是 p99 不超過 `--tolerance`、錯誤率不超過 1%，退步就 exit 1，可直接放進 CI。
+
+```bash
+ramplio discover --url https://api.example.com/me -H "Authorization: Bearer $TOKEN" --save-scenario scenario.yaml
+export RAMPLIO_H_AUTHORIZATION="Bearer $TOKEN"   # 存檔後會列出需要設定的變數名稱
+ramplio run --scenario scenario.yaml
+```
+
+- 憑證不落地：敏感 header（Authorization、Cookie、名稱含 token／key／secret／auth 等字樣）的值寫成 `{{env "RAMPLIO_H_<名稱>"}}`，網址裡的敏感參數寫成 `{{env "RAMPLIO_Q_<參數>"}}`；環境變數要設成原本**完整**的值（例如 `Bearer xxx`）。body 照原文存，非空時會提醒。
+- 不寫檔並 exit 1 的情況：安全上限為 0、探測被中斷、寫入型方法沒加 `--allow-write`、目標檔已存在（不覆蓋）、網址含 `user:pass@`（請改用 Authorization header）。
+
 ### HAR Import
 
 從瀏覽器錄製直接產生 scenario.yaml，無需手寫：
@@ -763,6 +774,7 @@ Flags:
       --tolerance string       可接受的 p99 時間（預設 "2s"）
       --max-rps int            最高探測速率（預設 500）
       --probe-duration string  每個探測點的時長（預設 "15s"）
+      --save-scenario string   探測成功後存成可直接 run --scenario 的情境檔（憑證改成環境變數引用，不覆蓋既有檔）
 ```
 
 ```
