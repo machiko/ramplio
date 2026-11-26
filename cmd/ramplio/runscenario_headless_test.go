@@ -40,7 +40,7 @@ steps:
 	}
 
 	start := time.Now()
-	sum, _, err := runScenario(path, "", protocols.DefaultHTTPConfig(), false)
+	sum, _, _, err := runScenario(path, "", protocols.DefaultHTTPConfig(), false)
 	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatalf("runScenario: %v", err)
