@@ -3,7 +3,7 @@
 - 分支：`feat/run-tui`（worktree：`/Users/reyes/Workspace/ramplio-worktrees/run-tui`）
 - 基準：`main` @ e2a2eb0
 - 規模：一般
-- 狀態：第 1 段規格待使用者確認（2026-11-26）
+- 狀態：第 1 段已確認，第 2 段實作中（2026-11-26）
 
 ## 規格
 
@@ -32,8 +32,8 @@
 - 抽出共用的「看著一次執行跑完」函式 `watchRun`：決定開 TUI 或非 TTY 模式、攔 SIGINT／SIGTERM、回報這次是否被中斷。`runURL`、`runRPS`、`runScenario`、`runDistributed` 都用它。
 - 「是否開 TUI」的判斷與 TUI 本身、訊號來源都可注入（`liveEnv`），測試不依賴真終端、不對測試行程送真訊號。
 - TTY 下 `run --url`、`run --rps` 開即時畫面（重用 `reporter.RunTUI` 與 `rampProvider`）。
-- 非 TTY（CI、管線、重新導向）或 `--no-tui`：`run --url`／`--rps` 不開 TUI，**stdout 跟現在一致**（不新增進度行，見待決定 D1）。
-- 中斷（Ctrl-C 或 SIGTERM，TTY 與非 TTY 都一樣）：引擎停止 → 印摘要 → `--output`／`--report`／`--save-baseline`／`--sink` 照常產生 → **不存自動紀錄**（跟 2a 的 discover 一致）→ 結束碼照待決定 D2。第二次 Ctrl-C 仍可強制結束（沿用 `signal.Stop` 的做法）。
+- 非 TTY（CI、管線、重新導向）或 `--no-tui`：`run --url`／`--rps` 不開 TUI，**stdout 跟現在一致**（不新增進度行，見 Decisions D1）。
+- 中斷（Ctrl-C 或 SIGTERM，TTY 與非 TTY 都一樣）：引擎停止 → 印摘要 → `--output`／`--report`／`--save-baseline`／`--sink` 照常產生 → **不存自動紀錄**（跟 2a 的 discover 一致）→ 結束碼見 Decisions D2。第二次 Ctrl-C 仍可強制結束（沿用 `signal.Stop` 的做法）。
 - TUI 結束後，預檢輸出、「Running …」行、摘要、自動比較段落各出現一次、順序固定：預檢 → Running → （TUI 最後畫面）→ 摘要 → 紀錄／比較。
 
 ### 非目標
@@ -112,19 +112,6 @@
 4. `ramplio run --url … -d 10s | cat` → 沒有畫面，輸出跟 main 的 binary 一樣（`diff` 兩邊輸出，除時間與數字外相同）。
 5. 另開視窗 `kill -TERM <pid>`（TTY 模式）→ 跟步驟 3 相同的收尾。
 
-### 待決定（附推薦）
-
-- **D1 非 TTY 下 `run --url`／`--rps` 要不要印進度行？**
-  - A（推薦）：不印，stdout 跟現在完全一致。理由：不影響已經在解析 stdout 的腳本；CI 想看進度可改用 scenario 或 `--dashboard`。
-  - B：跟 scenario 一樣每 2 秒印一行 `[…] VUs=…`。CI log 看得到在跑，但 stdout 多了內容。
-- **D2 被中斷的 run 結束碼？**
-  - A（推薦）：RunE 回傳錯誤「測試被中斷，結果不完整（未存執行紀錄）」→ exit 1。理由：CI 裡被 SIGTERM 砍掉的 run 不該看起來是綠的；不用改 `main.go`，測試直接斷言 RunE 的錯誤。
-  - B：exit 130（Unix 慣例）。要在 `main.go` 加可攜帶結束碼的錯誤型別，多改一個檔。
-  - C：維持現狀（scenario 依 thresholds，url／rps 改成 0）。中斷的 CI run 會是綠的。
-- **D3 `run --scenario` 也套用「中斷不存紀錄＋D2 結束碼」嗎？**
-  - A（推薦）：套用。這就是 brief 說的「各路徑不一致」，也順便消掉 2a 記下的已知限制。代價：scenario 被中斷時的結束碼從「依 thresholds」改成 D2 的值，CHANGELOG 要寫。
-  - B：不套用，scenario 中斷行為完全不變，只修 url／rps。三條路徑仍然不一致。
-
 ### 讀程式發現的風險
 
 - **R1 TUI 路徑沒攔 SIGTERM**（scenario、distributed 都是）：bubbletea 只把 Ctrl-C 當按鍵收，`kill` 或容器停止時行程直接死，teardown 不會跑。本卡由 `watchRun` 一律註冊訊號修掉。
@@ -136,6 +123,9 @@
 
 ## Decisions
 
+- 2026-11-26（使用者確認，D1）：非 TTY 下 `run --url`／`--rps` 不印進度行，stdout 跟改動前完全一致。理由：不影響已經在解析 stdout 的腳本；CI 想看進度可改用 scenario 或 `--dashboard`。
+- 2026-11-26（使用者確認，D2）：被中斷的 run，RunE 回傳錯誤「測試被中斷，結果不完整（未存執行紀錄）」→ exit 1。理由：CI 裡被 SIGTERM 砍掉的 run 不該是綠的；不用改 `main.go`，測試直接斷言 RunE 的錯誤。
+- 2026-11-26（使用者確認，D3）：`run --scenario` 也套用「中斷不存紀錄＋D2 結束碼」，消掉 2a 記下的已知限制。**行為變更**：scenario 被中斷時不再依 thresholds 決定 exit code，一律 exit 1；寫進 CHANGELOG `[Unreleased]`。
 - 2026-11-26：不拆卡。即時畫面與中斷收尾都落在同一個 `watchRun` 抽取上，分開做會改兩次 `runURL`／`runRPS` 的簽名；預估產品程式 150–250 行。
 - 2026-11-26：重用既有 `--no-tui`，不新增旗標。它的說明本來就寫「非終端自動啟用」，只是 url／rps 沒讀它。
 - 2026-11-26：可測試性用注入（`liveEnv`＋package 變數 `newLiveEnv`），不在測試裡對自己的行程送真訊號（如果沒先註冊好就會殺掉整個測試行程）。
@@ -144,3 +134,4 @@
 ## History
 
 - 2026-11-26：讀 `run.go`（runURL／runRPS／runScenario／runDistributed／runHeadlessProgress）、`reporter/tui.go`、`autohistory.go`，確認 url／rps 沒有訊號處理、TUI 路徑沒攔 SIGTERM、TUI 為 inline 模式不會蓋掉摘要。寫出 2b 規格，3 個待決定附推薦。
+- 2026-11-26：使用者確認規格，D1–D3 照推薦定案；進第 2 段。
