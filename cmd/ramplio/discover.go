@@ -15,6 +15,7 @@ import (
 	"github.com/machiko/ramplio/v3/internal/baseline"
 	"github.com/machiko/ramplio/v3/internal/curlparse"
 	"github.com/machiko/ramplio/v3/internal/discover"
+	"github.com/machiko/ramplio/v3/internal/history"
 	"github.com/machiko/ramplio/v3/internal/protocols"
 	"github.com/spf13/cobra"
 )
@@ -38,6 +39,8 @@ type discoverOptions struct {
 	// Uncertain means the curl had parts we could not reproduce; the request
 	// is gated like a write (fail closed) until --allow-write is given.
 	Uncertain bool
+	// NoHistory skips the automatic run record and the comparison with the previous run.
+	NoHistory bool
 }
 
 // resolvedTarget is the request discover will send plus what the curl parser
@@ -66,6 +69,7 @@ func newDiscoverCmd() *cobra.Command {
 		maxRPS        int
 		probeDuration string
 		baselineFile  string
+		noHistory     bool
 	)
 
 	cmd := &cobra.Command{
@@ -108,6 +112,7 @@ POST／PUT／PATCH／DELETE 等會改資料的方法，預設只送一發預檢�
 				BaselineFile:  baselineFile,
 				AllowWrite:    allowWrite,
 				FromCurl:      curlCmd != "",
+				NoHistory:     noHistory,
 			})
 		},
 	}
@@ -122,6 +127,7 @@ POST／PUT／PATCH／DELETE 等會改資料的方法，預設只送一發預檢�
 	cmd.Flags().IntVar(&maxRPS, "max-rps", defaultDiscoverMaxRPS, "Stop probing above this request rate")
 	cmd.Flags().StringVar(&probeDuration, "probe-duration", defaultDiscoverProbeDuration.String(), "Duration of each probe (e.g. 10s, 30s)")
 	cmd.Flags().StringVar(&baselineFile, "save-baseline", "", "把容量結果存成 baseline 快照(供 ramplio compare 守門)")
+	cmd.Flags().BoolVar(&noHistory, "no-history", false, "不自動把這次結果存進 .ramplio/ 執行紀錄，也不跟上一次比較")
 
 	return cmd
 }
@@ -305,6 +311,18 @@ func runDiscover(ctx context.Context, w, errW io.Writer, opts discoverOptions) e
 		b := baseline.FromDiscover(result, maskURLForDisplay(req.URL))
 		b.GitCommit = currentGitCommit()
 		writeBaselineFile(w, errW, opts.BaselineFile, b)
+	}
+
+	// An interrupted probe is partial: recording it would make the next run
+	// look like a big change, so only completed probes are recorded.
+	if !opts.NoHistory && ctx.Err() == nil {
+		rec := history.Record{
+			Baseline:  baseline.FromDiscover(result, maskURLForDisplay(req.URL)),
+			Kind:      history.KindDiscover,
+			TargetKey: discoverTargetKey(req, opts.Tolerance, opts.MaxRPS, opts.ProbeDuration),
+		}
+		rec.GitCommit = currentGitCommit()
+		recordAndDiff(w, errW, historyDir(), rec)
 	}
 	return nil
 }

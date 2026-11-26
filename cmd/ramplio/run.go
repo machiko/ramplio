@@ -20,6 +20,7 @@ import (
 	"github.com/machiko/ramplio/v3/internal/dashboard"
 	"github.com/machiko/ramplio/v3/internal/distributed"
 	"github.com/machiko/ramplio/v3/internal/engine"
+	"github.com/machiko/ramplio/v3/internal/history"
 	"github.com/machiko/ramplio/v3/internal/metrics"
 	"github.com/machiko/ramplio/v3/internal/observe"
 	"github.com/machiko/ramplio/v3/internal/protocols"
@@ -60,6 +61,7 @@ func newRunCmd() *cobra.Command {
 		assignTimeout  string
 		noTUI          bool
 		noPreflight    bool
+		noHistory      bool
 	)
 
 	cmd := &cobra.Command{
@@ -169,6 +171,12 @@ func newRunCmd() *cobra.Command {
 			if scenarioName == "" {
 				scenarioName = url
 			}
+			// Saved files outlive the terminal: the identity written into
+			// baseline and history files never carries URL credentials.
+			savedName := scenarioName
+			if scenarioFile == "" {
+				savedName = maskURLForDisplay(url)
+			}
 			for _, dsn := range sinkDSNs {
 				sink, sinkErr := reporter.ParseSink(dsn)
 				if sinkErr != nil {
@@ -203,9 +211,28 @@ func newRunCmd() *cobra.Command {
 			}
 
 			if baselineFile != "" {
-				b := baseline.FromSummary(sum, scenarioName)
+				b := baseline.FromSummary(sum, savedName)
 				b.GitCommit = currentGitCommit()
 				writeBaselineFile(os.Stdout, os.Stderr, baselineFile, b)
+			}
+
+			// Automatic record + comparison with the previous run of the same
+			// target. Runs before the threshold exits below so a failing run is
+			// recorded too; it never changes the exit code.
+			if !noHistory {
+				rep := reporter.SummaryToReport(sum)
+				rec := history.Record{
+					Baseline: baseline.FromSummary(sum, savedName),
+					Kind:     history.KindRun,
+					TargetKey: runTargetKey(runLoad{
+						ScenarioFile: scenarioFile, Method: method, URL: url,
+						VUs: vus, RPS: rps, Duration: duration,
+						Headers: parseHeaders(headers), Body: body,
+					}),
+					Report: &rep,
+				}
+				rec.GitCommit = currentGitCommit()
+				recordAndDiff(cmd.OutOrStdout(), cmd.ErrOrStderr(), historyDir(), rec)
 			}
 
 			// 觀測失敗預設只警告不中斷:trace 關聯是補充,不可污染 exit code。
@@ -291,6 +318,7 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().StringVar(&assignTimeout, "assign-timeout", "", "Timeout for broadcasting work to workers (e.g. 10s, 30s; default 10s)")
 	cmd.Flags().BoolVar(&noTUI, "no-tui", false, "Disable the live TUI and print plain progress lines (auto-enabled when output is not a terminal)")
 	cmd.Flags().BoolVar(&noPreflight, "no-preflight", false, "Skip the quick reachability check before the test (run even if the target looks unreachable)")
+	cmd.Flags().BoolVar(&noHistory, "no-history", false, "不自動把這次結果存進 .ramplio/ 執行紀錄，也不跟上一次比較")
 
 	return cmd
 }
@@ -652,8 +680,9 @@ func runURL(url, method string, vus int, duration string, headers []string, body
 
 	col := metrics.NewCollector(vus)
 	eng := engine.NewRamp(engine.RampConfig{
-		Stages:   []scenarios.Stage{{Duration: dur, Target: vus}},
-		Steps:    []engine.RampStep{{Name: req.Method + " " + req.URL, Request: req}},
+		Stages: []scenarios.Stage{{Duration: dur, Target: vus}},
+		// The step name ends up in saved reports, so it never carries URL credentials.
+		Steps:    []engine.RampStep{{Name: req.Method + " " + maskURLForDisplay(req.URL), Request: req}},
 		Executor: protocols.NewHTTPExecutor(httpCfg),
 	}, col)
 

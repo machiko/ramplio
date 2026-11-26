@@ -333,6 +333,10 @@ ramplio run --url http://localhost:8080/ --rps 100 --duration 60s --save-baselin
 ramplio compare base.json after.json
 ```
 
+Without arguments, `ramplio compare` uses the automatic run records instead
+(latest record vs the previous record of the same target) — see
+[Save and replay results](#save-and-replay-results).
+
 Sample output:
 
 ```
@@ -436,6 +440,38 @@ ramplio run --url https://api.example.com/health --vus 50 --duration 60s --dns-c
 ---
 
 ## Save and replay results
+
+Every `run` / `discover` automatically saves a run record to `.ramplio/runs/`
+in the current directory (the latest 50 are kept; the directory ignores itself
+via its own `.gitignore`). At the end of each run the result is compared with
+the previous run of the **same target and settings** (mode, method, masked URL,
+a hash of headers + body, and load flags; scenario mode looks at the scenario
+file path only, not its content). Only the first 8 hex chars of a sha256 of the
+headers and body are stored — never their values — so rotating a token starts a
+new series. That comparison is informational only — it
+never changes the exit code.
+
+```bash
+ramplio run --url http://localhost:8080/ -d 30s   # run the same command twice
+ramplio compare                                   # latest record vs the previous one of the same target (exit 1 on regression)
+ramplio report                                    # HTML report from the latest run record
+```
+
+Use `--no-history` to skip recording, or `RAMPLIO_HISTORY_DIR` to keep records
+elsewhere. A failure to save (read-only directory, full disk) only prints a
+warning. URL credentials are masked in records. Corrupt records, or records
+written by a newer ramplio, are skipped with a warning but never deleted
+automatically.
+
+The header/body hash is **not encryption**: it is unsalted and only 8 hex
+chars, so short tokens or PINs can be brute-forced offline. Do not publish
+`.ramplio/` records or baseline files. The self-ignoring `.gitignore` is only
+written when the history directory belongs to ramplio (newly created, or
+holding nothing but `runs/`); if `RAMPLIO_HISTORY_DIR` points at a directory
+with other files, ramplio writes nothing and asks you once to ignore `runs/`
+yourself.
+
+The explicit flags still work when you want to manage file names yourself:
 
 ```bash
 # Save results to JSON

@@ -8,9 +8,11 @@ Ramplio 的所有重要變更都記錄於此。
 ## [Unreleased]
 
 ### 新增
+- **自動留存與比對**: `run`／`discover`（含單一入口）每次跑完自動存一筆執行紀錄到 `.ramplio/runs/`（保留最近 50 筆,目錄自帶 `.gitignore`），不必事先記得加 `--output`／`--save-baseline`;結尾自動跟「上一次同目標、同設定」(含 header＋body,只存雜湊不存原文)比較 p99、錯誤率、吞吐量,這段只是參考、不影響結束碼。`ramplio compare` 不帶參數時比較最近一筆與同目標的前一筆（退步照舊 exit 1）,`ramplio report` 不帶參數時用最近一筆 run 紀錄產生 HTML。存檔失敗只警告;`--no-history` 可關閉,`RAMPLIO_HISTORY_DIR` 可改位置。紀錄檔是 baseline 格式的超集,舊的 `compare a.json b.json` 可直接讀。
 - **單一入口 `ramplio <網址 | 'curl …' | ->`**: 不必記子指令,直接給網址、貼上瀏覽器 DevTools 的「Copy as cURL」或 `pbpaste | ramplio -`,就帶著 header／body 開始容量探測;`.yaml`／`.har` 會印出正確指令,打錯字的子指令會給建議且不會開跑。POST／PUT／PATCH／DELETE(含 Chrome 只有 `--data-raw` 的隱式 POST)預設只送一發預檢,確定要壓測需明確加 `--allow-write`;終端輸出與建議指令只顯示 header 名稱,不會印出 token。`discover` 同步新增 `--curl`、`-H`、`--method`、`--body`、`--allow-write`,開跑前的預檢也改為送出完整請求(含 header 與 body),寫入型預檢不再因少了授權拿到假的 401/415。
 
 ### 修正
+- **`run --save-baseline` 存下網址裡的帳密與 token**: `run --url` 存 baseline 時直接寫入原始網址,網址裡的密碼與 `token=` 之類的參數會留在檔案裡（discover 早已遮罩）。現在與畫面一樣遮成 `***`;`run --url` 的步驟名稱（會出現在摘要與存檔報告）也一併遮罩。
 - **`auth:` 步驟在多 VU 下並發寫入共用 header map**: 有 `auth:` 但沒寫 `headers:` 的步驟,其 header 模板由所有 VU 共用,auth 標頭卻被寫回模板本身——可能觸發 Go runtime `fatal error: concurrent map writes` 直接終止壓測,啟動瞬間也可能讓 VU 帶到別人的 token(假 401)。現在 auth 一律寫在每次請求自己的 map 上,模板永不被修改;沒有 header 的請求也順帶省下一次配置。
 - **熔斷器觸發旗標的 data race**: 熔斷器的觸發旗標在記錄失敗時持鎖寫入,但每個 VU 與 rate 模式的派發器在每次請求前都不持鎖讀取它——違反 Go 記憶體模型,多 VU 啟用 `circuit_breaker` 時 `-race` 會報錯。旗標改為原子變數;行為不變(x86 上指令與修正前相同,arm64 每次檢查多不到 1 ns)。
 - **分散式模式漏接 `stream: sse` 與 `ws_mode: persistent`**: worker 端的場景轉換是 CLI 版的舊複本,沒有跟上這兩個欄位——分散式壓測時串流步驟不量 TTFT(結果沒有「開始回應」數字)、WebSocket persistent 退回每次交換重新握手。另外 regex capture 的預編譯快取 key 對不上,每次擷取都重新編譯 regex(實測單次約 2.5µs → 0.38µs)。場景轉換現收斂為 CLI、儀表板、worker、coordinator 共用的單一來源,並以測試守門:`scenarios.Step` 新增欄位而未接上轉換時直接失敗。

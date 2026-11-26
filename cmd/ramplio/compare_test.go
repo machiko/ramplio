@@ -1,10 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/machiko/ramplio/v3/internal/baseline"
+	"github.com/machiko/ramplio/v3/internal/history"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func comparisonFixture() baseline.Comparison {
@@ -126,4 +131,90 @@ func TestCompareStrictTrust(t *testing.T) {
 	if err := compareVerdictErr(clean, true); err != nil {
 		t.Fatalf("strict 模式下無警告無退步不應報錯: %v", err)
 	}
+}
+
+func execCompare(t *testing.T, args ...string) (string, error) {
+	t.Helper()
+	cmd := newCompareCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetArgs(args)
+	err := cmd.Execute()
+	return out.String(), err
+}
+
+func saveRunRecord(t *testing.T, dir, key string, p99Ms float64) string {
+	t.Helper()
+	rec := history.Record{
+		Baseline: baseline.Baseline{
+			SchemaVersion: baseline.SchemaVersion,
+			CreatedAt:     time.Now().UTC(),
+			Scenario:      key,
+			Metrics:       &baseline.MetricsSnapshot{Total: 100, P50Ms: p99Ms / 2, P99Ms: p99Ms, ThroughputRPS: 100},
+		},
+		Kind:      history.KindRun,
+		TargetKey: key,
+	}
+	res, err := history.Save(dir, rec, history.DefaultKeep)
+	require.NoError(t, err)
+	return res.Path
+}
+
+// 情境 13：零參數比「最近一筆」與「同目標的前一筆」，沿用退步 → 錯誤的契約。
+func TestCompareZeroArgUsesHistory(t *testing.T) {
+	t.Run("退步回錯誤", func(t *testing.T) {
+		dir := useHistoryDir(t)
+		saveRunRecord(t, dir, "A", 100)
+		saveRunRecord(t, dir, "B", 999) // 夾在中間的其他目標不能被拿來比
+		saveRunRecord(t, dir, "A", 300)
+
+		out, err := execCompare(t)
+
+		require.Error(t, err, "退步時要 exit ≠ 0")
+		assert.Contains(t, out, "100ms")
+		assert.Contains(t, out, "300ms")
+		assert.NotContains(t, out, "999ms", "不可拿別的目標來比")
+		assert.Contains(t, out, "退步")
+	})
+	t.Run("持平回 nil", func(t *testing.T) {
+		dir := useHistoryDir(t)
+		saveRunRecord(t, dir, "A", 100)
+		saveRunRecord(t, dir, "A", 101)
+
+		out, err := execCompare(t)
+
+		require.NoError(t, err)
+		assert.Contains(t, out, "持平")
+	})
+}
+
+// 情境 14：紀錄不夠時回錯誤並給出怎麼產生紀錄的範例。
+func TestCompareZeroArgNotEnoughHistory(t *testing.T) {
+	cases := map[string]func(t *testing.T, dir string){
+		"沒有任何紀錄":       func(*testing.T, string) {},
+		"只有一筆":         func(t *testing.T, dir string) { saveRunRecord(t, dir, "A", 100) },
+		"最近一筆沒有同目標前一筆": func(t *testing.T, dir string) { saveRunRecord(t, dir, "A", 100); saveRunRecord(t, dir, "B", 100) },
+	}
+	for name, arrange := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := useHistoryDir(t)
+			arrange(t, dir)
+
+			_, err := execCompare(t)
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "ramplio run")
+		})
+	}
+}
+
+// 情境 16：只給 1 個參數是用法錯誤，不能默默當成零參數。
+func TestCompareOneArgRejected(t *testing.T) {
+	useHistoryDir(t)
+
+	_, err := execCompare(t, "only.json")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "1")
 }
