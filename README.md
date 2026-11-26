@@ -445,7 +445,9 @@ ramplio run --scenario scenario.yaml
 ```
 
 - 憑證不落地：敏感 header（Authorization、Cookie、名稱含 token／key／secret／auth 等字樣）的值寫成 `{{env "RAMPLIO_H_<名稱>"}}`，網址裡的敏感參數寫成 `{{env "RAMPLIO_Q_<參數>"}}`；環境變數要設成原本**完整**的值（例如 `Bearer xxx`）。body 照原文存，非空時會提醒。
-- 不寫檔並 exit 1 的情況：安全上限為 0、探測被中斷、寫入型方法沒加 `--allow-write`、目標檔已存在（不覆蓋）、網址含 `user:pass@`（請改用 Authorization header）。
+- 負載刻意卡在這次的安全上限（不打折），用來抓「撐不住原本容量」的退步；代價是偶發波動也可能讓門檻失敗，需要餘裕可自行調低 `target_rps`。
+- 不寫檔並 exit 1 的情況：安全上限為 0、探測被中斷、寫入型方法沒加 `--allow-write`、目標檔已存在（不覆蓋）、網址含 `user:pass@`（請改用 Authorization header）、上層目錄不存在、網址／非敏感 header／body 原本就含 `{{`（run 會當成模板）、`--tolerance` 不到 1ms。後四項在探測前就擋下。
+- 環境變數沒設時會送出空值；網址路徑照原文保存，若路徑含秘密請手動改寫。
 
 ### HAR Import
 
